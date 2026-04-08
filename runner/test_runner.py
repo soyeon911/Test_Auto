@@ -23,6 +23,10 @@ class TestRunner:
         self.allure_report = Path(runner_cfg.get("allure_report_dir", "./reports/allure-report"))
         self.html_report = Path(runner_cfg.get("html_report_path", "./reports/summary.html"))
         self.timeout = int(runner_cfg.get("timeout_seconds", 60))
+        self._default_test_dirs: list[str] = runner_cfg.get(
+            "test_dirs",
+            ["./tests/generated/rule", "./tests/generated/ai", "./tests/manual"],
+        )
 
         server_cfg = config.get("server", {})
         self.base_url = server_cfg.get("base_url", "http://localhost:8000")
@@ -32,7 +36,7 @@ class TestRunner:
     def run(self, test_dirs: list[str] | None = None) -> dict[str, Any]:
         """Run pytest and return a summary dict."""
         if test_dirs is None:
-            test_dirs = ["./tests/generated", "./tests/manual"]
+            test_dirs = self._default_test_dirs
 
         # Ensure output dirs exist
         self.allure_results.mkdir(parents=True, exist_ok=True)

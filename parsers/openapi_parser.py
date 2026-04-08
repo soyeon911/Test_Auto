@@ -63,13 +63,26 @@ class OpenAPIParser:
 
         endpoints: list[dict[str, Any]] = []
         paths: dict = self._raw.get("paths", {})
+        _HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
 
         for path, path_item in paths.items():
+            if not isinstance(path_item, dict):
+                continue
+
+            # TODO-3: path-level parameters (shared across all operations on this path)
+            path_level_params: list = path_item.get("parameters", [])
+
             for method, operation in path_item.items():
-                if method.lower() not in {"get", "post", "put", "patch", "delete", "head", "options"}:
+                if method.lower() not in _HTTP_METHODS:
                     continue
                 if not isinstance(operation, dict):
                     continue
+
+                # Merge path-level params with operation-level params.
+                # Operation-level takes precedence (same name+in wins).
+                op_params: list = operation.get("parameters", [])
+                merged = self._merge_parameters(path_level_params, op_params)
+                operation = {**operation, "parameters": merged}
 
                 endpoints.append(self._parse_operation(path, method, operation))
 
@@ -93,6 +106,24 @@ class OpenAPIParser:
             "request_body": request_body,
             "responses": responses,
         }
+
+    def _merge_parameters(self, path_params: list, op_params: list) -> list:
+        """
+        Merge path-level and operation-level parameter lists.
+        Operation-level entries override path-level entries with the same (name, in) key.
+        """
+        # Resolve $refs first so we can key on name+in
+        resolved_path = [self._resolve_ref(p["$ref"]) if "$ref" in p else p for p in path_params]
+        resolved_op   = [self._resolve_ref(p["$ref"]) if "$ref" in p else p for p in op_params]
+
+        merged: dict[tuple, dict] = {}
+        for p in resolved_path:
+            key = (p.get("name", ""), p.get("in", ""))
+            merged[key] = p
+        for p in resolved_op:          # op wins on collision
+            key = (p.get("name", ""), p.get("in", ""))
+            merged[key] = p
+        return list(merged.values())
 
     def _resolve_parameters(self, params: list) -> list[dict]:
         resolved = []

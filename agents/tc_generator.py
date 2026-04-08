@@ -10,17 +10,29 @@ TC Generator — orchestrates the two-layer generation strategy:
       so it does NOT duplicate them.
 
 Output per endpoint:  tests/generated/test_<operation_id>.py
-  ├── header comment
+  ├── header comment  (spec_hash for dedup)
   ├── imports
   ├── [Layer-1 functions]   ← always present when rule_based.enabled = true
   └── [Layer-2 functions]   ← appended block when ai_augment.enabled = true
+
+── Fixes applied (todo.md 1차) ──────────────────────────────────────────────
+  [1] dedup hash  → spec fingerprint (operation_id+method+path+params),
+                    NOT generated-code hash. Stable across re-runs.
+  [2] collect-only → ast.parse() + pytest --collect-only on a temp file
+                    before accepting AI output.
+  [4] decorator  → AST-based extraction of new functions; decorators (@mark,
+                   @parametrize …) are preserved correctly.
 """
 
 from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import re
+import subprocess
+import sys
+import tempfile
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -29,9 +41,9 @@ from .llm_client import BaseLLMClient, create_llm_client
 from .rule_based_generator import RuleBasedTCGenerator
 
 
-# ─── AI prompt ────────────────────────────────────────────────────────────────
+# ─── AI prompts ───────────────────────────────────────────────────────────────
 
-_AI_SYSTEM = textwrap.dedent("""
+_AI_SYSTEM_API = textwrap.dedent("""
 You are a senior QA engineer specialising in API testing.
 You will be given:
   1. An OpenAPI endpoint description (JSON).
@@ -52,10 +64,36 @@ Output rules:
   - Use `requests.<method>(f"{base_url}<path>", ...)` for HTTP calls.
   - Do NOT repeat any test function name from the already-generated tests.
   - Do NOT add import statements (they are added by the file header).
+  - Decorators like @pytest.mark.xfail are allowed and encouraged.
+""").strip()
+
+_AI_SYSTEM_PYTHON = textwrap.dedent("""
+You are a senior QA engineer specialising in Python unit testing.
+You will be given:
+  1. A Python function signature and docstring (JSON).
+  2. Rule-based pytest tests that have already been generated for it.
+
+Your task: generate ONLY additional edge-case pytest test functions
+that are NOT already covered by the rule-based tests.
+
+Focus on:
+  - None / null inputs for optional args
+  - Empty containers ([], {}, "")
+  - Boundary values near documented limits
+  - Combinations of invalid arguments
+  - Side effects, mutability, exception message content
+
+Output rules:
+  - Valid Python only — no markdown fences, no prose outside code.
+  - Every function must start with `test_` and take no arguments (no fixtures).
+  - Import the module inside each test function body.
+  - Do NOT repeat any test function name from the already-generated tests.
+  - Do NOT add top-level import statements.
+  - Decorators like @pytest.mark.xfail are allowed and encouraged.
 """).strip()
 
 _AI_USER_TEMPLATE = textwrap.dedent("""
-=== Endpoint (JSON) ===
+=== Endpoint / Function (JSON) ===
 {endpoint_json}
 
 === Already generated rule-based tests ===
@@ -65,160 +103,7 @@ Generate at most {max_extra} additional edge-case test functions.
 """).strip()
 
 
-# ─── orchestrator ─────────────────────────────────────────────────────────────
-
-class TCGeneratorAgent:
-    def __init__(self, config: dict):
-        self.config = config
-        tc_cfg = config.get("tc_generation", {})
-        self.output_dir = Path(tc_cfg.get("output_dir", "./tests/generated"))
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.dedup_check: bool = tc_cfg.get("dedup_check", True)
-
-        rb_cfg = tc_cfg.get("rule_based", {})
-        ai_cfg = tc_cfg.get("ai_augment", {})
-        self.rule_enabled: bool = rb_cfg.get("enabled", True)
-        self.ai_enabled: bool = ai_cfg.get("enabled", True)
-        self.max_extra: int = int(ai_cfg.get("max_extra_tc", 3))
-
-        self._rule_gen = RuleBasedTCGenerator(config)
-        self._llm: BaseLLMClient | None = None   # lazy-init to avoid API key check on import
-        self._seen_hashes: set[str] = self._load_existing_hashes()
-
-    # ─── public ──────────────────────────────────────────────────────────────
-
-    def generate_for_endpoints(self, endpoints: list[dict[str, Any]]) -> list[Path]:
-        """Generate (or append to) one TC file per endpoint. Returns written paths."""
-        written: list[Path] = []
-        for ep in endpoints:
-            path = self._generate_one(ep)
-            if path:
-                written.append(path)
-        return written
-
-    # ─── internal ─────────────────────────────────────────────────────────────
-
-    def _generate_one(self, endpoint: dict[str, Any]) -> Path | None:
-        import json
-
-        op_id = _safe_name(endpoint.get("operation_id", "unknown"))
-
-        # ── Layer 1: Rule-based ─────────────────────────────────
-        rule_code = ""
-        if self.rule_enabled:
-            rule_code = self._rule_gen.generate(endpoint)
-
-        # ── Layer 2: AI edge cases ──────────────────────────────
-        ai_code = ""
-        if self.ai_enabled:
-            ai_code = self._ai_generate(endpoint, rule_code)
-
-        # Combine
-        combined = "\n\n\n".join(block for block in [rule_code, ai_code] if block.strip())
-        if not combined.strip():
-            print(f"[TCAgent] No TC generated for {op_id}.")
-            return None
-
-        # Dedup by hash of combined block
-        code_hash = hashlib.sha256(combined.encode()).hexdigest()
-        if self.dedup_check and code_hash in self._seen_hashes:
-            print(f"[TCAgent] Duplicate — skipping {op_id}.")
-            return None
-
-        path = self._save(endpoint, rule_code, ai_code, code_hash)
-        self._seen_hashes.add(code_hash)
-        return path
-
-    def _ai_generate(self, endpoint: dict[str, Any], rule_code: str) -> str:
-        import json
-
-        if self._llm is None:
-            try:
-                self._llm = create_llm_client(self.config)
-            except (EnvironmentError, ImportError) as e:
-                print(f"[TCAgent] AI disabled: {e}")
-                return ""
-
-        user_prompt = _AI_USER_TEMPLATE.format(
-            endpoint_json=json.dumps(endpoint, indent=2, ensure_ascii=False),
-            rule_code=rule_code or "(none)",
-            max_extra=self.max_extra,
-        )
-
-        for attempt in range(1, 4):
-            try:
-                raw = self._llm.generate(_AI_SYSTEM, user_prompt)
-                code = _strip_fences(raw)
-                if _is_valid_python(code):
-                    return code
-                print(f"[TCAgent] AI attempt {attempt}: syntax error, retrying…")
-                user_prompt += "\n\nFix the syntax errors in your previous output."
-            except Exception as e:
-                print(f"[TCAgent] AI attempt {attempt} failed: {e}")
-
-        return ""
-
-    def _save(
-        self,
-        endpoint: dict,
-        rule_code: str,
-        ai_code: str,
-        code_hash: str,
-    ) -> Path:
-        op_id = _safe_name(endpoint.get("operation_id", "unknown"))
-        file_path = self.output_dir / f"test_{op_id}.py"
-
-        header = textwrap.dedent(f"""\
-            # Auto-generated by TCGeneratorAgent
-            # {endpoint.get('method', '').upper()} {endpoint.get('path', '')}
-            # operation : {endpoint.get('operation_id', '')}
-            # hash      : {code_hash[:12]}
-            # ───────────────────────────────────────────────────────
-            import pytest
-            import requests
-
-        """)
-
-        if file_path.exists():
-            # Append only new functions to avoid overwriting manual edits
-            existing = file_path.read_text(encoding="utf-8")
-            new_rule = _only_new_functions(existing, rule_code)
-            new_ai   = _only_new_functions(existing, ai_code)
-
-            additions: list[str] = []
-            if new_rule.strip():
-                additions.append("# --- rule-based (appended) ---\n" + new_rule)
-            if new_ai.strip():
-                additions.append("# --- AI edge cases (appended) ---\n" + new_ai)
-
-            if not additions:
-                print(f"[TCAgent] No new functions for {file_path.name}.")
-                return file_path
-
-            with file_path.open("a", encoding="utf-8") as f:
-                f.write("\n\n" + "\n\n".join(additions))
-        else:
-            parts: list[str] = []
-            if rule_code.strip():
-                parts.append(f"# ── Layer 1: Rule-based ──────────────────────────────\n\n{rule_code}")
-            if ai_code.strip():
-                parts.append(f"# ── Layer 2: AI edge cases ──────────────────────────\n\n{ai_code}")
-            file_path.write_text(header + "\n\n".join(parts), encoding="utf-8")
-
-        print(f"[TCAgent] ✓ {file_path}")
-        return file_path
-
-    def _load_existing_hashes(self) -> set[str]:
-        hashes: set[str] = set()
-        for f in self.output_dir.glob("test_*.py"):
-            for line in f.read_text(encoding="utf-8").splitlines():
-                m = re.search(r"# hash\s*:\s*([a-f0-9]+)", line)
-                if m:
-                    hashes.add(m.group(1))
-        return hashes
-
-
-# ─── helpers ──────────────────────────────────────────────────────────────────
+# ─── helpers (module-level) ───────────────────────────────────────────────────
 
 def _safe_name(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", text).strip("_")
@@ -238,18 +123,300 @@ def _is_valid_python(code: str) -> bool:
         return False
 
 
-def _only_new_functions(existing: str, new_code: str) -> str:
-    """Return functions from new_code whose names don't appear in existing."""
-    if not new_code:
+def _endpoint_fingerprint(endpoint: dict[str, Any]) -> str:
+    """
+    [TODO-1] Stable hash of the endpoint *spec*, not the generated code.
+    Re-running with the same spec → same fingerprint → skip generation.
+    """
+    key = {
+        "operation_id": endpoint.get("operation_id", ""),
+        "method":       endpoint.get("method", ""),
+        "path":         endpoint.get("path", ""),
+        "params":       sorted(
+            f"{p.get('name','')}:{p.get('in','')}:{p.get('required', False)}"
+            for p in endpoint.get("parameters", [])
+        ),
+        "body_required": (
+            (endpoint.get("request_body") or {}).get("required", False)
+        ),
+    }
+    return hashlib.sha256(
+        json.dumps(key, sort_keys=True).encode()
+    ).hexdigest()
+
+
+def _ast_extract_new_functions(existing_src: str, new_src: str) -> str:
+    """
+    [TODO-4] AST-based extraction that preserves decorators.
+
+    Parses new_src with ast, finds FunctionDef nodes whose names don't
+    already appear in existing_src.  Uses node.lineno/end_lineno to slice
+    out the exact source lines INCLUDING any leading decorators.
+    """
+    if not new_src.strip():
         return ""
-    existing_names = set(re.findall(r"^def (test_\w+)", existing, re.MULTILINE))
-    lines = new_code.splitlines(keepends=True)
-    result: list[str] = []
-    include = False
-    for line in lines:
-        m = re.match(r"^def (test_\w+)", line)
-        if m:
-            include = m.group(1) not in existing_names
-        if include:
-            result.append(line)
-    return "".join(result)
+
+    # Names already in the file
+    try:
+        existing_tree = ast.parse(existing_src)
+        existing_names: set[str] = {
+            node.name
+            for node in ast.walk(existing_tree)
+            if isinstance(node, ast.FunctionDef)
+        }
+    except SyntaxError:
+        existing_names = set(re.findall(r"^def (test_\w+)", existing_src, re.MULTILINE))
+
+    try:
+        new_tree = ast.parse(new_src)
+    except SyntaxError:
+        return ""
+
+    new_lines = new_src.splitlines(keepends=True)
+    blocks: list[str] = []
+
+    for node in ast.walk(new_tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        if not node.name.startswith("test_"):
+            continue
+        if node.name in existing_names:
+            continue
+
+        # Include decorators: start from first decorator line (1-indexed → 0-indexed)
+        start = (node.decorator_list[0].lineno - 1) if node.decorator_list else (node.lineno - 1)
+        end   = node.end_lineno          # end_lineno is 1-indexed inclusive
+        block = "".join(new_lines[start:end])
+        blocks.append(block)
+
+    return "\n\n".join(blocks)
+
+
+# ─── orchestrator ─────────────────────────────────────────────────────────────
+
+class TCGeneratorAgent:
+    def __init__(self, config: dict):
+        self.config = config
+        tc_cfg = config.get("tc_generation", {})
+        self.dedup_check: bool = tc_cfg.get("dedup_check", True)
+
+        # Separate output directories for rule-based vs AI-generated tests
+        output_dirs = tc_cfg.get("output_dirs", {})
+        self.rule_dir = Path(output_dirs.get("rule", "./tests/generated/rule"))
+        self.ai_dir   = Path(output_dirs.get("ai",   "./tests/generated/ai"))
+        self.rule_dir.mkdir(parents=True, exist_ok=True)
+        self.ai_dir.mkdir(parents=True, exist_ok=True)
+
+        rb_cfg = tc_cfg.get("rule_based", {})
+        ai_cfg = tc_cfg.get("ai_augment", {})
+        self.rule_enabled: bool = rb_cfg.get("enabled", True)
+        self.ai_enabled:   bool = ai_cfg.get("enabled", True)
+        self.max_extra:    int  = int(ai_cfg.get("max_extra_tc", 3))
+
+        self._rule_gen = RuleBasedTCGenerator(config)
+        self._llm: BaseLLMClient | None = None   # lazy-init
+
+        # [TODO-1] Load stored spec fingerprints from existing generated files
+        self._known_fingerprints: set[str] = self._load_fingerprints()
+
+    # ─── public ──────────────────────────────────────────────────────────────
+
+    def generate_for_endpoints(self, endpoints: list[dict[str, Any]]) -> list[Path]:
+        """Generate TC files per endpoint. Returns list of all written paths."""
+        written: list[Path] = []
+        for ep in endpoints:
+            paths = self._generate_one(ep)
+            written.extend(paths)
+        return written
+
+    # ─── internal ─────────────────────────────────────────────────────────────
+
+    def _generate_one(self, endpoint: dict[str, Any]) -> list[Path]:
+        op_id       = _safe_name(endpoint.get("operation_id", "unknown"))
+        fingerprint = _endpoint_fingerprint(endpoint)
+
+        # [TODO-1] Skip if this exact spec was already generated
+        if self.dedup_check and fingerprint in self._known_fingerprints:
+            print(f"[TCAgent] Spec unchanged — skip {op_id}")
+            return []
+
+        # ── Layer 1: Rule-based ─────────────────────────────────
+        rule_code = ""
+        if self.rule_enabled:
+            rule_code = self._rule_gen.generate(endpoint)
+
+        # ── Layer 2: AI edge cases ──────────────────────────────
+        ai_code = ""
+        if self.ai_enabled:
+            ai_code = self._ai_generate(endpoint, rule_code)
+
+        # Save each layer to its own directory
+        written: list[Path] = []
+        rule_path = self._save_layer(endpoint, rule_code, fingerprint, self.rule_dir, "rule")
+        ai_path   = self._save_layer(endpoint, ai_code,   fingerprint, self.ai_dir,   "ai")
+        if rule_path:
+            written.append(rule_path)
+        if ai_path:
+            written.append(ai_path)
+
+        if written:
+            self._known_fingerprints.add(fingerprint)
+        return written
+
+    # ── AI generation ────────────────────────────────────────────────────────
+
+    def _ai_generate(self, endpoint: dict[str, Any], rule_code: str) -> str:
+        if self._llm is None:
+            try:
+                self._llm = create_llm_client(self.config)
+            except (EnvironmentError, ImportError) as e:
+                print(f"[TCAgent] AI disabled: {e}")
+                return ""
+
+        target_type = endpoint.get("target_type", "api")
+        system_prompt = _AI_SYSTEM_PYTHON if target_type == "python" else _AI_SYSTEM_API
+
+        user_prompt = _AI_USER_TEMPLATE.format(
+            endpoint_json=json.dumps(endpoint, indent=2, ensure_ascii=False),
+            rule_code=rule_code or "(none)",
+            max_extra=self.max_extra,
+        )
+
+        for attempt in range(1, 4):
+            try:
+                raw  = self._llm.generate(system_prompt, user_prompt)
+                code = _strip_fences(raw)
+
+                # [TODO-2] Step 1: syntax check
+                if not _is_valid_python(code):
+                    print(f"[TCAgent] AI attempt {attempt}: syntax error — retrying…")
+                    user_prompt += "\n\nFix all syntax errors in the previous output."
+                    continue
+
+                # [TODO-2] Step 2: pytest --collect-only validation
+                ok, err = self._validate_collect(code)
+                if ok:
+                    return code
+                print(f"[TCAgent] AI attempt {attempt}: collect failed — retrying…\n  {err[:300]}")
+                user_prompt += (
+                    f"\n\nThe previous output failed pytest --collect-only:\n{err[:300]}\n"
+                    "Fix all issues (import errors, fixture name errors, parametrize structure errors)."
+                )
+
+            except Exception as e:
+                print(f"[TCAgent] AI attempt {attempt} error: {e}")
+
+        print(f"[TCAgent] AI gave up after 3 attempts for {endpoint.get('operation_id')}")
+        return ""
+
+    def _validate_collect(self, code: str) -> tuple[bool, str]:
+        """
+        [TODO-2] Write code to a temp file and run pytest --collect-only.
+        Returns (success, error_message).
+        """
+        # Build a minimal file with imports prepended
+        full_src = "import pytest\nimport requests\n\n" + code
+
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".py",
+                dir=self.rule_dir,   # use rule_dir for temp validation files
+                prefix="_tmp_validate_",
+                delete=False,
+                encoding="utf-8",
+            ) as f:
+                f.write(full_src)
+                tmp_path = Path(f.name)
+
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "pytest",
+                    "--collect-only", "-q",
+                    "--no-header",
+                    str(tmp_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if result.returncode == 0:
+                return True, ""
+            return False, (result.stdout + result.stderr).strip()
+
+        except subprocess.TimeoutExpired:
+            return False, "collect-only timed out"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+
+    # ── file save ────────────────────────────────────────────────────────────
+
+    def _save_layer(
+        self,
+        endpoint:    dict,
+        code:        str,
+        fingerprint: str,
+        out_dir:     Path,
+        layer:       str,   # "rule" | "ai"
+    ) -> Path | None:
+        """
+        Write a single layer's code to out_dir/test_{op_id}.py.
+        - New file  → write header + code.
+        - Existing  → append only genuinely new functions (AST-based, preserves decorators).
+        - No code   → skip.
+        """
+        if not code.strip():
+            return None
+
+        op_id     = _safe_name(endpoint.get("operation_id", "unknown"))
+        file_path = out_dir / f"test_{op_id}.py"
+
+        header = textwrap.dedent(f"""\
+            # Auto-generated by TCGeneratorAgent [{layer}]
+            # {endpoint.get('method', '').upper()} {endpoint.get('path', '')}
+            # operation : {endpoint.get('operation_id', '')}
+            # spec_hash : {fingerprint}
+            # ───────────────────────────────────────────────────────
+            import pytest
+            import requests
+
+        """)
+
+        if file_path.exists():
+            existing = file_path.read_text(encoding="utf-8")
+            new_code = _ast_extract_new_functions(existing, code)   # [TODO-4]
+
+            if not new_code.strip():
+                print(f"[TCAgent] No new functions for {file_path.name} — updating spec_hash.")
+                updated = re.sub(
+                    r"# spec_hash : [a-f0-9]+",
+                    f"# spec_hash : {fingerprint}",
+                    existing,
+                )
+                file_path.write_text(updated, encoding="utf-8")
+                return file_path
+
+            with file_path.open("a", encoding="utf-8") as f:
+                f.write(f"\n\n# --- {layer} (appended) ---\n\n" + new_code)
+        else:
+            file_path.write_text(header + code, encoding="utf-8")
+
+        print(f"[TCAgent] ✓ [{layer}] {file_path}")
+        return file_path
+
+    # ── dedup persistence ─────────────────────────────────────────────────────
+
+    def _load_fingerprints(self) -> set[str]:
+        """[TODO-1] Read stored spec_hash values from both rule and AI output dirs."""
+        fps: set[str] = set()
+        for search_dir in (self.rule_dir, self.ai_dir):
+            for f in search_dir.glob("test_*.py"):
+                for line in f.read_text(encoding="utf-8").splitlines():
+                    m = re.search(r"# spec_hash\s*:\s*([a-f0-9]{64})", line)
+                    if m:
+                        fps.add(m.group(1))
+        return fps

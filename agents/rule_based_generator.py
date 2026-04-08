@@ -106,6 +106,16 @@ class RuleBasedTCGenerator:
 
     def generate(self, endpoint: dict[str, Any]) -> str:
         """Return a Python code block with all rule-based test functions."""
+        target_type = endpoint.get("target_type", "api")
+
+        if target_type == "python":
+            return self._generate_python(endpoint)
+
+        # Default: API (HTTP) tests
+        return self._generate_api(endpoint)
+
+    def _generate_api(self, endpoint: dict[str, Any]) -> str:
+        """Generate HTTP-request-based pytest functions for an API endpoint."""
         op_id = _safe_name(endpoint.get("operation_id", "unknown"))
         method = endpoint.get("method", "get").lower()
         path = endpoint.get("path", "/")
@@ -133,6 +143,148 @@ class RuleBasedTCGenerator:
 
         if "invalid_enum" in self.enabled_rules:
             blocks.extend(self._invalid_enum(op_id, method, path, params, req_body))
+
+        return "\n\n\n".join(b for b in blocks if b)
+
+    def _generate_python(self, endpoint: dict[str, Any]) -> str:
+        """
+        Generate function-call-based pytest functions for a Python module target.
+
+        Assumes the module is importable at runtime.  The 'path' field contains
+        'module_name.function_name', from which we derive the import.
+        """
+        op_id      = _safe_name(endpoint.get("operation_id", "unknown"))
+        full_path  = endpoint.get("path", op_id)        # e.g. "mymodule.my_func"
+        parts      = full_path.rsplit(".", 1)
+        module_name = parts[0] if len(parts) == 2 else "unknown_module"
+        func_name  = endpoint.get("operation_id", op_id)
+        params: list[dict] = endpoint.get("parameters", [])
+
+        # Build a valid call with representative good values
+        def good_val(p: dict) -> Any:
+            return _GOOD.get(p["schema"].get("type", "string"), "test")
+
+        required_params = [p for p in params if p.get("required")]
+        all_params = params
+
+        blocks: list[str] = []
+
+        # ── positive ──────────────────────────────────────────────
+        if "positive" in self.enabled_rules:
+            args_repr = ", ".join(
+                f"{p['name']}={good_val(p)!r}" for p in required_params
+            )
+            blocks.append(textwrap.dedent(f"""\
+                def test_{op_id}_positive():
+                    \"\"\"[rule:positive] Call with valid args — must not raise.\"\"\"
+                    import {module_name}
+                    result = {module_name}.{func_name}({args_repr})
+                    # basic smoke: callable returned without exception
+                    assert result is not None or result is None  # noqa: S101
+            """))
+
+        # ── missing required ───────────────────────────────────────
+        if "missing_required" in self.enabled_rules:
+            for p in required_params:
+                fname = f"test_{op_id}_missing_{_safe_name(p['name'])}"
+                args_repr = ", ".join(
+                    f"{pp['name']}={good_val(pp)!r}"
+                    for pp in required_params
+                    if pp["name"] != p["name"]
+                )
+                blocks.append(textwrap.dedent(f"""\
+                    def {fname}():
+                        \"\"\"[rule:missing_required] Omit '{p['name']}' → TypeError or ValueError.\"\"\"
+                        import {module_name}
+                        import pytest
+                        with pytest.raises((TypeError, ValueError)):
+                            {module_name}.{func_name}({args_repr})
+                """))
+
+        # ── wrong type ────────────────────────────────────────────
+        if "wrong_type" in self.enabled_rules:
+            for p in all_params:
+                ptype = p["schema"].get("type", "string")
+                wrong = _WRONG.get(ptype)
+                if wrong is None or ptype == "string":
+                    continue
+                fname = f"test_{op_id}_wrong_type_{_safe_name(p['name'])}"
+                args_repr = ", ".join(
+                    f"{pp['name']}={wrong if pp['name'] == p['name'] else repr(good_val(pp))}"
+                    for pp in required_params
+                )
+                blocks.append(textwrap.dedent(f"""\
+                    def {fname}():
+                        \"\"\"[rule:wrong_type] Pass wrong type for '{p['name']}' (expected {ptype}).\"\"\"
+                        import {module_name}
+                        import pytest
+                        with pytest.raises((TypeError, ValueError)):
+                            {module_name}.{func_name}({args_repr})
+                """))
+
+        # ── boundary ──────────────────────────────────────────────
+        if "boundary" in self.enabled_rules:
+            for p in all_params:
+                ptype = p["schema"].get("type", "string")
+                if ptype not in {"integer", "number"}:
+                    continue
+                for probe in _BOUNDARY_INT:
+                    safe_probe = str(probe).replace("-", "neg")
+                    fname = f"test_{op_id}_boundary_{_safe_name(p['name'])}_{safe_probe}"
+                    args_repr = ", ".join(
+                        f"{pp['name']}={probe if pp['name'] == p['name'] else good_val(pp)!r}"
+                        for pp in required_params
+                    )
+                    blocks.append(textwrap.dedent(f"""\
+                        def {fname}():
+                            \"\"\"[rule:boundary] '{p['name']}' = {probe} — must not crash with 5xx-equivalent.\"\"\"
+                            import {module_name}
+                            try:
+                                {module_name}.{func_name}({args_repr})
+                            except (ValueError, OverflowError):
+                                pass  # domain rejection is acceptable
+                    """))
+
+        # ── nullable / Optional ───────────────────────────────────
+        # For Optional[T] params: passing None should not raise TypeError
+        for p in all_params:
+            if not p.get("nullable"):
+                continue
+            fname = f"test_{op_id}_none_{_safe_name(p['name'])}"
+            args_repr = ", ".join(
+                f"{pp['name']}={repr(None) if pp['name'] == p['name'] else repr(good_val(pp))}"
+                for pp in required_params
+            )
+            blocks.append(textwrap.dedent(f"""\
+                def {fname}():
+                    \"\"\"[rule:nullable] '{p['name']}' is Optional — None must be accepted.\"\"\"
+                    import {module_name}
+                    try:
+                        {module_name}.{func_name}({args_repr})
+                    except (ValueError, RuntimeError):
+                        pass  # domain-level rejection OK; TypeError is NOT
+            """))
+
+        # ── invalid_enum ──────────────────────────────────────────
+        if "invalid_enum" in self.enabled_rules:
+            for p in all_params:
+                enum_vals = p["schema"].get("enum")
+                if not enum_vals:
+                    continue
+                fname = f"test_{op_id}_invalid_enum_{_safe_name(p['name'])}"
+                invalid_val = "__INVALID__"
+                args_repr = ", ".join(
+                    f"{pp['name']}={repr(invalid_val) if pp['name'] == p['name'] else repr(good_val(pp))}"
+                    for pp in required_params
+                )
+                blocks.append(textwrap.dedent(f"""\
+                    def {fname}():
+                        \"\"\"[rule:invalid_enum] '{p['name']}' outside {enum_vals} → ValueError.\"\"\"
+                        import {module_name}
+                        import pytest
+                        with pytest.raises((ValueError, TypeError)):
+                            {module_name}.{func_name}({args_repr})
+                """))
 
         return "\n\n\n".join(b for b in blocks if b)
 

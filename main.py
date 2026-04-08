@@ -33,30 +33,52 @@ def load_config(path: str = "config/config.yaml") -> dict:
 
 def detect_source_and_parse(source: str, config: dict) -> list[dict]:
     """
-    Automatically detect whether `source` is:
-      - an OpenAPI/Swagger file (YAML/JSON)
-      - a Python module/file
-      - a URL to a running server's spec
+    Automatically detect whether `source` is an OpenAPI spec, a Python module,
+    or a C/C++ header. Injects 'target_type' into every endpoint descriptor.
 
-    Returns a list of endpoint descriptors.
+    target_type is resolved in priority order:
+      1. config.target.type  (if not 'auto')
+      2. file extension / URL heuristic
     """
     from parsers import OpenAPIParser, PythonFunctionParser
 
-    if source.startswith(("http://", "https://")):
-        print(f"[Main] Fetching OpenAPI spec from URL: {source}")
-        return OpenAPIParser(source).load().parse()
+    # Resolve target type
+    configured = config.get("target", {}).get("type", "auto")
 
-    p = Path(source)
-    if p.suffix in {".yaml", ".yml", ".json"}:
-        print(f"[Main] Parsing OpenAPI file: {source}")
-        return OpenAPIParser(source).load().parse()
+    if configured != "auto":
+        target_type = configured
+    elif source.startswith(("http://", "https://")):
+        target_type = "api"
+    else:
+        ext = Path(source).suffix.lower()
+        if ext in {".yaml", ".yml", ".json"}:
+            target_type = "api"
+        elif ext == ".py":
+            target_type = "python"
+        elif ext in {".h", ".hpp"}:
+            target_type = "lib"
+        else:
+            target_type = "api"   # best-effort fallback
 
-    if p.suffix == ".py" or not p.suffix:
-        print(f"[Main] Parsing Python module: {source}")
-        return PythonFunctionParser(source).load().parse()
+    print(f"[Main] target_type={target_type}  source={source}")
 
-    print(f"[Main] Unknown source format: {source}")
-    return []
+    # Parse based on resolved type
+    if target_type == "api":
+        endpoints = OpenAPIParser(source).load().parse()
+    elif target_type == "python":
+        endpoints = PythonFunctionParser(source).load().parse()
+    elif target_type == "lib":
+        print("[Main] C/C++ library parser not yet implemented — skipping.")
+        return []
+    else:
+        print(f"[Main] Unknown target_type '{target_type}' — skipping.")
+        return []
+
+    # Inject target_type so downstream generators can branch on it
+    for ep in endpoints:
+        ep.setdefault("target_type", target_type)
+
+    return endpoints
 
 
 # ─── full pipeline ────────────────────────────────────────────────────────────

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pandoc \"C:\\\\Users\\\\sypark5\\\\OneDrive - Suprema Inc\\\\1차_프로토타입_피드백.docx\" -o /tmp/feedback.md)",
+      "Read(//tmp/**)",
+      "Bash(python3 -c ':*)",
+      "Read(//usr/**)",
+      "Read(//usr/local/**)",
+      "Bash(python -c ':*)",
+      "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -c ':*)",
+      "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -m pip show pyyaml)",
+      "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -m pip list)",
+      "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -m py_compile C:/Users/sypark5/TestAgent/agents/tc_generator.py C:/Users/sypark5/TestAgent/agents/rule_based_generator.py C:/Users/sypark5/TestAgent/parsers/python_parser.py C:/Users/sypark5/TestAgent/main.py C:/Users/sypark5/TestAgent/runner/test_runner.py)"
+    ]
+  }
+}

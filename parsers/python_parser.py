@@ -11,21 +11,153 @@ generator can treat both sources uniformly:
     "operation_id": "function_name",
     "summary": docstring first line,
     "parameters": [
-        {"name": "x", "in": "arg", "required": True, "schema": {"type": "integer"}}
+        {
+          "name": "x",
+          "in": "arg",
+          "required": True,
+          "nullable": False,       # True when Optional[T] or Union[T, None]
+          "description": "...",    # from docstring Args: section
+          "schema": {
+            "type": "integer",
+            "enum": [...],         # present when Literal[...] or enum.Enum subclass
+          },
+          "default": None,
+        }
     ],
     "request_body": None,
-    "responses": {"return": {"description": return annotation, "schema": {}}},
+    "responses": {"return": {"description": return_type, "schema": {"type": ...}}},
   }
 """
 
 from __future__ import annotations
 
+import enum
 import importlib
 import importlib.util
 import inspect
+import re
 import sys
+import typing
 from pathlib import Path
 from typing import Any, Callable, get_type_hints
+
+
+# ─── type resolution helpers ──────────────────────────────────────────────────
+
+_PRIMITIVE_MAP: dict[Any, str] = {
+    int:        "integer",
+    float:      "number",
+    str:        "string",
+    bool:       "boolean",
+    list:       "array",
+    dict:       "object",
+    bytes:      "string",   # treat as string for test-gen purposes
+    None:       "null",
+    type(None): "null",
+}
+
+
+def _resolve_annotation(annotation: Any) -> dict:
+    """
+    Convert a Python type annotation to a schema dict.
+
+    Returns e.g.:
+      {"type": "integer"}
+      {"type": "string", "nullable": True}
+      {"type": "string", "enum": ["a", "b"]}
+      {"type": "array", "items": {"type": "string"}}
+    """
+    if annotation is inspect.Parameter.empty:
+        return {"type": "any"}
+
+    origin = getattr(annotation, "__origin__", None)
+    args   = getattr(annotation, "__args__", ()) or ()
+
+    # Optional[T]  →  Union[T, None]
+    if origin is typing.Union:
+        non_none = [a for a in args if a is not type(None)]
+        nullable = type(None) in args
+        if len(non_none) == 1:
+            schema = _resolve_annotation(non_none[0])
+            schema["nullable"] = nullable
+            return schema
+        # Union[X, Y, ...] — use first non-None type
+        schema = _resolve_annotation(non_none[0]) if non_none else {"type": "any"}
+        schema["nullable"] = nullable
+        schema["union_types"] = [_resolve_annotation(a)["type"] for a in non_none]
+        return schema
+
+    # Literal["a", "b", ...]
+    if origin is typing.Literal:
+        literal_vals = list(args)
+        base_type = _primitive_type(type(literal_vals[0])) if literal_vals else "string"
+        return {"type": base_type, "enum": literal_vals}
+
+    # list[T] / List[T]
+    if origin in (list, typing.List):
+        item_schema = _resolve_annotation(args[0]) if args else {"type": "any"}
+        return {"type": "array", "items": item_schema}
+
+    # dict[K, V] / Dict[K, V]
+    if origin in (dict, typing.Dict):
+        return {"type": "object"}
+
+    # Primitive types
+    if annotation in _PRIMITIVE_MAP:
+        return {"type": _PRIMITIVE_MAP[annotation]}
+
+    # enum.Enum subclasses
+    if inspect.isclass(annotation) and issubclass(annotation, enum.Enum):
+        values = [m.value for m in annotation]
+        base_type = _primitive_type(type(values[0])) if values else "string"
+        return {"type": base_type, "enum": values}
+
+    return {"type": str(annotation)}
+
+
+def _primitive_type(py_type: type) -> str:
+    return _PRIMITIVE_MAP.get(py_type, "string")
+
+
+# ─── docstring parser (Google / NumPy / reStructuredText) ────────────────────
+
+def _parse_docstring_args(doc: str) -> dict[str, str]:
+    """
+    Extract per-argument descriptions from a docstring.
+    Supports Google-style ('Args:') and NumPy-style ('Parameters\n----------').
+
+    Returns:  {"param_name": "description text"}
+    """
+    if not doc:
+        return {}
+
+    descriptions: dict[str, str] = {}
+
+    # Google-style: 'Args:\n    name (type): description'
+    google_section = re.search(
+        r"(?:Args|Arguments|Parameters)\s*:\s*\n((?:[ \t]+\S.*\n?)*)",
+        doc,
+        re.IGNORECASE,
+    )
+    if google_section:
+        for line in google_section.group(1).splitlines():
+            m = re.match(r"\s+(\w+)\s*(?:\([^)]*\))?\s*:\s*(.+)", line)
+            if m:
+                descriptions[m.group(1)] = m.group(2).strip()
+
+    # NumPy-style: 'param_name : type\n    description'
+    for m in re.finditer(
+        r"^(\w+)\s*:\s*\S.*\n\s{4}(.+)",
+        doc,
+        re.MULTILINE,
+    ):
+        descriptions.setdefault(m.group(1), m.group(2).strip())
+
+    # reST-style: ':param name: description'
+    for m in re.finditer(r":param\s+(\w+)\s*:\s*(.+)", doc):
+        descriptions.setdefault(m.group(1), m.group(2).strip())
+
+    return descriptions
 
 
 class PythonFunctionParser:
@@ -72,66 +204,53 @@ class PythonFunctionParser:
         doc = inspect.getdoc(func) or ""
 
         try:
-            hints = get_type_hints(func)
+            hints = get_type_hints(func, include_extras=True)
         except Exception:
             hints = {}
 
+        arg_descriptions = _parse_docstring_args(doc)
+
         parameters = []
         for param_name, param in sig.parameters.items():
-            if param_name == "self":
+            if param_name in {"self", "cls"}:
                 continue
+
             annotation = hints.get(param_name, inspect.Parameter.empty)
-            type_name = self._annotation_to_type(annotation)
+            schema     = _resolve_annotation(annotation)
+            nullable   = schema.pop("nullable", False)
             has_default = param.default is not inspect.Parameter.empty
+            default_val = param.default if has_default else None
 
             parameters.append({
-                "name": param_name,
-                "in": "arg",
-                "required": not has_default,
-                "description": "",
-                "schema": {"type": type_name},
-                "default": None if has_default is False else (
-                    param.default if param.default is not inspect.Parameter.empty else None
-                ),
+                "name":        param_name,
+                "in":          "arg",
+                "required":    not has_default,
+                "nullable":    nullable,
+                "description": arg_descriptions.get(param_name, ""),
+                "schema":      schema,
+                "default":     default_val,
             })
 
         return_annotation = hints.get("return", inspect.Parameter.empty)
-        return_type = self._annotation_to_type(return_annotation)
-
-        module_name = getattr(self._module, "__name__", "unknown") if self._module else "unknown"
+        return_schema     = _resolve_annotation(return_annotation)
+        module_name       = getattr(self._module, "__name__", "unknown") if self._module else "unknown"
 
         return {
-            "path": f"{module_name}.{name}",
-            "method": "call",
+            "path":         f"{module_name}.{name}",
+            "method":       "call",
             "operation_id": name,
-            "summary": doc.split("\n")[0] if doc else name,
-            "description": doc,
-            "tags": [module_name],
-            "parameters": parameters,
+            "summary":      doc.split("\n")[0] if doc else name,
+            "description":  doc,
+            "tags":         [module_name],
+            "parameters":   parameters,
             "request_body": None,
             "responses": {
                 "return": {
-                    "description": return_type,
-                    "schema": {"type": return_type},
+                    "description": return_schema.get("type", "any"),
+                    "schema":      return_schema,
                 }
             },
         }
-
-    @staticmethod
-    def _annotation_to_type(annotation: Any) -> str:
-        if annotation is inspect.Parameter.empty:
-            return "any"
-        mapping = {
-            int: "integer",
-            float: "number",
-            str: "string",
-            bool: "boolean",
-            list: "array",
-            dict: "object",
-            None: "null",
-            type(None): "null",
-        }
-        return mapping.get(annotation, str(annotation))
 
     @staticmethod
     def _load_from_file(file_path: str):

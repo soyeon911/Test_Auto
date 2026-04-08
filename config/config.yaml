@@ -2,7 +2,16 @@
 # Auto TC Generator – Configuration
 # ─────────────────────────────────────────────
 
-# Local server info
+# ── Target type ──────────────────────────────────────────────────────────────
+# Controls which parser and test-generator are used.
+#   api    → OpenAPIParser  + requests-based pytest
+#   python → PythonParser   + function-call pytest
+#   lib    → (stub) C/C++ header parser + GTest skeleton
+#   auto   → infer from file extension (.yaml/.json → api, .py → python, .h/.hpp → lib)
+target:
+  type: auto
+
+# ── Local server (for api target) ────────────────────────────────────────────
 server:
   base_url: "http://localhost:8000"
   health_check_path: "/health"
@@ -11,26 +20,29 @@ server:
     - "/swagger.json"
     - "/docs/openapi.yaml"
 
-# Watcher: directories to monitor for Swagger/OpenAPI files
+# ── Watcher ───────────────────────────────────────────────────────────────────
 watcher:
   watch_dirs:
-    - "./input"          # drop swagger files here → auto-trigger
+    - "./input"
   patterns:
     - "*.yaml"
     - "*.yml"
     - "*.json"
-  debounce_seconds: 2   # wait before processing to avoid double-trigger
+    - "*.py"        # python module input
+    - "*.h"
+    - "*.hpp"       # C/C++ header input
+  debounce_seconds: 2
+  polling_interval_secs: 1.5   # WSL PollingObserver (ignored on native Linux/macOS)
 
-# AI Agent — provider-agnostic
+# ── AI Agent ──────────────────────────────────────────────────────────────────
 # provider: gemini | anthropic | openai
-# api_key_env: name of the environment variable holding the API key
 agent:
   provider: gemini
   model: gemini-2.0-flash
   max_tokens: 4096
-  api_key_env: GEMINI_API_KEY   # set this env var before running
+  api_key_env: GEMINI_API_KEY
 
-  # ── other provider examples (uncomment to switch) ──────────────────
+  # ── other provider examples ────────────────────────────────────────────────
   # provider: anthropic
   # model: claude-haiku-4-5
   # api_key_env: ANTHROPIC_API_KEY
@@ -39,40 +51,49 @@ agent:
   # model: gpt-4o-mini
   # api_key_env: OPENAI_API_KEY
 
-# Test generation
+# ── Test generation ───────────────────────────────────────────────────────────
 tc_generation:
-  output_dir: "./tests/generated"
-  dedup_check: true            # skip identical TC files (hash compare)
+  dedup_check: true   # skip if endpoint spec fingerprint unchanged
+
+  # Output directories — separated by origin (feedback: overwrite/review/failure 분석 편의)
+  output_dirs:
+    rule: "./tests/generated/rule"   # deterministic, overwrite-safe
+    ai:   "./tests/generated/ai"     # AI edge cases, needs human review
 
   # Rule-based layer (deterministic, no AI)
   rule_based:
     enabled: true
     include:
-      - positive               # happy-path: one valid request per endpoint
-      - missing_required       # omit each required field → expect 400/422
-      - wrong_type             # pass wrong type per param → expect 400/422
-      - boundary               # int min/max edges, empty string, zero
-      - invalid_enum           # enum param with unlisted value → expect 400/422
+      - positive          # happy-path: one valid request per endpoint
+      - missing_required  # omit each required field → expect 400/422
+      - wrong_type        # pass wrong type per param → expect 400/422
+      - boundary          # int min/max edges, empty string, zero
+      - invalid_enum      # enum param with unlisted value → expect 400/422
 
-  # AI layer (edge-case augmentation)
+  # AI layer (edge-case augmentation only)
   ai_augment:
     enabled: true
-    max_extra_tc: 3            # max additional test functions per endpoint
+    max_extra_tc: 3    # max additional test functions per endpoint
 
-# Test execution
+# ── Test execution ────────────────────────────────────────────────────────────
 runner:
+  # Run all three buckets
+  test_dirs:
+    - "./tests/generated/rule"
+    - "./tests/generated/ai"
+    - "./tests/manual"
   allure_results_dir: "./reports/allure-results"
-  allure_report_dir: "./reports/allure-report"
-  html_report_path: "./reports/summary.html"
-  timeout_seconds: 30
+  allure_report_dir:  "./reports/allure-report"
+  html_report_path:   "./reports/summary.html"
+  timeout_seconds: 60
 
-# Email notification
+# ── Email notification ────────────────────────────────────────────────────────
 email:
-  enabled: false          # set true + fill credentials to activate
+  enabled: false
   smtp_host: "smtp.gmail.com"
   smtp_port: 587
   sender: "your@gmail.com"
-  password_env: "SMTP_PASSWORD"   # read from env, never hardcode
+  password_env: "SMTP_PASSWORD"
   recipients:
     - "recipient@example.com"
   attach_report: true
