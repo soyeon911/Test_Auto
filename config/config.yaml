@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────
+# Auto TC Generator – Configuration
+# ─────────────────────────────────────────────
+
+# Local server info
+server:
+  base_url: "http://localhost:8000"
+  health_check_path: "/health"
+  swagger_paths:
+    - "/openapi.json"
+    - "/swagger.json"
+    - "/docs/openapi.yaml"
+
+# Watcher: directories to monitor for Swagger/OpenAPI files
+watcher:
+  watch_dirs:
+    - "./input"          # drop swagger files here → auto-trigger
+  patterns:
+    - "*.yaml"
+    - "*.yml"
+    - "*.json"
+  debounce_seconds: 2   # wait before processing to avoid double-trigger
+
+# AI Agent — provider-agnostic
+# provider: gemini | anthropic | openai
+# api_key_env: name of the environment variable holding the API key
+agent:
+  provider: gemini
+  model: gemini-2.0-flash
+  max_tokens: 4096
+  api_key_env: GEMINI_API_KEY   # set this env var before running
+
+  # ── other provider examples (uncomment to switch) ──────────────────
+  # provider: anthropic
+  # model: claude-haiku-4-5
+  # api_key_env: ANTHROPIC_API_KEY
+
+  # provider: openai
+  # model: gpt-4o-mini
+  # api_key_env: OPENAI_API_KEY
+
+# Test generation
+tc_generation:
+  output_dir: "./tests/generated"
+  dedup_check: true            # skip identical TC files (hash compare)
+
+  # Rule-based layer (deterministic, no AI)
+  rule_based:
+    enabled: true
+    include:
+      - positive               # happy-path: one valid request per endpoint
+      - missing_required       # omit each required field → expect 400/422
+      - wrong_type             # pass wrong type per param → expect 400/422
+      - boundary               # int min/max edges, empty string, zero
+      - invalid_enum           # enum param with unlisted value → expect 400/422
+
+  # AI layer (edge-case augmentation)
+  ai_augment:
+    enabled: true
+    max_extra_tc: 3            # max additional test functions per endpoint
+
+# Test execution
+runner:
+  allure_results_dir: "./reports/allure-results"
+  allure_report_dir: "./reports/allure-report"
+  html_report_path: "./reports/summary.html"
+  timeout_seconds: 30
+
+# Email notification
+email:
+  enabled: false          # set true + fill credentials to activate
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  sender: "your@gmail.com"
+  password_env: "SMTP_PASSWORD"   # read from env, never hardcode
+  recipients:
+    - "recipient@example.com"
+  attach_report: true

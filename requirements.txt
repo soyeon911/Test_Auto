@@ -1,0 +1,28 @@
+# Parsing
+pyyaml>=6.0
+jsonschema>=4.0
+
+# ── AI providers (install only what you need) ──────────────────────────────
+# Gemini (default / free tier)
+google-generativeai>=0.8.0
+
+# Anthropic — uncomment if provider: anthropic
+# anthropic>=0.40.0
+
+# OpenAI — uncomment if provider: openai
+# openai>=1.0.0
+
+# Test framework
+pytest>=7.0
+pytest-html>=3.2
+pytest-json-report>=1.5
+allure-pytest>=2.13
+
+# File watcher
+watchdog>=3.0
+
+# HTTP client (for local server health check & generated tests)
+requests>=2.31
+
+# Report
+jinja2>=3.1
