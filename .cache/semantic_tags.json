@@ -1,0 +1,17 @@
+{
+  "channel|integer|||[]": "numeric_id",
+  "height|integer|||[]": "numeric_id",
+  "image_data|string|||[]": "base64_image",
+  "width|integer|||[]": "numeric_id",
+  "mode|integer|||[]": "numeric_id",
+  "user_id|integer|||[]": "numeric_id",
+  "template_data|string|||[]": "base64_template",
+  "template1|string|||[]": "base64_template",
+  "template2|string|||[]": "base64_template",
+  "image1_data|string|||[]": "base64_image",
+  "image2_data|string|||[]": "base64_image",
+  "threshold|number|||[]": "threshold_float",
+  "max_face|integer|||[]": "integer_count",
+  "user_id||||[]": "identifier",
+  "sub_id||||[]": "identifier"
+}
