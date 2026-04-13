@@ -377,4 +377,11 @@ jobs:
           $serverCrash = "${{ steps.post_health.outputs.server_up }}" -eq "false"
 
           if ($serverCrash) {
-            Write-Host "::error::서버가 테스트 중 크래시됐습니다. Crash 로그 아티팩트를 �
+            Write-Host "::error::서버가 테스트 중 크래시됐습니다. Crash 로그 아티팩트를 확인하세요."
+            exit 2
+          }
+          if ($pytestExit -ne "0" -and $pytestExit -ne "") {
+            Write-Host "::error::pytest 실패 (exit=$pytestExit). 테스트 레포트를 확인하세요."
+            exit $pytestExit
+          }
+          Write-Host "[Result] 파이프라인 완료."
