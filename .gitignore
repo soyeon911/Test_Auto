@@ -39,8 +39,7 @@ pytest_report.json
 # ─────────────────────────────────────────────
 # Generated test files
 # ─────────────────────────────────────────────
-tests/generated/
-!tests/generated/.gitkeep
+
 
 
 
