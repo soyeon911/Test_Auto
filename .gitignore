@@ -93,3 +93,8 @@ models/
 
 
 actions-runner/
+actions-runner/_work/
+reports/
+.cache/
+tests/generated/
+.pytest_cache/
