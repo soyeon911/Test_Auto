@@ -20,6 +20,12 @@ server:
     - "/swagger.json"
     - "/docs/openapi.yaml"
 
+  # ── 서버 에러 응답 방식 ──────────────────────────────────────────────────────
+  # standard : HTTP 400/422 반환 (일반 REST 규약)
+  # qfe      : 항상 HTTP 200, body의 success/error_code 로 에러 구분
+  #            {"success": false, "error_code": <음수>, "msg": "..."}
+  error_response_mode: qfe
+
 # ── Watcher ───────────────────────────────────────────────────────────────────
 watcher:
   watch_dirs:
