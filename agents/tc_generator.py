@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 
 import re
 import subprocess
@@ -47,27 +48,50 @@ from .semantic_tagger import SemanticTagger
 # ─── AI prompts ───────────────────────────────────────────────────────────────
 
 _AI_SYSTEM_API = textwrap.dedent("""
-You are a senior QA engineer specialising in API testing.
-You will be given:
-  1. An OpenAPI endpoint description (JSON).
-  2. Rule-based pytest tests that have already been generated for it.
+You are a senior QA engineer specialising in API testing for a biometric face-recognition server.
 
-Your task: generate ONLY additional edge-case pytest test functions
-that are NOT already covered by the rule-based tests.
+─── Server response contract ─────────────────────────────────────────────────
+This server ALWAYS returns HTTP 200, even for errors.
+Success or failure is indicated inside the JSON body:
+  • Success : {"success": true,  "data": {...}}
+  • Error   : {"success": false, "error_code": <negative int>, "msg": "..."}
 
-Focus on:
-  - Non-obvious / domain-specific negative inputs
-  - Combinatorial negative cases (multiple bad fields at once)
-  - Atypical but plausible inputs (unicode, very long strings, SQL-injection probes, whitespace-only)
-  - Business-logic edge cases you can infer from the endpoint name / schema
+So your assertions must check the body, NOT the HTTP status code:
+  body = resp.json()
+  assert body.get("success") == False or body.get("error_code", 0) < 0, (
+      f"Expected error but got: {resp.text[:300]}"
+  )
 
-Output rules:
-  - Valid Python only — no markdown fences, no prose outside code.
-  - Every function must start with `test_` and accept `base_url` as the first arg.
-  - Use `requests.<method>(f"{base_url}<path>", ...)` for HTTP calls.
-  - Do NOT repeat any test function name from the already-generated tests.
-  - Do NOT add import statements (they are added by the file header).
-  - Decorators like @pytest.mark.xfail are allowed and encouraged.
+─── Rule-based tests already generated ──────────────────────────────────────
+The rule-based layer already covers:
+  - positive (happy-path with dummy values)
+  - missing_required (omit each required field)
+  - wrong_type (send wrong JSON type per field)
+  - boundary (integer min/max/zero edges)
+  - invalid_enum (unlisted enum values)
+  - semantic_probe (tag-specific bad values: invalid base64, out-of-range float, etc.)
+
+DO NOT duplicate any of the above patterns.
+
+─── Your task ────────────────────────────────────────────────────────────────
+Generate ONLY additional edge-case test functions not covered above.
+
+Focus exclusively on:
+  1. Combinatorial negatives  — multiple bad fields simultaneously
+  2. Domain / business logic  — e.g. enroll then identify, unknown user_id, duplicate enroll
+  3. Semantic edge cases      — extremely large base64, truncated base64, corrupt image header
+  4. Injection / fuzzing      — SQL injection strings, null bytes, very long values (>10 KB)
+  5. Optional-field combos    — omit optional fields in various combinations
+
+─── Output rules ─────────────────────────────────────────────────────────────
+  • Return valid Python ONLY — no markdown fences, no prose, no comments outside functions.
+  • Return at most 2 test functions. Keep the code short and syntactically minimal.
+  • Every function starts with `test_` and accepts `base_url` as the ONLY argument.
+  • HTTP calls: requests.<method>(f"{base_url}<path>", json=..., timeout=10)
+  • Assertions MUST use the body-level format above (not status code != 200).
+  • Do NOT add import statements at module level — they are already present.
+  • Do NOT repeat any function name from the already-generated tests.
+  • @pytest.mark.xfail is allowed for known-fragile edge cases.
 """).strip()
 
 _AI_SYSTEM_PYTHON = textwrap.dedent("""
@@ -96,17 +120,98 @@ Output rules:
 """).strip()
 
 _AI_USER_TEMPLATE = textwrap.dedent("""
-=== Endpoint / Function (JSON) ===
-{endpoint_json}
+=== Endpoint summary ===
+{endpoint_summary}
 
-=== Already generated rule-based tests ===
-{rule_code}
+=== Semantic tags ===
+{semantic_tags}
+
+=== Rule-based tests already covered (DO NOT duplicate) ===
+{rule_summary}
 
 Generate at most {max_extra} additional edge-case test functions.
+Focus on combinatorial negatives, domain-logic errors, and injection/fuzzing.
+Do NOT repeat single-field invalid cases already listed above.
+Return only valid Python pytest functions — no prose, no markdown.
 """).strip()
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
+
+def _build_semantic_tag_summary(endpoint: dict[str, Any]) -> str:
+    """Compact semantic-tag listing for the AI prompt."""
+    lines: list[str] = []
+    for p in endpoint.get("parameters", []):
+        tag = (p.get("schema") or {}).get("semantic_tag", "")
+        if tag:
+            lines.append(f"  {p['name']:20s}: {tag}  (param {p.get('in', '')})")
+    rb = endpoint.get("request_body")
+    if rb:
+        for fname, fschema in ((rb.get("schema") or {}).get("properties", {}) or {}).items():
+            tag = fschema.get("semantic_tag", "")
+            if tag:
+                lines.append(f"  {fname:20s}: {tag}  (body)")
+    return "\n".join(lines) if lines else "  (none)"
+
+
+def _build_compact_endpoint_summary(endpoint: dict[str, Any]) -> str:
+    """
+    Strip the endpoint dict down to only what AI needs for test generation.
+    Omits description, summary, tags, responses, examples — keeps type/enum/semantic_tag.
+    """
+    req_body = endpoint.get("request_body") or {}
+    schema   = req_body.get("schema") or {}
+
+    compact: dict[str, Any] = {
+        "operation_id": endpoint.get("operation_id", ""),
+        "method":       endpoint.get("method", ""),
+        "path":         endpoint.get("path", ""),
+        "parameters":   [],
+        "request_body": {
+            "required": req_body.get("required", False),
+            "schema": {
+                "type":       schema.get("type", "object"),
+                "required":   schema.get("required", []),
+                "properties": {},
+            },
+        },
+    }
+
+    for p in endpoint.get("parameters", []):
+        ps = p.get("schema") or {}
+        entry: dict[str, Any] = {
+            "name":         p.get("name", ""),
+            "in":           p.get("in", ""),
+            "required":     p.get("required", False),
+            "type":         ps.get("type", "string"),
+            "semantic_tag": ps.get("semantic_tag", ""),
+        }
+        if ps.get("enum"):
+            entry["enum"] = ps["enum"]
+        compact["parameters"].append(entry)
+
+    for name, prop in (schema.get("properties") or {}).items():
+        entry = {
+            "type":         prop.get("type", "string"),
+            "required":     name in (schema.get("required") or []),
+            "semantic_tag": prop.get("semantic_tag", ""),
+        }
+        if prop.get("enum"):
+            entry["enum"] = prop["enum"]
+        compact["request_body"]["schema"]["properties"][name] = entry
+
+    return json.dumps(compact, indent=2, ensure_ascii=False)
+
+
+def _build_rule_test_summary(rule_code: str) -> str:
+    """Return only the function names of already-generated rule tests (much smaller than full code)."""
+    if not rule_code.strip():
+        return "(none)"
+    names = re.findall(r"^def\s+(test_[a-zA-Z0-9_]+)\s*\(", rule_code, re.MULTILINE)
+    if not names:
+        return "(could not extract function names)"
+    return "\n".join(f"  - {n}" for n in names)
+
 
 def _safe_name(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", text).strip("_")
@@ -202,6 +307,7 @@ class TCGeneratorAgent:
         self.config = config
         tc_cfg = config.get("tc_generation", {})
         self.dedup_check: bool = tc_cfg.get("dedup_check", True)
+        self.max_ai_endpoints = self._resolve_ai_endpoint_limit(config)
 
         # Separate output directories for rule-based vs AI-generated tests
         output_dirs = tc_cfg.get("output_dirs", {})
@@ -216,7 +322,7 @@ class TCGeneratorAgent:
         self.rule_enabled: bool = rb_cfg.get("enabled", True)
         self.ai_enabled:   bool = ai_cfg.get("enabled", True)
         self.max_extra:    int  = int(ai_cfg.get("max_extra_tc", 3))
-        self.max_ai_endpoints: int = int(ai_cfg.get("max_endpoints_to_augment", 1))  # ⚠️ Quota 제한
+        #self.max_ai_endpoints: int = int(ai_cfg.get("max_endpoints_to_augment", 1))  # ⚠️ Quota 제한
         self._ai_endpoints_count: int = 0  # AI 호출 카운터
 
         self._rule_gen = RuleBasedTCGenerator(config)
@@ -225,6 +331,44 @@ class TCGeneratorAgent:
         # [TODO-1] Load stored spec fingerprints from existing generated files
         self._known_fingerprints: set[str] = self._load_fingerprints()
 
+    def _resolve_ai_endpoint_limit(self, config: dict) -> int | None:
+        """
+        Resolve how many endpoints may use AI augmentation.
+
+        Returns:
+        - int  : hard cap
+        - None : unlimited
+        Priority:
+        1. tc_generation.ai_augment.max_endpoints_to_augment
+        2. agent.ai_endpoint_limit
+        3. provider default
+            - ollama  -> unlimited
+            - others  -> AI_ENDPOINT_LIMIT env var or 1
+        """
+        tc_cfg = config.get("tc_generation", {})
+        ai_cfg = tc_cfg.get("ai_augment", {})
+        agent_cfg = config.get("agent", {})
+
+        # 1) legacy / existing config support
+        if "max_endpoints_to_augment" in ai_cfg:
+            value = ai_cfg.get("max_endpoints_to_augment")
+            if value is None:
+                return None
+            return int(value)
+
+        # 2) provider-level explicit override
+        if "ai_endpoint_limit" in agent_cfg:
+            value = agent_cfg.get("ai_endpoint_limit")
+            if value is None:
+                return None
+            return int(value)
+
+        # 3) provider default
+        provider = str(agent_cfg.get("provider", "gemini")).lower()
+        if provider == "ollama":
+            return None  # unlimited by default
+
+        return int(os.getenv("AI_ENDPOINT_LIMIT", "1"))
     # ─── public ──────────────────────────────────────────────────────────────
 
     def generate_for_endpoints(self, endpoints: list[dict[str, Any]]) -> list[Path]:
@@ -255,13 +399,26 @@ class TCGeneratorAgent:
 
         # ── Layer 2: AI edge cases ──────────────────────────────
         # ⚠️ Quota 제한: max_endpoints_to_augment 초과 시 AI 호출 스킵
+        # AI augmentation
         ai_code = ""
-        if self.ai_enabled and self._ai_endpoints_count < self.max_ai_endpoints:
+        can_use_ai = (
+            self.ai_enabled and (
+                self.max_ai_endpoints is None
+                or self._ai_endpoints_count < self.max_ai_endpoints
+            )
+        )
+
+        if can_use_ai:
             ai_code = self._ai_generate(endpoint, rule_code)
             self._ai_endpoints_count += 1
-            print(f"[TCAgent] AI augmentation: {self._ai_endpoints_count}/{self.max_ai_endpoints} endpoints")
-        elif self.ai_enabled and self._ai_endpoints_count >= self.max_ai_endpoints:
-            print(f"[TCAgent] AI quota limit reached ({self.max_ai_endpoints} endpoints). Skipping AI for {op_id}")
+
+            if self.max_ai_endpoints is None:
+                print(f"[TCAgent] AI augmentation: {self._ai_endpoints_count} endpoints (unlimited)")
+            else:
+                print(f"[TCAgent] AI augmentation: {self._ai_endpoints_count}/{self.max_ai_endpoints} endpoints")
+
+        elif self.ai_enabled:
+            print(f"[TCAgent] AI endpoint limit reached ({self.max_ai_endpoints}). Skipping AI for {op_id}")
 
         # Save each layer to its own directory
         written: list[Path] = []
@@ -286,45 +443,61 @@ class TCGeneratorAgent:
                 print(f"[TCAgent] AI disabled: {e}")
                 return ""
 
-        target_type = endpoint.get("target_type", "api")
+        target_type   = endpoint.get("target_type", "api")
         system_prompt = _AI_SYSTEM_PYTHON if target_type == "python" else _AI_SYSTEM_API
 
-        user_prompt = _AI_USER_TEMPLATE.format(
-            endpoint_json=json.dumps(endpoint, indent=2, ensure_ascii=False),
-            rule_code=rule_code or "(none)",
-            max_extra=self.max_extra,
-        )
+        # ── compact prompts (Ollama/local-LLM friendly) ───────────────────────
+        endpoint_summary = _build_compact_endpoint_summary(endpoint)
+        semantic_tags    = _build_semantic_tag_summary(endpoint)
+        rule_summary     = _build_rule_test_summary(rule_code)
 
-        wait_time = 2  # 지수 백오프 초기값 (2s, 4s, 8s)
+        base_user_prompt = _AI_USER_TEMPLATE.format(
+            endpoint_summary = endpoint_summary,
+            semantic_tags    = semantic_tags,
+            rule_summary     = rule_summary,
+            max_extra        = self.max_extra,
+        )
+        print(f"[TCAgent] prompt tokens ≈ {len(base_user_prompt) // 4} "
+              f"(system {len(system_prompt)//4} + user {len(base_user_prompt)//4})")
+
+        user_prompt = base_user_prompt   # start clean; rebuilt on each retry
+        wait_time   = 2                  # exponential back-off seed (2s → 4s → 8s)
+
         for attempt in range(1, 4):
             try:
                 raw  = self._llm.generate(system_prompt, user_prompt)
                 code = _strip_fences(raw)
 
-                # [TODO-2] Step 1: syntax check
+                # Step 1: syntax check
                 if not _is_valid_python(code):
-                    print(f"[TCAgent] AI attempt {attempt}: syntax error — retrying…")
-                    user_prompt += "\n\nFix all syntax errors in the previous output."
+                    print(f"[TCAgent] attempt {attempt}: syntax error — retrying…")
+                    # rebuild from base; do NOT accumulate
+                    user_prompt = (
+                        base_user_prompt
+                        + "\n\nPrevious output had syntax errors. "
+                          "Return fewer functions and ensure valid Python only."
+                    )
                     continue
 
-                # [TODO-2] Step 2: pytest --collect-only validation
+                # Step 2: pytest --collect-only validation
                 ok, err = self._validate_collect(code)
                 if ok:
                     return code
-                print(f"[TCAgent] AI attempt {attempt}: collect failed — retrying…\n  {err[:300]}")
-                user_prompt += (
-                    f"\n\nThe previous output failed pytest --collect-only:\n{err[:300]}\n"
-                    "Fix all issues (import errors, fixture name errors, parametrize structure errors)."
+                print(f"[TCAgent] attempt {attempt}: collect failed — retrying…\n  {err[:200]}")
+                user_prompt = (
+                    base_user_prompt
+                    + f"\n\nPrevious output failed pytest --collect-only:\n{err[:200]}\n"
+                      "Return fewer functions and fix all issues."
                 )
 
             except Exception as e:
-                print(f"[TCAgent] AI attempt {attempt} error: {e}")
+                print(f"[TCAgent] attempt {attempt} error: {e}")
+                user_prompt = base_user_prompt   # reset for next attempt
 
-            # 429 에러(QuotaExhausted 등)인 경우 대기 후 재시도
-            if attempt < 3:  # 마지막 시도가 아닐 때만 대기
-                print(f"잠시 대기 후 {wait_time}초 뒤에 다시 시도합니다...")
+            if attempt < 3:
+                print(f"[TCAgent] waiting {wait_time}s before retry…")
                 time.sleep(wait_time)
-                wait_time *= 2  # 지수 백오프: 대기 시간을 2배로 늘림 (2s → 4s → 8s)
+                wait_time *= 2
 
         return ""
 

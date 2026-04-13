@@ -150,20 +150,35 @@ class SemanticTagger:
                 )
 
         # ── request body fields ────────────────────────────────────────────────
+        # OpenAPIParser normalises request_body to {"schema": {...}, ...}
+        # (no "content" nesting). Support both formats for robustness.
         req_body = ep.get("request_body")
         if req_body:
+            # normalised format: req_body["schema"]["properties"]
+            body_schema = req_body.get("schema") or {}
+            self._tag_properties(body_schema.get("properties", {}))
+
+            # raw OpenAPI 3.x format (fallback): req_body["content"][ct]["schema"]
             for media_obj in req_body.get("content", {}).values():
-                body_schema = media_obj.get("schema") or {}
-                for field_name, field_schema in body_schema.get("properties", {}).items():
-                    if "semantic_tag" not in field_schema:
-                        field_schema["semantic_tag"] = self._tag_field(
-                            name=field_name,
-                            schema=field_schema,
-                        )
+                raw_schema = media_obj.get("schema") or {}
+                self._tag_properties(raw_schema.get("properties", {}))
 
         return ep
 
     # ─── internal ─────────────────────────────────────────────────────────────
+
+    def _tag_properties(self, properties: dict) -> None:
+        """In-place: inject semantic_tag into each property schema that lacks one."""
+        for field_name, field_schema in properties.items():
+            if "semantic_tag" not in field_schema:
+                field_schema["semantic_tag"] = self._tag_field(
+                    name=field_name,
+                    schema=field_schema,
+                )
+            # recurse into nested objects
+            nested = field_schema.get("properties", {})
+            if nested:
+                self._tag_properties(nested)
 
     def _tag_field(self, name: str, schema: dict) -> str:
         key = self._cache_key(name, schema)
@@ -275,7 +290,10 @@ class SemanticTagger:
 
         # Type-based fallback
         if ftype == "integer":
-            if any(x in n for x in ("count", "limit", "size", "page", "num", "max", "min", "total")):
+            # image/video dimension keywords → integer_count (not an ID)
+            if any(x in n for x in ("width", "height", "channel", "depth",
+                                    "count", "limit", "size", "page",
+                                    "num", "max", "min", "total")):
                 return "integer_count"
             return "numeric_id"
         if ftype == "number":

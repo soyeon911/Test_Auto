@@ -185,7 +185,10 @@ jobs:
       BASE_URL: ${{ inputs.base_url || vars.SERVER_BASE_URL || 'http://192.168.150.162:8080' }}
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      #GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      LLM_PROVIDER: ollama
+      LLM_MODEL: llama3.1:8b
+      OLLAMA_BASE_URL: http://localhost:11434
 
     steps:
       - name: Checkout
@@ -256,30 +259,51 @@ jobs:
         run: |
           Write-Host "::error::서버가 다운 상태입니다. 파이프라인을 중단합니다. Crash 로그를 확인하세요."
           exit 1
-
-      # ── TC 생성 ─────────────────────────────────────────────────
-      - name: TC 생성 (generate)
+      - name: Ollama health check
         shell: powershell
         run: |
-          $swaggerFile = @("input\QFEapi.json","input\QFEapi.yaml","QFEapi.json","QFEapi.yaml") |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
+          try {
+            $resp = Invoke-RestMethod -Uri "$env:OLLAMA_BASE_URL/api/tags" -Method Get -TimeoutSec 10
+            if (-not $resp.models) {
+              Write-Error "Ollama is reachable but no models are installed."
+              exit 1
+            }
+            $models = @($resp.models | ForEach-Object { $_.name })
+            Write-Host "[Ollama] Installed models: $($models -join ', ')"
 
-          if (-not $swaggerFile) {
-            Write-Error "Swagger 파일을 찾을 수 없습니다."
+            if ($models -notcontains $env:LLM_MODEL) {
+              Write-Error "Required model '$env:LLM_MODEL' is not installed in Ollama."
+              exit 1
+            }
+          } catch {
+            Write-Error "Ollama health check failed: $_"
             exit 1
           }
 
-          Write-Host "[Generate] 사용 파일: $swaggerFile"
 
-          if ($env:GEMINI_API_KEY) {
-            $prefixLen = [Math]::Min(5, $env:GEMINI_API_KEY.Length)
-            $prefix = $env:GEMINI_API_KEY.Substring(0, $prefixLen)
-            Write-Host "[Generate] GEMINI_API_KEY detected: $prefix..."
-          } else {
-            Write-Host "[Generate] GEMINI_API_KEY is not set"
-          }
+      # ── TC 생성 ─────────────────────────────────────────────────
+      # - name: TC 생성 (generate)
+      #   shell: powershell
+      #   run: |
+      #     $swaggerFile = @("input\QFEapi.json","input\QFEapi.yaml","QFEapi.json","QFEapi.yaml") |
+      #       Where-Object { Test-Path $_ } | Select-Object -First 1
 
-          python main.py generate $swaggerFile
+      #     if (-not $swaggerFile) {
+      #       Write-Error "Swagger 파일을 찾을 수 없습니다."
+      #       exit 1
+      #     }
+
+      #     Write-Host "[Generate] 사용 파일: $swaggerFile"
+
+      #     if ($env:GEMINI_API_KEY) {
+      #       $prefixLen = [Math]::Min(5, $env:GEMINI_API_KEY.Length)
+      #       $prefix = $env:GEMINI_API_KEY.Substring(0, $prefixLen)
+      #       Write-Host "[Generate] GEMINI_API_KEY detected: $prefix..."
+      #     } else {
+      #       Write-Host "[Generate] GEMINI_API_KEY is not set"
+      #     }
+
+      #     python main.py generate $swaggerFile
 
       # ── 테스트 실행 ────────────────────────────────────────────────────────
       - name: 테스트 실행

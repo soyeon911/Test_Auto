@@ -91,8 +91,26 @@ class OpenAPIParser:
     # ─── internal helpers ─────────────────────────────────────────────────────
 
     def _parse_operation(self, path: str, method: str, op: dict) -> dict[str, Any]:
-        parameters = self._resolve_parameters(op.get("parameters", []))
+        raw_params = op.get("parameters", [])
+
+        # ── Swagger 2.0: pull out in:body parameter before resolving ────────────
+        # (OpenAPI 3.x uses requestBody; Swagger 2.0 puts the body inside parameters)
+        swagger_body: dict | None = None
+        non_body_raw: list = []
+        for p in raw_params:
+            resolved_p = self._resolve_ref(p["$ref"]) if "$ref" in p else p
+            if resolved_p.get("in") == "body":
+                swagger_body = resolved_p
+            else:
+                non_body_raw.append(p)
+
+        parameters = self._resolve_parameters(non_body_raw)
+
+        # ── request_body: prefer OpenAPI 3.x requestBody, fall back to Swagger body param
         request_body = self._parse_request_body(op.get("requestBody"))
+        if request_body is None and swagger_body is not None:
+            request_body = self._parse_swagger_body_param(swagger_body)
+
         responses = self._parse_responses(op.get("responses", {}))
 
         return {
@@ -140,6 +158,7 @@ class OpenAPIParser:
         return resolved
 
     def _parse_request_body(self, body: dict | None) -> dict | None:
+        """OpenAPI 3.x requestBody → normalised dict."""
         if not body:
             return None
         content = body.get("content", {})
@@ -153,6 +172,41 @@ class OpenAPIParser:
                 "required": body.get("required", False),
             }
         return None
+
+    def _parse_swagger_body_param(self, param: dict) -> dict | None:
+        """
+        Swagger 2.0: parameters[].in == 'body'  →  same normalised dict as
+        _parse_request_body so the rest of the pipeline is format-agnostic.
+
+        The parameter schema may be:
+          - a $ref  → resolve to the definition object
+          - an inline object schema  → use as-is
+          - a primitive / missing  → wrap in {"type": "object", "properties": {}}
+
+        Nested $refs inside properties are also resolved one level deep.
+        """
+        schema = param.get("schema", {})
+
+        # top-level $ref
+        if "$ref" in schema:
+            schema = self._resolve_ref(schema["$ref"])
+            # deep-copy so we don't mutate the raw spec
+            import copy
+            schema = copy.deepcopy(schema)
+
+        # resolve $refs inside properties (one level)
+        for prop_name, prop_schema in schema.get("properties", {}).items():
+            if "$ref" in prop_schema:
+                schema["properties"][prop_name] = self._resolve_ref(prop_schema["$ref"])
+
+        if not schema:
+            return None
+
+        return {
+            "content_type": "application/json",
+            "schema":       schema,
+            "required":     param.get("required", False),
+        }
 
     def _parse_responses(self, responses: dict) -> dict[str, dict]:
         result = {}

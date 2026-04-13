@@ -31,6 +31,42 @@ _GOOD: dict[str, Any] = {
     "object":  {},
 }
 
+# Semantic-tag-aware "good" values (overrides type-based _GOOD when tag is known)
+# base64_image: 1×1 pixel PNG
+_GOOD_BY_TAG: dict[str, Any] = {
+    "plain_string":    "hello",
+    "identifier":      "item_001",
+    "base64_image":    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64_template": "AAEC",
+    "threshold_float": 0.7,
+    "config_json":     "{}",
+    "path_user_id":    1,
+    "integer_count":   10,
+    "boolean_flag":    True,
+    "datetime_string": "2024-01-01T00:00:00Z",
+    "email_string":    "test@example.com",
+    "password_string": "Test1234!",
+    "file_path":       "/tmp/test.txt",
+    "url_string":      "https://example.com",
+    "uuid_string":     "00000000-0000-0000-0000-000000000001",
+    "numeric_id":      1,
+}
+
+# Semantic-tag-based invalid probes: {tag: [(bad_value, label), ...]}
+_SEMANTIC_PROBES: dict[str, list] = {
+    "base64_image":    [("not_base64!@#", "invalid_b64"), ("",              "empty_b64")],
+    "base64_template": [("not_base64!@#", "invalid_b64"), ("",              "empty_b64")],
+    "threshold_float": [(-0.1,            "below_range"), (1.1,             "above_range"),
+                        ("not_a_number",  "wrong_type")],
+    "numeric_id":      [(-1,              "negative_id"), (0,               "zero_id")],
+    "integer_count":   [(-1,              "negative"),    (0,               "zero")],
+    "email_string":    [("not_an_email",  "invalid_fmt"), ("@nodomain",     "malformed")],
+    "uuid_string":     [("not-a-uuid",    "invalid_fmt"), ("",              "empty")],
+    "datetime_string": [("not_a_date",    "invalid_fmt"), ("2024-13-01T00:00:00Z", "bad_month")],
+    "url_string":      [("not_a_url",     "invalid_fmt")],
+    "boolean_flag":    [("not_boolean",   "wrong_type"),  (2,               "out_of_range")],
+}
+
 # Wrong-type stand-ins (e.g. send a string where an int is expected)
 _WRONG: dict[str, Any] = {
     "integer": '"not_an_integer"',
@@ -101,7 +137,7 @@ class RuleBasedTCGenerator:
         rb_cfg = config.get("tc_generation", {}).get("rule_based", {})
         self.enabled_rules: set[str] = set(
             rb_cfg.get("include", ["positive", "missing_required",
-                                   "wrong_type", "boundary", "invalid_enum"])
+                                   "wrong_type", "boundary", "invalid_enum", "semantic_probe"])
         )
         # 서버 에러 응답 방식 (standard: HTTP 400/422 | qfe: HTTP 200 + success=false)
         self.error_mode: str = config.get("server", {}).get("error_response_mode", "standard")
@@ -145,6 +181,9 @@ class RuleBasedTCGenerator:
 
         if "invalid_enum" in self.enabled_rules:
             blocks.extend(self._invalid_enum(op_id, method, path, params, req_body))
+
+        if "semantic_probe" in self.enabled_rules:
+            blocks.extend(self._semantic_probe(op_id, method, path, params, req_body))
 
         return "\n\n\n".join(b for b in blocks if b)
 
@@ -302,11 +341,11 @@ class RuleBasedTCGenerator:
         success_statuses: list[int],
     ) -> str:
         path_params = {
-            p["name"]: _GOOD.get(p["schema"].get("type", "string"), "test")
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
             for p in params if p["in"] == "path"
         }
         query_params = {
-            p["name"]: _GOOD.get(p["schema"].get("type", "string"), "test")
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
             for p in params if p["in"] == "query" and p.get("required")
         }
         body = self._build_valid_body(req_body)
@@ -333,18 +372,18 @@ class RuleBasedTCGenerator:
     ) -> list[str]:
         blocks: list[str] = []
 
-        # Required path/query params
+        # Required query params only (path params cannot really be omitted from URL construction)
         required_params = [p for p in params if p.get("required") and p["in"] != "path"]
-        for p in required_params:
-            fname = f"test_{op_id}_missing_{_safe_name(p['name'])}"
+        for target_param in required_params:
+            fname = f"test_{op_id}_missing_{_safe_name(target_param['name'])}"
             path_params = {
-                pp["name"]: _GOOD.get(pp["schema"].get("type", "string"), "test")
-                for pp in params if pp["in"] == "path"
+                p["name"]: self._good_value(p["name"], p.get("schema", {}))
+                for p in params if p["in"] == "path"
             }
             query_params = {
-                pp["name"]: _GOOD.get(pp["schema"].get("type", "string"), "test")
-                for pp in params
-                if pp["in"] == "query" and pp.get("required") and pp["name"] != p["name"]
+                p["name"]: self._good_value(p["name"], p.get("schema", {}))
+                for p in params
+                if p["in"] == "query" and p.get("required") and p["name"] != target_param["name"]
             }
             call = _render_call(
                 method,
@@ -357,13 +396,13 @@ class RuleBasedTCGenerator:
             if self.error_mode == "qfe":
                 assertion = textwrap.dedent(f"""\
                     assert resp.status_code == 200, (
-                        f"[FAIL] missing param '{p['name']}' — unexpected HTTP status\\n"
+                        f"[FAIL] missing param '{target_param['name']}' — unexpected HTTP status\\n"
                         f"  Status : {{resp.status_code}}\\n"
                         f"  Body   : {{resp.text[:300]}}"
                     )
                     body = resp.json()
                     assert body.get("success") == False or body.get("error_code", 0) < 0, (
-                        f"[FAIL] missing param '{p['name']}' — expected error response\\n"
+                        f"[FAIL] missing param '{target_param['name']}' — expected error response\\n"
                         f"  success    : {{body.get('success')}}\\n"
                         f"  error_code : {{body.get('error_code')}}\\n"
                         f"  msg        : {{body.get('msg')}}\\n"
@@ -373,7 +412,7 @@ class RuleBasedTCGenerator:
             else:
                 assertion = textwrap.dedent(f"""\
                     assert resp.status_code in [400, 422], (
-                        f"[FAIL] missing param '{p['name']}' — expected 400/422\\n"
+                        f"[FAIL] missing param '{target_param['name']}' — expected 400/422\\n"
                         f"  Status : {{resp.status_code}}\\n"
                         f"  Body   : {{resp.text[:300]}}"
                     )
@@ -381,7 +420,7 @@ class RuleBasedTCGenerator:
 
             block = (
                 f"def {fname}(base_url):\n"
-                f"    \"\"\"[rule:missing_required] Omit required param '{p['name']}' → error response.\"\"\"\n"
+                f"    \"\"\"[rule:missing_required] Omit required param '{target_param['name']}' → error response.\"\"\"\n"
                 f"    resp = {call}\n"
                 f"{textwrap.indent(assertion, '    ')}\n"
             )
@@ -393,18 +432,22 @@ class RuleBasedTCGenerator:
             required_fields = body_schema.get("required", [])
             properties = body_schema.get("properties", {})
             path_params = {
-                p["name"]: _GOOD.get(p["schema"].get("type", "string"), "test")
+                p["name"]: self._good_value(p["name"], p.get("schema", {}))
                 for p in params if p["in"] == "path"
+            }
+            query_params = {
+                p["name"]: self._good_value(p["name"], p.get("schema", {}))
+                for p in params if p["in"] == "query" and p.get("required")
             }
 
             for field in required_fields:
                 fname = f"test_{op_id}_missing_body_{_safe_name(field)}"
                 partial_body = {
-                    k: _GOOD.get(v.get("type", "string"), "test")
+                    k: self._good_value(k, v)
                     for k, v in properties.items()
                     if k != field
                 }
-                call = _render_call(method, path, path_params, {}, partial_body)
+                call = _render_call(method, path, path_params, query_params, partial_body)
 
                 if self.error_mode == "qfe":
                     assertion = textwrap.dedent(f"""\
@@ -451,8 +494,12 @@ class RuleBasedTCGenerator:
     ) -> list[str]:
         blocks: list[str] = []
         path_params = {
-            p["name"]: _GOOD.get(p["schema"].get("type", "string"), "test")
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
             for p in params if p["in"] == "path"
+        }
+        query_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "query" and p.get("required")
         }
 
         for p in params:
@@ -464,10 +511,12 @@ class RuleBasedTCGenerator:
             fname = f"test_{op_id}_wrong_type_{_safe_name(p['name'])}"
             if p["in"] == "path":
                 bad_path_params = {**path_params, p["name"]: wrong}
-                call = _render_call(method, path, bad_path_params, {}, self._build_valid_body(req_body))
-            else:
-                query_with_bad = {p["name"]: wrong}
+                call = _render_call(method, path, bad_path_params, query_params, self._build_valid_body(req_body))
+            elif p["in"] == "query":
+                query_with_bad = {**query_params, p["name"]: wrong}
                 call = _render_call(method, path, path_params, query_with_bad, self._build_valid_body(req_body))
+            else:
+                continue
 
             if self.error_mode == "qfe":
                 assertion = textwrap.dedent(f"""\
@@ -514,7 +563,7 @@ class RuleBasedTCGenerator:
                 fname = f"test_{op_id}_wrong_type_body_{_safe_name(field)}"
                 valid_body = self._build_valid_body(req_body) or {}
                 bad_body = {**valid_body, field: wrong}
-                call = _render_call(method, path, path_params, {}, bad_body)
+                call = _render_call(method, path, path_params, query_params, bad_body)
 
                 if self.error_mode == "qfe":
                     assertion = textwrap.dedent(f"""\
@@ -560,8 +609,12 @@ class RuleBasedTCGenerator:
     ) -> list[str]:
         blocks: list[str] = []
         path_params = {
-            p["name"]: _GOOD.get(p["schema"].get("type", "string"), "test")
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
             for p in params if p["in"] == "path"
+        }
+        query_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "query" and p.get("required")
         }
 
         for p in params:
@@ -573,9 +626,12 @@ class RuleBasedTCGenerator:
                 fname = f"test_{op_id}_boundary_{_safe_name(p['name'])}_{probe}".replace("-", "neg")
                 if p["in"] == "path":
                     bad_path = {**path_params, p["name"]: probe}
-                    call = _render_call(method, path, bad_path, {}, None)
+                    call = _render_call(method, path, bad_path, query_params, None)
+                elif p["in"] == "query":
+                    bad_query = {**query_params, p["name"]: probe}
+                    call = _render_call(method, path, path_params, bad_query, None)
                 else:
-                    call = _render_call(method, path, path_params, {p["name"]: probe}, None)
+                    continue
 
                 blocks.append(textwrap.dedent(f"""\
                     def {fname}(base_url):
@@ -588,6 +644,7 @@ class RuleBasedTCGenerator:
 
         return blocks
 
+
     def _invalid_enum(
         self,
         op_id: str,
@@ -598,8 +655,12 @@ class RuleBasedTCGenerator:
     ) -> list[str]:
         blocks: list[str] = []
         path_params = {
-            p["name"]: _GOOD.get(p["schema"].get("type", "string"), "test")
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
             for p in params if p["in"] == "path"
+        }
+        query_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "query" and p.get("required")
         }
 
         for p in params:
@@ -612,9 +673,12 @@ class RuleBasedTCGenerator:
 
             if p["in"] == "path":
                 bad_path = {**path_params, p["name"]: invalid_val}
-                call = _render_call(method, path, bad_path, {}, self._build_valid_body(req_body))
+                call = _render_call(method, path, bad_path, query_params, self._build_valid_body(req_body))
+            elif p["in"] == "query":
+                bad_query = {**query_params, p["name"]: invalid_val}
+                call = _render_call(method, path, path_params, bad_query, self._build_valid_body(req_body))
             else:
-                call = _render_call(method, path, path_params, {p["name"]: invalid_val}, self._build_valid_body(req_body))
+                continue
 
             if self.error_mode == "qfe":
                 assertion = textwrap.dedent(f"""\
@@ -651,22 +715,37 @@ class RuleBasedTCGenerator:
 
         return blocks
 
-    # ── helpers ───────────────────────────────────────────────────────────────
+    # ── helpers ──────────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _build_valid_body(req_body: dict | None) -> dict | None:
+    def _build_valid_body(self, req_body: dict | None) -> dict | None:
+        """Build a minimal valid request body from the schema, using semantic tags."""
         if not req_body:
             return None
-        schema = req_body.get("schema", {})
+        schema = req_body.get("schema") or {}
         properties = schema.get("properties", {})
-        required = schema.get("required", list(properties.keys()))
-        return {
-            field: _GOOD.get(properties[field].get("type", "string"), "test")
-            for field in required
-            if field in properties
-        }
-    
-    def _semantic_cases(
+        if not properties:
+            return None
+        body = {field: self._good_value(field, fschema)
+                for field, fschema in properties.items()}
+        return body or None
+
+    def _good_value(self, name: str, schema: dict) -> Any:
+        """Pick a representative valid value. Prefers semantic_tag over raw type."""
+        tag = schema.get("semantic_tag", "")
+        val = _GOOD_BY_TAG.get(tag) if tag else None
+        if val is not None:
+            return val
+
+        ftype = schema.get("type", "string")
+        if ftype == "object":
+            props = schema.get("properties", {})
+            return {k: self._good_value(k, v) for k, v in props.items()} if props else {}
+        if ftype == "array":
+            items = schema.get("items", {})
+            return [self._good_value("item", items)] if items else []
+        return _GOOD.get(ftype, "test")
+
+    def _semantic_probe(
         self,
         op_id: str,
         method: str,
@@ -674,57 +753,59 @@ class RuleBasedTCGenerator:
         params: list[dict],
         req_body: dict | None,
     ) -> list[str]:
+        """Generate semantic-tag-specific edge-case tests for params and body fields."""
         blocks: list[str] = []
 
-        if not req_body:
-            return blocks
-
-        body_schema = req_body.get("schema", {})
-        properties = body_schema.get("properties", {})
-        path_params = {
-            p["name"]: _GOOD.get(p["schema"].get("type", "string"), "test")
+        base_path_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
             for p in params if p["in"] == "path"
         }
+        base_query_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "query" and p.get("required")
+        }
+        base_body = self._build_valid_body(req_body) or {}
 
-        valid_body = self._build_valid_body(req_body) or {}
-
-        for field, field_schema in properties.items():
-            tag = field_schema.get("semantic_tag")
-            if tag not in {"base64_image", "base64_template"}:
+        # 1) params
+        for p in params:
+            schema = p.get("schema", {})
+            tag = schema.get("semantic_tag", "")
+            probes = _SEMANTIC_PROBES.get(tag, [])
+            if not probes:
                 continue
 
-            semantic_probes = [
-                ("invalid_base64", "this_is_not_base64!!!"),
-                ("empty_string", ""),
-                ("whitespace_only", "   "),
-                ("bad_padding", "dGVzdA"),
-            ]
+            for probe_val, probe_label in probes:
+                fname = f"test_{op_id}_semantic_{_safe_name(p['name'])}_{probe_label}"
 
-            for suffix, probe in semantic_probes:
-                fname = f"test_{op_id}_semantic_{_safe_name(field)}_{suffix}"
-                bad_body = {**valid_body, field: probe}
-                call = _render_call(method, path, path_params, {}, bad_body)
+                if p["in"] == "path":
+                    bad_path = {**base_path_params, p["name"]: probe_val}
+                    call = _render_call(method, path, bad_path, base_query_params, base_body if base_body else None)
+                elif p["in"] == "query":
+                    bad_query = {**base_query_params, p["name"]: probe_val}
+                    call = _render_call(method, path, base_path_params, bad_query, base_body if base_body else None)
+                else:
+                    continue
 
                 if self.error_mode == "qfe":
                     assertion = textwrap.dedent(f"""\
-                        assert resp.status_code == 200, (
-                            f"[FAIL] semantic invalid {tag} for body field '{field}' — unexpected HTTP status\\n"
+                        assert resp.status_code < 500, (
+                            f"[FAIL] semantic:{probe_label} on param '{p['name']}' — server crashed\\n"
                             f"  Status : {{resp.status_code}}\\n"
                             f"  Body   : {{resp.text[:300]}}"
                         )
-                        body = resp.json()
-                        assert body.get("success") == False or body.get("error_code", 0) < 0, (
-                            f"[FAIL] semantic invalid {tag} for body field '{field}' — expected error response\\n"
-                            f"  success    : {{body.get('success')}}\\n"
-                            f"  error_code : {{body.get('error_code')}}\\n"
-                            f"  msg        : {{body.get('msg')}}\\n"
+                        body_json = resp.json()
+                        assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+                            f"[FAIL] semantic:{probe_label} on param '{p['name']}' — expected error response\\n"
+                            f"  success    : {{body_json.get('success')}}\\n"
+                            f"  error_code : {{body_json.get('error_code')}}\\n"
+                            f"  msg        : {{body_json.get('msg')}}\\n"
                             f"  Full body  : {{resp.text[:300]}}"
                         )
                     """)
                 else:
                     assertion = textwrap.dedent(f"""\
                         assert resp.status_code in [400, 422], (
-                            f"[FAIL] semantic invalid {tag} for body field '{field}' — expected 400/422\\n"
+                            f"[FAIL] semantic:{probe_label} on param '{p['name']}' — expected 400/422\\n"
                             f"  Status : {{resp.status_code}}\\n"
                             f"  Body   : {{resp.text[:300]}}"
                         )
@@ -732,7 +813,52 @@ class RuleBasedTCGenerator:
 
                 block = (
                     f"def {fname}(base_url):\n"
-                    f"    \"\"\"[rule:semantic] Invalid semantic value for '{field}' ({tag}) → error response.\"\"\"\n"
+                    f"    \"\"\"[rule:semantic_probe] param '{p['name']}' tag={tag} probe={probe_label}.\"\"\"\n"
+                    f"    resp = {call}\n"
+                    f"{textwrap.indent(assertion, '    ')}\n"
+                )
+                blocks.append(block)
+
+        # 2) body fields
+        schema = (req_body or {}).get("schema") or {}
+        properties = schema.get("properties", {})
+
+        for field, field_schema in properties.items():
+            tag = field_schema.get("semantic_tag", "")
+            probes = _SEMANTIC_PROBES.get(tag, [])
+            for probe_val, probe_label in probes:
+                fname = f"test_{op_id}_semantic_{_safe_name(field)}_{probe_label}"
+                bad_body = {**base_body, field: probe_val}
+                call = _render_call(method, path, base_path_params, base_query_params, bad_body)
+
+                if self.error_mode == "qfe":
+                    assertion = textwrap.dedent(f"""\
+                        assert resp.status_code < 500, (
+                            f"[FAIL] semantic:{probe_label} on '{field}' — server crashed\\n"
+                            f"  Status : {{resp.status_code}}\\n"
+                            f"  Body   : {{resp.text[:300]}}"
+                        )
+                        body_json = resp.json()
+                        assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+                            f"[FAIL] semantic:{probe_label} on '{field}' — expected error response\\n"
+                            f"  success    : {{body_json.get('success')}}\\n"
+                            f"  error_code : {{body_json.get('error_code')}}\\n"
+                            f"  msg        : {{body_json.get('msg')}}\\n"
+                            f"  Full body  : {{resp.text[:300]}}"
+                        )
+                    """)
+                else:
+                    assertion = textwrap.dedent(f"""\
+                        assert resp.status_code in [400, 422], (
+                            f"[FAIL] semantic:{probe_label} on '{field}' — expected 400/422\\n"
+                            f"  Status : {{resp.status_code}}\\n"
+                            f"  Body   : {{resp.text[:300]}}"
+                        )
+                    """)
+
+                block = (
+                    f"def {fname}(base_url):\n"
+                    f"    \"\"\"[rule:semantic_probe] '{field}' tag={tag} probe={probe_label}.\"\"\"\n"
                     f"    resp = {call}\n"
                     f"{textwrap.indent(assertion, '    ')}\n"
                 )

@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from typing import Any
+import requests
 
 
 # ─── Abstract base ─────────────────────────────────────────────────────────────
@@ -109,12 +110,41 @@ class OpenAIClient(BaseLLMClient):
         return (response.choices[0].message.content or "").strip()
 
 
+class OllamaClient(BaseLLMClient):
+    def __init__(self, model: str, max_tokens: int, api_key: str | None = None):
+        self._model = model
+        self._max_tokens = max_tokens
+        self._base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+
+        payload = {
+            "model": self._model,
+            "prompt": full_prompt,
+            "stream": False,
+            "options": {
+                "num_predict": self._max_tokens,
+            },
+        }
+
+        response = requests.post(
+            f"{self._base_url}/api/generate",
+            json=payload,
+            timeout=180,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        return data.get("response", "").strip()
+
 # ─── Factory ──────────────────────────────────────────────────────────────────
 
 _PROVIDERS: dict[str, type[BaseLLMClient]] = {
     "gemini": GeminiClient,
     "anthropic": AnthropicClient,
     "openai": OpenAIClient,
+    "ollama": OllamaClient,
 }
 
 
@@ -134,8 +164,16 @@ def create_llm_client(config: dict) -> BaseLLMClient:
     max_tokens = int(agent_cfg.get("max_tokens", 4096))
     key_env = agent_cfg.get("api_key_env", _default_key_env(provider))
 
+    # api_key = os.environ.get(key_env, "")
+    # if not api_key:
+    #     raise EnvironmentError(
+    #         f"API key env var '{key_env}' is not set.\n"
+    #         f"Run: set {key_env}=<your-key>  (Windows) "
+    #         f"or  export {key_env}=<your-key>  (Linux/macOS)"
+    #     )
     api_key = os.environ.get(key_env, "")
-    if not api_key:
+
+    if provider != "ollama" and not api_key:
         raise EnvironmentError(
             f"API key env var '{key_env}' is not set.\n"
             f"Run: set {key_env}=<your-key>  (Windows) "
@@ -158,4 +196,5 @@ def _default_key_env(provider: str) -> str:
         "gemini": "GEMINI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
-    }.get(provider, f"{provider.upper()}_API_KEY")
+                "ollama": "",
+    }.get(provider, "API_KEY")

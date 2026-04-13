@@ -11,3 +11,6 @@
 2. 서버가 죽었을 때 그 상황 기록 후 재실행하는 스크립트 제작
 3. sc_failure로 restart/run/reboot 를 통해 서비스 자동 재시작, 실패 시 특정 명령 실행, 서비스 상태 조회
 4. sc.exe 또는 서비스 설정을 통해 event log + file log 생성
+
+[유의사항]
+./qfe-api-server-no-license 폴더 아래는 절대 건들면 안 됨
