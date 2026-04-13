@@ -19,7 +19,7 @@
 #   - crash 시 로그 수집 후 Artifact 업로드
 #   - SCM이 서버를 재기동할 때까지 재시도 대기
 # ──────────────────────────────────────────────────────────────────────────────
-
+# -*- coding: utf-8 -*-
 name: AutoTC Pipeline
 
 on:
@@ -373,15 +373,18 @@ jobs:
         if: always()
         shell: powershell
         run: |
-          $pytestExit  = "${{ steps.pytest.outputs.exit_code }}"
+          # 이전 step의 결과 값 읽기
           $serverCrash = "${{ steps.post_health.outputs.server_up }}" -eq "false"
+          $pytestExit  = "${{ steps.pytest.outputs.exit_code }}"
+
+          Write-Host "[Result] serverCrash=$serverCrash, pytestExit=$pytestExit"
 
           if ($serverCrash) {
-            Write-Host "::error::서버가 테스트 중 크래시됐습니다. Crash 로그 아티팩트를 확인하세요."
+            Write-Host "::error::Server crashed during test run. Check crash log artifacts."
             exit 2
           }
-          if ($pytestExit -ne "0" -and $pytestExit -ne "") {
-            Write-Host "::error::pytest 실패 (exit=$pytestExit). 테스트 레포트를 확인하세요."
-            exit $pytestExit
+          if ($pytestExit -ne "0" -and $pytestExit -ne "" -and $pytestExit -ne $null) {
+            Write-Host "::error::pytest failed (exit=$pytestExit). Check uploaded test reports."
+            exit [int]$pytestExit
           }
-          Write-Host "[Result] 파이프라인 완료."
+          Write-Host "[Result] Pipeline completed successfully."                                                                                                                                               
