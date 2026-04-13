@@ -85,7 +85,7 @@ tc_generation:
   ai_augment:
     enabled: true
     max_extra_tc: 2                  # Ollama 8B 최적화
-    max_endpoints_to_augment: 1      # 최대 N개 엔드포인트만 AI 생성
+    #max_endpoints_to_augment: 1      # 최대 N개 엔드포인트만 AI 생성
 
 # ── Test execution ────────────────────────────────────────────────────────────
 runner:

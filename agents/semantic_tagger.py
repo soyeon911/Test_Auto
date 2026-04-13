@@ -300,7 +300,10 @@ class SemanticTagger:
             return "threshold_float"
         if ftype == "boolean":
             return "boolean_flag"
-
+        if ftype == "integer":
+            if any(x in n for x in ("mode", "operation", "type", "kind")):
+                return "enum_mode"
+            
         return "plain_string"
 
     # ─── cache helpers ─────────────────────────────────────────────────────────

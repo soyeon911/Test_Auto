@@ -1,0 +1,3568 @@
+[2026-04-13 06:17:26Z INFO HostContext] No proxy settings were found based on environmental variables (http_proxy/https_proxy/HTTP_PROXY/HTTPS_PROXY)
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'Credentials': 'C:\Users\sypark5\TestAgent\actions-runner\.credentials'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'Runner': 'C:\Users\sypark5\TestAgent\actions-runner\.runner'
+[2026-04-13 06:17:26Z INFO Worker] Version: 2.333.1
+[2026-04-13 06:17:26Z INFO Worker] Commit: 6792966801e8925346735b68c03bf9f347af4646
+[2026-04-13 06:17:26Z INFO Worker] Culture: ko-KR
+[2026-04-13 06:17:26Z INFO Worker] UI Culture: ko-KR
+[2026-04-13 06:17:26Z INFO Worker] Waiting to receive the job message from the channel.
+[2026-04-13 06:17:26Z INFO ProcessChannel] Receiving message of length 23182, with hash '7ccf1ef7cf69432d52754a2f2ecf2410ab6055438953441cfb1764c17b18570c'
+[2026-04-13 06:17:26Z INFO Worker] Message received.
+[2026-04-13 06:17:26Z INFO Worker] Job message:
+ {
+  "fileTable": [
+    ".github/workflows/auto-tc.yml"
+  ],
+  "mask": [
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    },
+    {
+      "type": "regex",
+      "value": "***"
+    }
+  ],
+  "steps": [
+    {
+      "type": "action",
+      "reference": {
+        "type": "repository",
+        "name": "actions/checkout",
+        "ref": "v4",
+        "repositoryType": "GitHub"
+      },
+      "displayNameToken": {
+        "type": 0,
+        "file": 1,
+        "line": 63,
+        "col": 15,
+        "lit": "Checkout"
+      },
+      "contextName": "__actions_checkout",
+      "inputs": {
+        "type": 2,
+        "file": 1,
+        "line": 66,
+        "col": 11,
+        "map": [
+          {
+            "key": {
+              "type": 0,
+              "file": 1,
+              "line": 66,
+              "col": 11,
+              "lit": "fetch-depth"
+            },
+            "value": {
+              "type": 0,
+              "file": 1,
+              "line": 66,
+              "col": 24,
+              "lit": "1"
+            }
+          }
+        ]
+      },
+      "condition": "success()",
+      "id": "51a35028-0f1c-4f84-9947-31a455c6d086",
+      "name": "__actions_checkout"
+    },
+    {
+      "type": "action",
+      "reference": {
+        "type": "script"
+      },
+      "displayNameToken": {
+        "type": 0,
+        "file": 1,
+        "line": 69,
+        "col": 15,
+        "lit": "Swagger 해시 계산"
+      },
+      "contextName": "hash",
+      "inputs": {
+        "type": 2,
+        "map": [
+          {
+            "key": "script",
+            "value": {
+              "type": 0,
+              "file": 1,
+              "line": 72,
+              "col": 14,
+              "lit": "$swaggerFiles = @()\nif (Test-Path \"input\") {\n  $swaggerFiles += Get-ChildItem -Path \"input\" -Include \"*.yaml\",\"*.yml\",\"*.json\" -Recurse\n}\nforeach ($extra in @(\"QFEapi.yaml\",\"QFEapi.json\")) {\n  if (Test-Path $extra) { $swaggerFiles += Get-Item $extra }\n}\n\nif ($swaggerFiles.Count -eq 0) {\n  Write-Error \"Swagger 파일을 찾을 수 없습니다.\"\n  exit 1\n}\n\n$hasher   = [System.Security.Cryptography.SHA256]::Create()\n$combined = \"\"\nforeach ($f in ($swaggerFiles | Sort-Object FullName)) {\n  $bytes = [System.IO.File]::ReadAllBytes($f.FullName)\n  $h     = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace(\"-\",\"\").ToLower()\n  $combined += \"$($f.Name):$h;\"\n  Write-Host \"[Hash] $($f.Name) → $h\"\n}\n$finalHash = [System.BitConverter]::ToString(\n  $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($combined))\n).Replace(\"-\",\"\").ToLower()\n\nWrite-Host \"[Hash] 최종 Swagger 해시: $finalHash\"\n\"swagger_hash=$finalHash\" | Out-File $env:GITHUB_OUTPUT -Append\n"
+            }
+          },
+          {
+            "key": "shell",
+            "value": {
+              "type": 0,
+              "file": 1,
+              "line": 71,
+              "col": 16,
+              "lit": "powershell"
+            }
+          }
+        ]
+      },
+      "condition": "success()",
+      "id": "1cf38d7d-5c0d-4111-8a7d-519049219c78",
+      "name": "hash"
+    },
+    {
+      "type": "action",
+      "reference": {
+        "type": "script"
+      },
+      "displayNameToken": {
+        "type": 0,
+        "file": 1,
+        "line": 102,
+        "col": 15,
+        "lit": "서버 버전 조회"
+      },
+      "contextName": "server_version",
+      "inputs": {
+        "type": 2,
+        "map": [
+          {
+            "key": "script",
+            "value": {
+              "type": 3,
+              "file": 1,
+              "line": 105,
+              "col": 14,
+              "expr": "format('$baseUrl = \"{0}\"\nif (\"{1}\" -ne \"\") {{ $baseUrl = \"{2}\" }}\nif (-not $baseUrl) {{ $baseUrl = \"http://192.168.150.162:8080\" }}\n\n$version = \"unknown\"\n$endpoints = @(\"/health\", \"/version\", \"/api/version\", \"/api/v1/version\", \"/api/v2/version\")\n\nforeach ($ep in $endpoints) {{\n  try {{\n    $resp = Invoke-RestMethod -Uri \"$baseUrl$ep\" -TimeoutSec 5 -ErrorAction Stop\n    # version / commit / build_hash 필드를 순서대로 탐색\n    $candidate = $null\n    if ($resp.version) {{ $candidate = $resp.version }}\n    elseif ($resp.commit) {{ $candidate = $resp.commit }}\n    elseif ($resp.build_hash) {{ $candidate = $resp.build_hash }}\n    elseif ($resp.hash) {{ $candidate = $resp.hash }}\n    if ($candidate) {{\n      $version = $candidate\n      Write-Host \"[Version] $ep → $version\"\n      break\n    }}\n    # 응답 자체가 문자열인 경우\n    if ($resp -is [string] -and $resp.Length -lt 100) {{\n      $version = $resp.Trim()\n      Write-Host \"[Version] $ep → $version\"\n      break\n    }}\n  }} catch {{\n    Write-Host \"[Version] $ep 접근 실패: $_\"\n  }}\n}}\n\nWrite-Host \"[Version] 최종 서버 버전: $version\"\n\"version=$version\" | Out-File $env:GITHUB_OUTPUT -Append\n', vars.SERVER_BASE_URL, inputs.base_url, inputs.base_url)"
+            }
+          },
+          {
+            "key": "shell",
+            "value": {
+              "type": 0,
+              "file": 1,
+              "line": 104,
+              "col": 16,
+              "lit": "powershell"
+            }
+          }
+        ]
+      },
+      "condition": "success()",
+      "id": "6c40a2c9-57b7-4010-a439-c8a108146e87",
+      "name": "server_version"
+    },
+    {
+      "type": "action",
+      "reference": {
+        "type": "script"
+      },
+      "displayNameToken": {
+        "type": 0,
+        "file": 1,
+        "line": 142,
+        "col": 15,
+        "lit": "이전 캐시와 비교"
+      },
+      "contextName": "compare",
+      "inputs": {
+        "type": 2,
+        "map": [
+          {
+            "key": "script",
+            "value": {
+              "type": 3,
+              "file": 1,
+              "line": 145,
+              "col": 14,
+              "expr": "format('$forceRun    = \"{0}\" -eq \"true\"\n$cacheFile   = \".cache\\last_run_state.txt\"\n$currentKey  = \"{1}::{2}\"\n\nWrite-Host \"[Compare] 현재 상태 키: $currentKey\"\n\nif ($forceRun) {{\n  Write-Host \"[Compare] 강제 실행 요청 → 실행\"\n  \"should_run=true\" | Out-File $env:GITHUB_OUTPUT -Append\n  exit 0\n}}\n\nif (-not (Test-Path $cacheFile)) {{\n  Write-Host \"[Compare] 캐시 없음 (최초 실행) → 실행\"\n  \"should_run=true\" | Out-File $env:GITHUB_OUTPUT -Append\n  exit 0\n}}\n\n$cachedKey = (Get-Content $cacheFile -Raw).Trim()\nWrite-Host \"[Compare] 캐시된 상태 키: $cachedKey\"\n\nif ($cachedKey -eq $currentKey) {{\n  Write-Host \"[Compare] 변경 없음 → 스킵\"\n  \"should_run=false\" | Out-File $env:GITHUB_OUTPUT -Append\n}} else {{\n  Write-Host \"[Compare] 변경 감지됨 → 실행\"\n  \"should_run=true\"  | Out-File $env:GITHUB_OUTPUT -Append\n}}\n', inputs.force_run, steps.hash.outputs.swagger_hash, steps.server_version.outputs.version)"
+            }
+          },
+          {
+            "key": "shell",
+            "value": {
+              "type": 0,
+              "file": 1,
+              "line": 144,
+              "col": 16,
+              "lit": "powershell"
+            }
+          }
+        ]
+      },
+      "condition": "success()",
+      "id": "e861654c-9fed-45d3-8fa3-71054a0d4303",
+      "name": "compare"
+    }
+  ],
+  "variables": {
+    "Actions.EnableHttpRedirects": {
+      "value": "true"
+    },
+    "DistributedTask.AddWarningToNode12Action": {
+      "value": "true"
+    },
+    "DistributedTask.AddWarningToNode16Action": {
+      "value": "true"
+    },
+    "DistributedTask.AllowRunnerContainerHooks": {
+      "value": "true"
+    },
+    "DistributedTask.DeprecateStepOutputCommands": {
+      "value": "true"
+    },
+    "DistributedTask.DetailUntarFailure": {
+      "value": "true"
+    },
+    "DistributedTask.EnableCompositeActions": {
+      "value": "true"
+    },
+    "DistributedTask.EnableJobServerQueueTelemetry": {
+      "value": "true"
+    },
+    "DistributedTask.EnhancedAnnotations": {
+      "value": "true"
+    },
+    "DistributedTask.ForceGithubJavascriptActionsToNode16": {
+      "value": "true"
+    },
+    "DistributedTask.ForceGithubJavascriptActionsToNode20": {
+      "value": "true"
+    },
+    "DistributedTask.LogTemplateErrorsAsDebugMessages": {
+      "value": "true"
+    },
+    "DistributedTask.MarkJobAsFailedOnWorkerCrash": {
+      "value": "true"
+    },
+    "DistributedTask.NewActionMetadata": {
+      "value": "true"
+    },
+    "DistributedTask.UploadStepSummary": {
+      "value": "true"
+    },
+    "DistributedTask.UseActionArchiveCache": {
+      "value": "true"
+    },
+    "DistributedTask.UseWhich2": {
+      "value": "true"
+    },
+    "RunService.FixEmbeddedIssues": {
+      "value": "true"
+    },
+    "actions.runner.requirenode24": {
+      "value": "false"
+    },
+    "actions.runner.usenode24bydefault": {
+      "value": "false"
+    },
+    "actions.runner.warnonnode20": {
+      "value": "true"
+    },
+    "actions_add_check_run_id_to_job_context": {
+      "value": "true"
+    },
+    "actions_batch_action_resolution": {
+      "value": "false"
+    },
+    "actions_container_action_runner_temp": {
+      "value": "true"
+    },
+    "actions_display_helpful_actions_download_errors": {
+      "value": "true"
+    },
+    "actions_runner_compare_workflow_parser": {
+      "value": "false"
+    },
+    "actions_runner_deprecate_linux_arm32": {
+      "value": "false"
+    },
+    "actions_runner_emit_composite_markers": {
+      "value": "false"
+    },
+    "actions_runner_kill_linux_arm32": {
+      "value": "false"
+    },
+    "actions_runner_node20_removal_date": {
+      "value": ""
+    },
+    "actions_runner_node24_default_date": {
+      "value": ""
+    },
+    "actions_service_container_command": {
+      "value": "true"
+    },
+    "actions_set_orchestration_id_env_for_actions": {
+      "value": "true"
+    },
+    "actions_skip_retry_complete_job_upon_known_errors": {
+      "value": "true"
+    },
+    "actions_snapshot_preflight_hosted_runner_check": {
+      "value": "false"
+    },
+    "actions_snapshot_preflight_image_gen_pool_check": {
+      "value": "false"
+    },
+    "actions_use_bearer_token_for_codeload": {
+      "value": "false"
+    },
+    "actions_uses_cache_service_v2": {
+      "value": "true"
+    },
+    "github_token": {
+      "value": "***",
+      "isSecret": true
+    },
+    "system.from_run_service": {
+      "value": "true"
+    },
+    "system.github.job": {
+      "value": "detect-changes"
+    },
+    "system.github.launch_endpoint": {
+      "value": "https://launch.actions.githubusercontent.com"
+    },
+    "system.github.results_endpoint": {
+      "value": "https://results-receiver.actions.githubusercontent.com/"
+    },
+    "system.github.results_upload_with_sdk": {
+      "value": "true"
+    },
+    "system.github.token": {
+      "value": "***",
+      "isSecret": true
+    },
+    "system.github.token.permissions": {
+      "value": "{\"Contents\":\"read\",\"Metadata\":\"read\",\"Packages\":\"read\"}"
+    },
+    "system.orchestrationId": {
+      "value": "1cf6f631-a9a0-4c6c-888e-eddf6aae6961.detect-changes.__default"
+    },
+    "system.phaseDisplayName": {
+      "value": "변경 감지 (Swagger Hash + Server Version)"
+    },
+    "system.runner.lowdiskspacethreshold": {
+      "value": "100"
+    },
+    "system.runnerEnvironment": {
+      "value": "self-hosted"
+    },
+    "system.runnerGroupName": {
+      "value": "Default"
+    }
+  },
+  "messageType": "RunnerJobRequest",
+  "plan": {
+    "scopeIdentifier": "00000000-0000-0000-0000-000000000000",
+    "planType": "actions",
+    "version": 0,
+    "planId": "1cf6f631-a9a0-4c6c-888e-eddf6aae6961",
+    "planGroup": null,
+    "artifactUri": null,
+    "artifactLocation": null,
+    "definition": null,
+    "owner": null
+  },
+  "timeline": {
+    "id": "1cf6f631-a9a0-4c6c-888e-eddf6aae6961",
+    "changeId": 0,
+    "location": null
+  },
+  "jobId": "f4f6a481-75b3-5ceb-86b9-3b6a1ebc8028",
+  "jobDisplayName": "변경 감지 (Swagger Hash + Server Version)",
+  "jobName": "__default",
+  "jobOutputs": {
+    "type": 2,
+    "file": 1,
+    "line": 58,
+    "col": 7,
+    "map": [
+      {
+        "key": {
+          "type": 0,
+          "file": 1,
+          "line": 58,
+          "col": 7,
+          "lit": "should_run"
+        },
+        "value": {
+          "type": 3,
+          "file": 1,
+          "line": 58,
+          "col": 19,
+          "expr": "steps.compare.outputs.should_run"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 1,
+          "line": 59,
+          "col": 7,
+          "lit": "swagger_hash"
+        },
+        "value": {
+          "type": 3,
+          "file": 1,
+          "line": 59,
+          "col": 21,
+          "expr": "steps.hash.outputs.swagger_hash"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 1,
+          "line": 60,
+          "col": 7,
+          "lit": "server_version"
+        },
+        "value": {
+          "type": 3,
+          "file": 1,
+          "line": 60,
+          "col": 23,
+          "expr": "steps.server_version.outputs.version"
+        }
+      }
+    ]
+  },
+  "requestId": 0,
+  "lockedUntil": "0001-01-01T00:00:00",
+  "resources": {
+    "endpoints": [
+      {
+        "data": {
+          "ServerId": "",
+          "ServerName": "",
+          "CacheServerUrl": "https://artifactcache.actions.githubusercontent.com/lI8n5nDzUfbmpWjBO3LE26zf2zbvPC72YRoR4mQIS0Xjs5Rnvh/",
+          "FeedStreamUrl": "wss://results-receiver.actions.githubusercontent.com/_ws/ingest.sock",
+          "ResultsServiceUrl": "https://results-receiver.actions.githubusercontent.com/",
+          "PipelinesServiceUrl": "https://pipelinesghubeus21.actions.githubusercontent.com/lI8n5nDzUfbmpWjBO3LE26zf2zbvPC72YRoR4mQIS0Xjs5Rnvh/",
+          "GenerateIdTokenUrl": "",
+          "ConnectivityChecks": "[\"https://broker.actions.githubusercontent.com/health\",\"https://token.actions.githubusercontent.com/ready\",\"https://run.actions.githubusercontent.com/health\"]"
+        },
+        "name": "SystemVssConnection",
+        "url": "https://run-actions-2-azure-eastus.actions.githubusercontent.com/208/",
+        "authorization": {
+          "parameters": {
+            "AccessToken": "***"
+          },
+          "scheme": "OAuth"
+        },
+        "isShared": false,
+        "isReady": true
+      }
+    ]
+  },
+  "contextData": {
+    "github": {
+      "t": 2,
+      "d": [
+        {
+          "k": "ref",
+          "v": "refs/heads/main"
+        },
+        {
+          "k": "sha",
+          "v": "6572ead1f687a1ce99962d77a5ad78c720cef2e3"
+        },
+        {
+          "k": "repository",
+          "v": "soyeon911/Test_Auto"
+        },
+        {
+          "k": "repository_owner",
+          "v": "soyeon911"
+        },
+        {
+          "k": "repository_owner_id",
+          "v": "163836036"
+        },
+        {
+          "k": "repositoryUrl",
+          "v": "git://github.com/soyeon911/Test_Auto.git"
+        },
+        {
+          "k": "run_id",
+          "v": "24328662194"
+        },
+        {
+          "k": "run_number",
+          "v": "18"
+        },
+        {
+          "k": "retention_days",
+          "v": "90"
+        },
+        {
+          "k": "run_attempt",
+          "v": "1"
+        },
+        {
+          "k": "artifact_cache_size_limit",
+          "v": "10"
+        },
+        {
+          "k": "repository_visibility",
+          "v": "private"
+        },
+        {
+          "k": "actor_id",
+          "v": "163836036"
+        },
+        {
+          "k": "actor",
+          "v": "soyeon911"
+        },
+        {
+          "k": "workflow",
+          "v": "AutoTC Pipeline"
+        },
+        {
+          "k": "head_ref",
+          "v": ""
+        },
+        {
+          "k": "base_ref",
+          "v": ""
+        },
+        {
+          "k": "event_name",
+          "v": "workflow_dispatch"
+        },
+        {
+          "k": "server_url",
+          "v": "https://github.com"
+        },
+        {
+          "k": "api_url",
+          "v": "https://api.github.com"
+        },
+        {
+          "k": "graphql_url",
+          "v": "https://api.github.com/graphql"
+        },
+        {
+          "k": "ref_name",
+          "v": "main"
+        },
+        {
+          "k": "ref_protected",
+          "v": false
+        },
+        {
+          "k": "ref_type",
+          "v": "branch"
+        },
+        {
+          "k": "secret_source",
+          "v": "Actions"
+        },
+        {
+          "k": "event",
+          "v": {
+            "t": 2,
+            "d": [
+              {
+                "k": "ref",
+                "v": "refs/heads/main"
+              },
+              {
+                "k": "workflow",
+                "v": ".github/workflows/auto-tc.yml"
+              },
+              {
+                "k": "inputs",
+                "v": {
+                  "t": 2,
+                  "d": [
+                    {
+                      "k": "force_run",
+                      "v": "false"
+                    }
+                  ]
+                }
+              },
+              {
+                "k": "repository",
+                "v": {
+                  "t": 2,
+                  "d": [
+                    {
+                      "k": "id",
+                      "v": 1204418284.0
+                    },
+                    {
+                      "k": "node_id",
+                      "v": "R_kgDOR8n27A"
+                    },
+                    {
+                      "k": "name",
+                      "v": "Test_Auto"
+                    },
+                    {
+                      "k": "full_name",
+                      "v": "soyeon911/Test_Auto"
+                    },
+                    {
+                      "k": "private",
+                      "v": true
+                    },
+                    {
+                      "k": "owner",
+                      "v": {
+                        "t": 2,
+                        "d": [
+                          {
+                            "k": "login",
+                            "v": "soyeon911"
+                          },
+                          {
+                            "k": "id",
+                            "v": 163836036.0
+                          },
+                          {
+                            "k": "node_id",
+                            "v": "U_kgDOCcPwhA"
+                          },
+                          {
+                            "k": "avatar_url",
+                            "v": "https://avatars.githubusercontent.com/u/163836036?v=4"
+                          },
+                          {
+                            "k": "gravatar_id",
+                            "v": ""
+                          },
+                          {
+                            "k": "url",
+                            "v": "https://api.github.com/users/soyeon911"
+                          },
+                          {
+                            "k": "html_url",
+                            "v": "https://github.com/soyeon911"
+                          },
+                          {
+                            "k": "followers_url",
+                            "v": "https://api.github.com/users/soyeon911/followers"
+                          },
+                          {
+                            "k": "following_url",
+                            "v": "https://api.github.com/users/soyeon911/following{/other_user}"
+                          },
+                          {
+                            "k": "gists_url",
+                            "v": "https://api.github.com/users/soyeon911/gists{/gist_id}"
+                          },
+                          {
+                            "k": "starred_url",
+                            "v": "https://api.github.com/users/soyeon911/starred{/owner}{/repo}"
+                          },
+                          {
+                            "k": "subscriptions_url",
+                            "v": "https://api.github.com/users/soyeon911/subscriptions"
+                          },
+                          {
+                            "k": "organizations_url",
+                            "v": "https://api.github.com/users/soyeon911/orgs"
+                          },
+                          {
+                            "k": "repos_url",
+                            "v": "https://api.github.com/users/soyeon911/repos"
+                          },
+                          {
+                            "k": "events_url",
+                            "v": "https://api.github.com/users/soyeon911/events{/privacy}"
+                          },
+                          {
+                            "k": "received_events_url",
+                            "v": "https://api.github.com/users/soyeon911/received_events"
+                          },
+                          {
+                            "k": "type",
+                            "v": "User"
+                          },
+                          {
+                            "k": "user_view_type",
+                            "v": "public"
+                          },
+                          {
+                            "k": "site_admin",
+                            "v": false
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "k": "html_url",
+                      "v": "https://github.com/soyeon911/Test_Auto"
+                    },
+                    {
+                      "k": "description",
+                      "v": null
+                    },
+                    {
+                      "k": "fork",
+                      "v": false
+                    },
+                    {
+                      "k": "url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto"
+                    },
+                    {
+                      "k": "forks_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/forks"
+                    },
+                    {
+                      "k": "keys_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/keys{/key_id}"
+                    },
+                    {
+                      "k": "collaborators_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/collaborators{/collaborator}"
+                    },
+                    {
+                      "k": "teams_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/teams"
+                    },
+                    {
+                      "k": "hooks_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/hooks"
+                    },
+                    {
+                      "k": "issue_events_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/issues/events{/number}"
+                    },
+                    {
+                      "k": "events_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/events"
+                    },
+                    {
+                      "k": "assignees_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/assignees{/user}"
+                    },
+                    {
+                      "k": "branches_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/branches{/branch}"
+                    },
+                    {
+                      "k": "tags_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/tags"
+                    },
+                    {
+                      "k": "blobs_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/git/blobs{/sha}"
+                    },
+                    {
+                      "k": "git_tags_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/git/tags{/sha}"
+                    },
+                    {
+                      "k": "git_refs_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/git/refs{/sha}"
+                    },
+                    {
+                      "k": "trees_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/git/trees{/sha}"
+                    },
+                    {
+                      "k": "statuses_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/statuses/{sha}"
+                    },
+                    {
+                      "k": "languages_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/languages"
+                    },
+                    {
+                      "k": "stargazers_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/stargazers"
+                    },
+                    {
+                      "k": "contributors_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/contributors"
+                    },
+                    {
+                      "k": "subscribers_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/subscribers"
+                    },
+                    {
+                      "k": "subscription_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/subscription"
+                    },
+                    {
+                      "k": "commits_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/commits{/sha}"
+                    },
+                    {
+                      "k": "git_commits_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/git/commits{/sha}"
+                    },
+                    {
+                      "k": "comments_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/comments{/number}"
+                    },
+                    {
+                      "k": "issue_comment_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/issues/comments{/number}"
+                    },
+                    {
+                      "k": "contents_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/contents/{+path}"
+                    },
+                    {
+                      "k": "compare_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/compare/{base}...{head}"
+                    },
+                    {
+                      "k": "merges_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/merges"
+                    },
+                    {
+                      "k": "archive_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/{archive_format}{/ref}"
+                    },
+                    {
+                      "k": "downloads_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/downloads"
+                    },
+                    {
+                      "k": "issues_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/issues{/number}"
+                    },
+                    {
+                      "k": "pulls_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/pulls{/number}"
+                    },
+                    {
+                      "k": "milestones_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/milestones{/number}"
+                    },
+                    {
+                      "k": "notifications_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/notifications{?since,all,participating}"
+                    },
+                    {
+                      "k": "labels_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/labels{/name}"
+                    },
+                    {
+                      "k": "releases_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/releases{/id}"
+                    },
+                    {
+                      "k": "deployments_url",
+                      "v": "https://api.github.com/repos/soyeon911/Test_Auto/deployments"
+                    },
+                    {
+                      "k": "created_at",
+                      "v": "2026-04-08T01:52:22Z"
+                    },
+                    {
+                      "k": "updated_at",
+                      "v": "2026-04-13T06:08:29Z"
+                    },
+                    {
+                      "k": "pushed_at",
+                      "v": "2026-04-13T06:08:21Z"
+                    },
+                    {
+                      "k": "git_url",
+                      "v": "git://github.com/soyeon911/Test_Auto.git"
+                    },
+                    {
+                      "k": "ssh_url",
+                      "v": "git@github.com:soyeon911/Test_Auto.git"
+                    },
+                    {
+                      "k": "clone_url",
+                      "v": "https://github.com/soyeon911/Test_Auto.git"
+                    },
+                    {
+                      "k": "svn_url",
+                      "v": "https://github.com/soyeon911/Test_Auto"
+                    },
+                    {
+                      "k": "homepage",
+                      "v": null
+                    },
+                    {
+                      "k": "size",
+                      "v": 73982.0
+                    },
+                    {
+                      "k": "stargazers_count",
+                      "v": 0.0
+                    },
+                    {
+                      "k": "watchers_count",
+                      "v": 0.0
+                    },
+                    {
+                      "k": "language",
+                      "v": "Python"
+                    },
+                    {
+                      "k": "has_issues",
+                      "v": true
+                    },
+                    {
+                      "k": "has_projects",
+                      "v": true
+                    },
+                    {
+                      "k": "has_downloads",
+                      "v": true
+                    },
+                    {
+                      "k": "has_wiki",
+                      "v": false
+                    },
+                    {
+                      "k": "has_pages",
+                      "v": false
+                    },
+                    {
+                      "k": "has_discussions",
+                      "v": false
+                    },
+                    {
+                      "k": "forks_count",
+                      "v": 0.0
+                    },
+                    {
+                      "k": "mirror_url",
+                      "v": null
+                    },
+                    {
+                      "k": "archived",
+                      "v": false
+                    },
+                    {
+                      "k": "disabled",
+                      "v": false
+                    },
+                    {
+                      "k": "open_issues_count",
+                      "v": 0.0
+                    },
+                    {
+                      "k": "license",
+                      "v": null
+                    },
+                    {
+                      "k": "allow_forking",
+                      "v": true
+                    },
+                    {
+                      "k": "is_template",
+                      "v": false
+                    },
+                    {
+                      "k": "web_commit_signoff_required",
+                      "v": false
+                    },
+                    {
+                      "k": "has_pull_requests",
+                      "v": true
+                    },
+                    {
+                      "k": "pull_request_creation_policy",
+                      "v": "all"
+                    },
+                    {
+                      "k": "topics",
+                      "v": {
+                        "t": 1
+                      }
+                    },
+                    {
+                      "k": "visibility",
+                      "v": "private"
+                    },
+                    {
+                      "k": "forks",
+                      "v": 0.0
+                    },
+                    {
+                      "k": "open_issues",
+                      "v": 0.0
+                    },
+                    {
+                      "k": "watchers",
+                      "v": 0.0
+                    },
+                    {
+                      "k": "default_branch",
+                      "v": "main"
+                    }
+                  ]
+                }
+              },
+              {
+                "k": "sender",
+                "v": {
+                  "t": 2,
+                  "d": [
+                    {
+                      "k": "login",
+                      "v": "soyeon911"
+                    },
+                    {
+                      "k": "id",
+                      "v": 163836036.0
+                    },
+                    {
+                      "k": "node_id",
+                      "v": "U_kgDOCcPwhA"
+                    },
+                    {
+                      "k": "avatar_url",
+                      "v": "https://avatars.githubusercontent.com/u/163836036?v=4"
+                    },
+                    {
+                      "k": "gravatar_id",
+                      "v": ""
+                    },
+                    {
+                      "k": "url",
+                      "v": "https://api.github.com/users/soyeon911"
+                    },
+                    {
+                      "k": "html_url",
+                      "v": "https://github.com/soyeon911"
+                    },
+                    {
+                      "k": "followers_url",
+                      "v": "https://api.github.com/users/soyeon911/followers"
+                    },
+                    {
+                      "k": "following_url",
+                      "v": "https://api.github.com/users/soyeon911/following{/other_user}"
+                    },
+                    {
+                      "k": "gists_url",
+                      "v": "https://api.github.com/users/soyeon911/gists{/gist_id}"
+                    },
+                    {
+                      "k": "starred_url",
+                      "v": "https://api.github.com/users/soyeon911/starred{/owner}{/repo}"
+                    },
+                    {
+                      "k": "subscriptions_url",
+                      "v": "https://api.github.com/users/soyeon911/subscriptions"
+                    },
+                    {
+                      "k": "organizations_url",
+                      "v": "https://api.github.com/users/soyeon911/orgs"
+                    },
+                    {
+                      "k": "repos_url",
+                      "v": "https://api.github.com/users/soyeon911/repos"
+                    },
+                    {
+                      "k": "events_url",
+                      "v": "https://api.github.com/users/soyeon911/events{/privacy}"
+                    },
+                    {
+                      "k": "received_events_url",
+                      "v": "https://api.github.com/users/soyeon911/received_events"
+                    },
+                    {
+                      "k": "type",
+                      "v": "User"
+                    },
+                    {
+                      "k": "user_view_type",
+                      "v": "public"
+                    },
+                    {
+                      "k": "site_admin",
+                      "v": false
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "k": "workflow_ref",
+          "v": "soyeon911/Test_Auto/.github/workflows/auto-tc.yml@refs/heads/main"
+        },
+        {
+          "k": "workflow_sha",
+          "v": "6572ead1f687a1ce99962d77a5ad78c720cef2e3"
+        },
+        {
+          "k": "repository_id",
+          "v": "1204418284"
+        },
+        {
+          "k": "triggering_actor",
+          "v": "soyeon911"
+        }
+      ]
+    },
+    "inputs": {
+      "t": 2,
+      "d": [
+        {
+          "k": "force_run",
+          "v": false
+        }
+      ]
+    },
+    "job": {
+      "t": 2,
+      "d": [
+        {
+          "k": "check_run_id",
+          "v": 71029289008.0
+        },
+        {
+          "k": "workflow_ref",
+          "v": "soyeon911/Test_Auto/.github/workflows/auto-tc.yml@refs/heads/main"
+        },
+        {
+          "k": "workflow_sha",
+          "v": "6572ead1f687a1ce99962d77a5ad78c720cef2e3"
+        },
+        {
+          "k": "workflow_repository",
+          "v": "soyeon911/Test_Auto"
+        },
+        {
+          "k": "workflow_file_path",
+          "v": ".github/workflows/auto-tc.yml"
+        }
+      ]
+    },
+    "matrix": null,
+    "needs": {
+      "t": 2
+    },
+    "strategy": {
+      "t": 2,
+      "d": [
+        {
+          "k": "fail-fast",
+          "v": true
+        },
+        {
+          "k": "job-index",
+          "v": 0.0
+        },
+        {
+          "k": "job-total",
+          "v": 1.0
+        },
+        {
+          "k": "max-parallel",
+          "v": 1.0
+        }
+      ]
+    },
+    "vars": {
+      "t": 2,
+      "d": [
+        {
+          "k": "SERVER_BASE_URL",
+          "v": "http://192.168.150.162:8080"
+        }
+      ]
+    }
+  },
+  "billingOwnerId": "U_kgDOCcPwhA"
+}
+[2026-04-13 06:17:26Z INFO JobRunner] Job ID f4f6a481-75b3-5ceb-86b9-3b6a1ebc8028
+[2026-04-13 06:17:26Z INFO ConfigurationStore] currentAssemblyLocation: C:\Users\sypark5\TestAgent\actions-runner\bin\Runner.Worker.dll
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO ConfigurationStore] binPath: C:\Users\sypark5\TestAgent\actions-runner\bin
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO ConfigurationStore] RootFolder: C:\Users\sypark5\TestAgent\actions-runner
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'Runner': 'C:\Users\sypark5\TestAgent\actions-runner\.runner'
+[2026-04-13 06:17:26Z INFO ConfigurationStore] ConfigFilePath: C:\Users\sypark5\TestAgent\actions-runner\.runner
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'MigratedRunner': 'C:\Users\sypark5\TestAgent\actions-runner\.runner_migrated'
+[2026-04-13 06:17:26Z INFO ConfigurationStore] MigratedConfigFilePath: C:\Users\sypark5\TestAgent\actions-runner\.runner_migrated
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'Credentials': 'C:\Users\sypark5\TestAgent\actions-runner\.credentials'
+[2026-04-13 06:17:26Z INFO ConfigurationStore] CredFilePath: C:\Users\sypark5\TestAgent\actions-runner\.credentials
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'MigratedCredentials': 'C:\Users\sypark5\TestAgent\actions-runner\.credentials_migrated'
+[2026-04-13 06:17:26Z INFO ConfigurationStore] MigratedCredFilePath: C:\Users\sypark5\TestAgent\actions-runner\.credentials_migrated
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'Service': 'C:\Users\sypark5\TestAgent\actions-runner\.service'
+[2026-04-13 06:17:26Z INFO ConfigurationStore] ServiceConfigFilePath: C:\Users\sypark5\TestAgent\actions-runner\.service
+[2026-04-13 06:17:26Z INFO ConfigurationStore] Read setting file: 395 chars
+[2026-04-13 06:17:26Z INFO JobRunner] Initializing launch client
+[2026-04-13 06:17:26Z INFO JobServerQueue] Initializing results client
+[2026-04-13 06:17:26Z INFO ResultServer] Creating websocket client ...wss://results-receiver.actions.githubusercontent.com/_ws/ingest.sock
+[2026-04-13 06:17:26Z INFO ResultServer] Attempting to start websocket client with delay 00:00:00.
+[2026-04-13 06:17:26Z INFO JobServerQueue] Start process web console line queue.
+[2026-04-13 06:17:26Z INFO JobServerQueue] Start process file upload queue.
+[2026-04-13 06:17:26Z INFO JobServerQueue] Start results file upload queue.
+[2026-04-13 06:17:26Z INFO JobServerQueue] Starting results-based upload queue...
+[2026-04-13 06:17:26Z INFO JobServerQueue] Start process timeline update queue.
+[2026-04-13 06:17:26Z INFO ExecutionContext] Initializing Job context
+[2026-04-13 06:17:26Z INFO ExecutionContext] Initialize GitHub context
+[2026-04-13 06:17:26Z INFO ExecutionContext] Initialize Env context
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:26Z INFO JobRunner] Starting the job execution context.
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO JobRunner] Validating directory permissions for: 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Tools': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_tool'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:26Z INFO JobRunner] Getting job extension.
+[2026-04-13 06:17:26Z INFO JobRunner] Initialize job. Getting all job steps.
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'Credentials': 'C:\Users\sypark5\TestAgent\actions-runner\.credentials'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known config file 'SetupInfo': 'C:\Users\sypark5\TestAgent\actions-runner\.setup_info'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO PipelineDirectoryManager] Loading tracking config if exists: C:\Users\sypark5\TestAgent\actions-runner\_work\_PipelineMapping\soyeon911/Test_Auto\PipelineFolder.json
+[2026-04-13 06:17:26Z INFO PipelineDirectoryManager] Updating job run properties.
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO JobExtension] Downloading actions
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:26Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:26Z INFO Worker] Listening for cancel message from the channel.
+[2026-04-13 06:17:26Z INFO Worker] Waiting for the job to complete or for a cancel message from the channel.
+[2026-04-13 06:17:27Z INFO ResultServer] Successfully started websocket client.
+[2026-04-13 06:17:27Z INFO JobServerQueue] Try to append 1 batches web console lines for record '4105f12a-b52f-42ef-adca-d8591a1a5aec', success rate: 1/1.
+[2026-04-13 06:17:27Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:27Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:27Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:27Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:27Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:27Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:27Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:27Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:27Z INFO ActionManager] Save archive 'https://api.github.com/repos/actions/checkout/zipball/34e114876b0b11c390a56381ad16ebd13914f8d5' into C:\Users\sypark5\TestAgent\actions-runner\_work\_actions\_temp_9eb5cb37-5bb9-4e98-82a3-a412bfa77699\22148e2b-41f2-4e1d-9ddf-115dea9e8d1b.zip.
+[2026-04-13 06:17:27Z INFO JobServerQueue] Job timeline record has been updated for the first time.
+[2026-04-13 06:17:27Z INFO JobServerQueue] Try to append 1 batches web console lines for record '4105f12a-b52f-42ef-adca-d8591a1a5aec', success rate: 1/1.
+[2026-04-13 06:17:28Z INFO ActionManager] Request URL: https://api.github.com/repos/actions/checkout/zipball/34e114876b0b11c390a56381ad16ebd13914f8d5 X-GitHub-Request-Id: FB61:32A674:2AEF1:24697A:69DC8A77 Http Status: OK
+[2026-04-13 06:17:29Z INFO ActionManager] Finished getting action repository.
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Load schema file with definitions: [
+  "null",
+  "boolean",
+  "number",
+  "string",
+  "sequence",
+  "mapping",
+  "any",
+  "action-root",
+  "inputs",
+  "input",
+  "outputs",
+  "output-definition",
+  "runs",
+  "container-runs",
+  "container-runs-args",
+  "container-runs-env",
+  "node-runs",
+  "plugin-runs",
+  "composite-runs",
+  "composite-steps",
+  "composite-step",
+  "run-step",
+  "uses-step",
+  "container-runs-context",
+  "output-value",
+  "input-default-context",
+  "non-empty-string",
+  "string-steps-context",
+  "boolean-steps-context",
+  "step-env",
+  "step-if",
+  "step-with"
+]
+[2026-04-13 06:17:29Z INFO ActionManifestManager] Load schema file with definitions: [
+  "null",
+  "boolean",
+  "number",
+  "string",
+  "sequence",
+  "mapping",
+  "any",
+  "action-root",
+  "inputs",
+  "input",
+  "outputs",
+  "output-definition",
+  "runs",
+  "container-runs",
+  "container-runs-args",
+  "container-runs-env",
+  "node-runs",
+  "plugin-runs",
+  "composite-runs",
+  "composite-steps",
+  "composite-step",
+  "run-step",
+  "uses-step",
+  "container-runs-context",
+  "output-value",
+  "input-default-context",
+  "non-empty-string",
+  "string-steps-context",
+  "boolean-steps-context",
+  "step-env",
+  "step-if",
+  "step-with"
+]
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Loaded action.yml file: {
+  "name": "Checkout",
+  "description": "Checkout a Git repository at a particular version",
+  "inputs": {
+    "type": 2,
+    "map": [
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 4,
+          "col": 3,
+          "lit": "repository"
+        },
+        "value": {
+          "type": 3,
+          "file": 2,
+          "line": 6,
+          "col": 14,
+          "expr": "github.repository"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 7,
+          "col": 3,
+          "lit": "ref"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 12,
+          "col": 3,
+          "lit": "token"
+        },
+        "value": {
+          "type": 3,
+          "file": 2,
+          "line": 24,
+          "col": 14,
+          "expr": "github.token"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 25,
+          "col": 3,
+          "lit": "ssh-key"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 37,
+          "col": 3,
+          "lit": "ssh-known-hosts"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 42,
+          "col": 3,
+          "lit": "ssh-strict"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 47,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 48,
+          "col": 3,
+          "lit": "ssh-user"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 51,
+          "col": 14,
+          "lit": "git"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 52,
+          "col": 3,
+          "lit": "persist-credentials"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 54,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 55,
+          "col": 3,
+          "lit": "path"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 57,
+          "col": 3,
+          "lit": "clean"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 59,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 60,
+          "col": 3,
+          "lit": "filter"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 64,
+          "col": 14,
+          "lit": ""
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 65,
+          "col": 3,
+          "lit": "sparse-checkout"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 69,
+          "col": 14,
+          "lit": ""
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 70,
+          "col": 3,
+          "lit": "sparse-checkout-cone-mode"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 73,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 74,
+          "col": 3,
+          "lit": "fetch-depth"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 76,
+          "col": 14,
+          "lit": "1"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 77,
+          "col": 3,
+          "lit": "fetch-tags"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 79,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 80,
+          "col": 3,
+          "lit": "show-progress"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 82,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 83,
+          "col": 3,
+          "lit": "lfs"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 85,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 86,
+          "col": 3,
+          "lit": "submodules"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 94,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 95,
+          "col": 3,
+          "lit": "set-safe-directory"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 97,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 98,
+          "col": 3,
+          "lit": "github-server-url"
+        },
+        "value": ""
+      }
+    ]
+  },
+  "execution": {
+    "executionType": "nodeJS",
+    "hasPre": false,
+    "hasPost": true,
+    "script": "dist/index.js",
+    "pre": null,
+    "post": "dist/index.js",
+    "nodeVersion": "node20",
+    "cleanupCondition": "always()",
+    "initCondition": "always()"
+  },
+  "deprecated": null
+}
+[2026-04-13 06:17:29Z INFO ActionManager] Action node.js file: dist/index.js, no more preparation.
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:29Z INFO ActionManager] Load action that reference repository from 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions\actions\checkout\v4'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Loaded action.yml file: {
+  "name": "Checkout",
+  "description": "Checkout a Git repository at a particular version",
+  "inputs": {
+    "type": 2,
+    "map": [
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 4,
+          "col": 3,
+          "lit": "repository"
+        },
+        "value": {
+          "type": 3,
+          "file": 2,
+          "line": 6,
+          "col": 14,
+          "expr": "github.repository"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 7,
+          "col": 3,
+          "lit": "ref"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 12,
+          "col": 3,
+          "lit": "token"
+        },
+        "value": {
+          "type": 3,
+          "file": 2,
+          "line": 24,
+          "col": 14,
+          "expr": "github.token"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 25,
+          "col": 3,
+          "lit": "ssh-key"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 37,
+          "col": 3,
+          "lit": "ssh-known-hosts"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 42,
+          "col": 3,
+          "lit": "ssh-strict"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 47,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 48,
+          "col": 3,
+          "lit": "ssh-user"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 51,
+          "col": 14,
+          "lit": "git"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 52,
+          "col": 3,
+          "lit": "persist-credentials"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 54,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 55,
+          "col": 3,
+          "lit": "path"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 57,
+          "col": 3,
+          "lit": "clean"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 59,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 60,
+          "col": 3,
+          "lit": "filter"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 64,
+          "col": 14,
+          "lit": ""
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 65,
+          "col": 3,
+          "lit": "sparse-checkout"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 69,
+          "col": 14,
+          "lit": ""
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 70,
+          "col": 3,
+          "lit": "sparse-checkout-cone-mode"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 73,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 74,
+          "col": 3,
+          "lit": "fetch-depth"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 76,
+          "col": 14,
+          "lit": "1"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 77,
+          "col": 3,
+          "lit": "fetch-tags"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 79,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 80,
+          "col": 3,
+          "lit": "show-progress"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 82,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 83,
+          "col": 3,
+          "lit": "lfs"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 85,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 86,
+          "col": 3,
+          "lit": "submodules"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 94,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 95,
+          "col": 3,
+          "lit": "set-safe-directory"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 97,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 98,
+          "col": 3,
+          "lit": "github-server-url"
+        },
+        "value": ""
+      }
+    ]
+  },
+  "execution": {
+    "executionType": "nodeJS",
+    "hasPre": false,
+    "hasPost": true,
+    "script": "dist/index.js",
+    "pre": null,
+    "post": "dist/index.js",
+    "nodeVersion": "node20",
+    "cleanupCondition": "always()",
+    "initCondition": "always()"
+  },
+  "deprecated": null
+}
+[2026-04-13 06:17:29Z INFO ActionManager] Action pre node.js file: N/A.
+[2026-04-13 06:17:29Z INFO ActionManager] Action node.js file: dist/index.js.
+[2026-04-13 06:17:29Z INFO ActionManager] Action post node.js file: dist/index.js.
+[2026-04-13 06:17:29Z INFO JobExtension] Adding .
+[2026-04-13 06:17:29Z INFO JobExtension] Adding .
+[2026-04-13 06:17:29Z INFO JobExtension] Adding .
+[2026-04-13 06:17:29Z INFO JobExtension] Adding .
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO JobExtension] Total accessible running process: 272.
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO JobExtension] Start checking server connectivity.
+[2026-04-13 06:17:29Z INFO JobExtension] Check server connectivity for https://broker.actions.githubusercontent.com/health.
+[2026-04-13 06:17:29Z INFO JobExtension] Check server connectivity for https://token.actions.githubusercontent.com/ready.
+[2026-04-13 06:17:29Z INFO JobExtension] Check server connectivity for https://run.actions.githubusercontent.com/health.
+[2026-04-13 06:17:29Z INFO JobExtension] Start checking service connectivity in background.
+[2026-04-13 06:17:29Z INFO ExecutionContext] Publish step telemetry for current step {
+  "action": "setup_job",
+  "type": "runner",
+  "stage": "Pre",
+  "stepId": "4105f12a-b52f-42ef-adca-d8591a1a5aec",
+  "result": "succeeded",
+  "errorMessages": [],
+  "executionTimeInSeconds": 3,
+  "startTime": "2026-04-13T06:17:26.677691Z",
+  "finishTime": "2026-04-13T06:17:29.3228526Z"
+}.
+[2026-04-13 06:17:29Z INFO JobRunner] Total job steps: 4.
+[2026-04-13 06:17:29Z INFO JobRunner] Run all job steps.
+[2026-04-13 06:17:29Z INFO StepsRunner] Processing step: DisplayName='Checkout'
+[2026-04-13 06:17:29Z INFO StepsRunner] Evaluating: success()
+[2026-04-13 06:17:29Z INFO StepsRunner] Result: true
+[2026-04-13 06:17:29Z INFO StepsRunner] Starting the step.
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO StepsRunner] Which2: 'chcp'
+[2026-04-13 06:17:29Z INFO StepsRunner] Location: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   File name: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Arguments: '65001'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Encoding web name:  ; code page: ''
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper] Process started with process id 21176, waiting for process exit.
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper] Finished process 21176 with exit code 0, and elapsed time 00:00:00.0418206.
+[2026-04-13 06:17:29Z INFO StepsRunner] Successfully returned to code page 65001 (UTF8)
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:29Z INFO ActionManager] Load action that reference repository from 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions\actions\checkout\v4'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Loaded action.yml file: {
+  "name": "Checkout",
+  "description": "Checkout a Git repository at a particular version",
+  "inputs": {
+    "type": 2,
+    "map": [
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 4,
+          "col": 3,
+          "lit": "repository"
+        },
+        "value": {
+          "type": 3,
+          "file": 2,
+          "line": 6,
+          "col": 14,
+          "expr": "github.repository"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 7,
+          "col": 3,
+          "lit": "ref"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 12,
+          "col": 3,
+          "lit": "token"
+        },
+        "value": {
+          "type": 3,
+          "file": 2,
+          "line": 24,
+          "col": 14,
+          "expr": "github.token"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 25,
+          "col": 3,
+          "lit": "ssh-key"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 37,
+          "col": 3,
+          "lit": "ssh-known-hosts"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 42,
+          "col": 3,
+          "lit": "ssh-strict"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 47,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 48,
+          "col": 3,
+          "lit": "ssh-user"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 51,
+          "col": 14,
+          "lit": "git"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 52,
+          "col": 3,
+          "lit": "persist-credentials"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 54,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 55,
+          "col": 3,
+          "lit": "path"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 57,
+          "col": 3,
+          "lit": "clean"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 59,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 60,
+          "col": 3,
+          "lit": "filter"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 64,
+          "col": 14,
+          "lit": ""
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 65,
+          "col": 3,
+          "lit": "sparse-checkout"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 69,
+          "col": 14,
+          "lit": ""
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 70,
+          "col": 3,
+          "lit": "sparse-checkout-cone-mode"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 73,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 74,
+          "col": 3,
+          "lit": "fetch-depth"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 76,
+          "col": 14,
+          "lit": "1"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 77,
+          "col": 3,
+          "lit": "fetch-tags"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 79,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 80,
+          "col": 3,
+          "lit": "show-progress"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 82,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 83,
+          "col": 3,
+          "lit": "lfs"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 85,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 86,
+          "col": 3,
+          "lit": "submodules"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 94,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 95,
+          "col": 3,
+          "lit": "set-safe-directory"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 97,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 98,
+          "col": 3,
+          "lit": "github-server-url"
+        },
+        "value": ""
+      }
+    ]
+  },
+  "execution": {
+    "executionType": "nodeJS",
+    "hasPre": false,
+    "hasPost": true,
+    "script": "dist/index.js",
+    "pre": null,
+    "post": "dist/index.js",
+    "nodeVersion": "node20",
+    "cleanupCondition": "always()",
+    "initCondition": "always()"
+  },
+  "deprecated": null
+}
+[2026-04-13 06:17:29Z INFO ActionManager] Action pre node.js file: N/A.
+[2026-04-13 06:17:29Z INFO ActionManager] Action node.js file: dist/index.js.
+[2026-04-13 06:17:29Z INFO ActionManager] Action post node.js file: dist/index.js.
+[2026-04-13 06:17:29Z INFO ExecutionContext] Reserve record order 6 to 10 for post job actions.
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:29Z INFO ExecutionContext] Write event payload to C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_github_workflow\event.json
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:29Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IFileCommandExtension'
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.AddPathFileCommand, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.SetEnvFileCommand, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.CreateStepSummaryCommand, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.SaveStateFileCommand, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.SetOutputFileCommand, Runner.Worker
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'repository': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 6,
+  "col": 14,
+  "lit": "soyeon911/Test_Auto"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'ref': default value evaluate result: ""
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'token': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 24,
+  "col": 14,
+  "lit": "***"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'ssh-key': default value evaluate result: ""
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'ssh-known-hosts': default value evaluate result: ""
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'ssh-strict': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 47,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'ssh-user': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 51,
+  "col": 14,
+  "lit": "git"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'persist-credentials': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 54,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'path': default value evaluate result: ""
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'clean': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 59,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'filter': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 64,
+  "col": 14,
+  "lit": ""
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'sparse-checkout': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 69,
+  "col": 14,
+  "lit": ""
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'sparse-checkout-cone-mode': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 73,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'fetch-tags': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 79,
+  "col": 14,
+  "lit": "false"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'show-progress': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 82,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'lfs': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 85,
+  "col": 14,
+  "lit": "false"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'submodules': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 94,
+  "col": 14,
+  "lit": "false"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'set-safe-directory': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 97,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:29Z INFO ActionManifestManagerLegacy] Input 'github-server-url': default value evaluate result: ""
+[2026-04-13 06:17:29Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IActionCommandExtension'
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.InternalPluginSetRepoPathCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.SetEnvCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.SetOutputCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.SaveStateCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.AddPathCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.AddMaskCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.AddMatcherCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.RemoveMatcherCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.WarningCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.ErrorCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.NoticeCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.DebugCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.GroupCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.EndGroupCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ExtensionManager] Creating instance: GitHub.Runner.Worker.EchoCommandExtension, Runner.Worker
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command internal-set-repo-path
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command set-env
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command set-output
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command save-state
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command add-path
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command add-mask
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command add-matcher
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command remove-matcher
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command warning
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command error
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command notice
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command debug
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command group
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command endgroup
+[2026-04-13 06:17:29Z INFO ActionCommandManager] Register action command extension for command echo
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:29Z INFO HostContext] Well known directory 'Externals': 'C:\Users\sypark5\TestAgent\actions-runner\externals'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   File name: 'C:\Users\sypark5\TestAgent\actions-runner\externals\node20\bin\node.exe'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Arguments: '"C:\Users\sypark5\TestAgent\actions-runner\_work\_actions\actions\checkout\v4\dist/index.js"'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work\Test_Auto\Test_Auto'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Encoding web name: utf-8 ; code page: '65001'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:29Z INFO JobServerQueue] Try to append 1 batches web console lines for record '4105f12a-b52f-42ef-adca-d8591a1a5aec', success rate: 1/1.
+[2026-04-13 06:17:29Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:29Z INFO ProcessInvokerWrapper] Process started with process id 4424, waiting for process exit.
+[2026-04-13 06:17:29Z INFO AddMaskCommandExtension] Add new secret mask with length of 76
+[2026-04-13 06:17:29Z INFO JobServerQueue] Got a step log file to send to results service.
+[2026-04-13 06:17:29Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:29Z INFO JobServerQueue] Starting upload of step log file to results service ResultsLog, C:\Users\sypark5\TestAgent\actions-runner\_diag\blocks\1cf6f631-a9a0-4c6c-888e-eddf6aae6961_4105f12a-b52f-42ef-adca-d8591a1a5aec.1
+[2026-04-13 06:17:29Z INFO JobServerQueue] Try to upload 1 log files or attachments, success rate: 1/1.
+[2026-04-13 06:17:29Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:30Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:30Z INFO JobServerQueue] Tried to upload 1 file(s) to results, success rate: 1/1.
+[2026-04-13 06:17:30Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:31Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:31Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:32Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:37Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:37Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:38Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:38Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:39Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:39Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:39Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:39Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:44Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:44Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:45Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:46Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:46Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:46Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:46Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:47Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:47Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:47Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:47Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:48Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:48Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:48Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:48Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:49Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:49Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:49Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] Finished process 4424 with exit code 0, and elapsed time 00:00:20.4902230.
+[2026-04-13 06:17:49Z INFO CreateStepSummaryCommand] Step Summary file (C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_runner_file_commands\step_summary_a9cd1a75-835c-474f-b1b2-85a20fc6795a) is empty; skipping attachment upload
+[2026-04-13 06:17:49Z INFO StepsRunner] Step result: 
+[2026-04-13 06:17:49Z INFO ExecutionContext] Publish step telemetry for current step {
+  "action": "actions/checkout",
+  "ref": "v4",
+  "type": "node20",
+  "stage": "Main",
+  "stepId": "51a35028-0f1c-4f84-9947-31a455c6d086",
+  "stepContextName": "__actions_checkout",
+  "hasPreStep": false,
+  "hasPostStep": true,
+  "result": "succeeded",
+  "errorMessages": [
+    "no submodule mapping found in .gitmodules for path 'actions-runner/_work/Test_Auto/Test_Auto'",
+    "Unable to clean or reset the repository. The repository will be recreated instead."
+  ],
+  "executionTimeInSeconds": 21,
+  "startTime": "2026-04-13T06:17:29.330394Z",
+  "finishTime": "2026-04-13T06:17:49.9146179Z"
+}.
+[2026-04-13 06:17:49Z INFO StepsRunner] No need for updating job result with current step result 'Succeeded'.
+[2026-04-13 06:17:49Z INFO StepsRunner] Current state: job state = ''
+[2026-04-13 06:17:49Z INFO StepsRunner] Processing step: DisplayName='Swagger 해시 계산'
+[2026-04-13 06:17:49Z INFO StepsRunner] Evaluating: success()
+[2026-04-13 06:17:49Z INFO StepsRunner] Result: true
+[2026-04-13 06:17:49Z INFO StepsRunner] Starting the step.
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:49Z INFO StepsRunner] Which2: 'chcp'
+[2026-04-13 06:17:49Z INFO StepsRunner] Location: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   File name: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Arguments: '65001'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Encoding web name:  ; code page: ''
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] Process started with process id 11188, waiting for process exit.
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] Finished process 11188 with exit code 0, and elapsed time 00:00:00.0088481.
+[2026-04-13 06:17:49Z INFO StepsRunner] Successfully returned to code page 65001 (UTF8)
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:49Z INFO ExecutionContext] Write event payload to C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_github_workflow\event.json
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:49Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IFileCommandExtension'
+[2026-04-13 06:17:49Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IActionCommandExtension'
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command internal-set-repo-path
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command set-env
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command set-output
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command save-state
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command add-path
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command add-mask
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command add-matcher
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command remove-matcher
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command warning
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command error
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command notice
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command debug
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command group
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command endgroup
+[2026-04-13 06:17:49Z INFO ActionCommandManager] Register action command extension for command echo
+[2026-04-13 06:17:49Z INFO ScriptHandler] Which2: 'powershell'
+[2026-04-13 06:17:49Z INFO ScriptHandler] Location: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:49Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:49Z INFO ScriptHandler] Which2: 'powershell'
+[2026-04-13 06:17:49Z INFO ScriptHandler] Location: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   File name: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Arguments: '-command ". 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\910e81cb-3449-43f3-95cc-8fae96ce647f.ps1'"'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work\Test_Auto\Test_Auto'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Encoding web name:  ; code page: ''
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:49Z INFO ProcessInvokerWrapper] Process started with process id 2664, waiting for process exit.
+[2026-04-13 06:17:49Z INFO JobServerQueue] Got a step log file to send to results service.
+[2026-04-13 06:17:49Z INFO JobServerQueue] Starting upload of step log file to results service ResultsLog, C:\Users\sypark5\TestAgent\actions-runner\_diag\blocks\1cf6f631-a9a0-4c6c-888e-eddf6aae6961_51a35028-0f1c-4f84-9947-31a455c6d086.1
+[2026-04-13 06:17:50Z INFO JobServerQueue] Try to append 1 batches web console lines for record '51a35028-0f1c-4f84-9947-31a455c6d086', success rate: 1/1.
+[2026-04-13 06:17:50Z INFO JobServerQueue] Try to append 1 batches web console lines for record '1cf38d7d-5c0d-4111-8a7d-519049219c78', success rate: 1/1.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Finished process 2664 with exit code 0, and elapsed time 00:00:00.2766071.
+[2026-04-13 06:17:50Z INFO CreateStepSummaryCommand] Step Summary file (C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_runner_file_commands\step_summary_fc7fa262-16d2-4948-bd1c-0fd189b9d500) is empty; skipping attachment upload
+[2026-04-13 06:17:50Z INFO StepsRunner] Step result: 
+[2026-04-13 06:17:50Z INFO ExecutionContext] Publish step telemetry for current step {
+  "action": "powershell",
+  "type": "run",
+  "stage": "Main",
+  "stepId": "1cf38d7d-5c0d-4111-8a7d-519049219c78",
+  "stepContextName": "hash",
+  "result": "succeeded",
+  "errorMessages": [],
+  "executionTimeInSeconds": 1,
+  "startTime": "2026-04-13T06:17:49.9163732Z",
+  "finishTime": "2026-04-13T06:17:50.2321467Z"
+}.
+[2026-04-13 06:17:50Z INFO StepsRunner] No need for updating job result with current step result 'Succeeded'.
+[2026-04-13 06:17:50Z INFO StepsRunner] Current state: job state = ''
+[2026-04-13 06:17:50Z INFO StepsRunner] Processing step: DisplayName='서버 버전 조회'
+[2026-04-13 06:17:50Z INFO StepsRunner] Evaluating: success()
+[2026-04-13 06:17:50Z INFO StepsRunner] Result: true
+[2026-04-13 06:17:50Z INFO StepsRunner] Starting the step.
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO StepsRunner] Which2: 'chcp'
+[2026-04-13 06:17:50Z INFO StepsRunner] Location: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   File name: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Arguments: '65001'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Encoding web name:  ; code page: ''
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Process started with process id 13048, waiting for process exit.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Finished process 13048 with exit code 0, and elapsed time 00:00:00.0094612.
+[2026-04-13 06:17:50Z INFO StepsRunner] Successfully returned to code page 65001 (UTF8)
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:50Z INFO ExecutionContext] Write event payload to C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_github_workflow\event.json
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:50Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IFileCommandExtension'
+[2026-04-13 06:17:50Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IActionCommandExtension'
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command internal-set-repo-path
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command set-env
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command set-output
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command save-state
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-path
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-mask
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-matcher
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command remove-matcher
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command warning
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command error
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command notice
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command debug
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command group
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command endgroup
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command echo
+[2026-04-13 06:17:50Z INFO ScriptHandler] Which2: 'powershell'
+[2026-04-13 06:17:50Z INFO ScriptHandler] Location: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:50Z INFO ScriptHandler] Which2: 'powershell'
+[2026-04-13 06:17:50Z INFO ScriptHandler] Location: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   File name: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Arguments: '-command ". 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\653adca7-fd1d-493a-9f91-a7c25c03174f.ps1'"'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work\Test_Auto\Test_Auto'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Encoding web name:  ; code page: ''
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:50Z INFO JobServerQueue] Try to append 1 batches web console lines for record '1cf38d7d-5c0d-4111-8a7d-519049219c78', success rate: 1/1.
+[2026-04-13 06:17:50Z INFO JobServerQueue] Try to append 1 batches web console lines for record '6c40a2c9-57b7-4010-a439-c8a108146e87', success rate: 1/1.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Process started with process id 12448, waiting for process exit.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Finished process 12448 with exit code 0, and elapsed time 00:00:00.3446073.
+[2026-04-13 06:17:50Z INFO CreateStepSummaryCommand] Step Summary file (C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_runner_file_commands\step_summary_615d33d9-5e32-47cf-afcc-097392e40e97) is empty; skipping attachment upload
+[2026-04-13 06:17:50Z INFO StepsRunner] Step result: 
+[2026-04-13 06:17:50Z INFO ExecutionContext] Publish step telemetry for current step {
+  "action": "powershell",
+  "type": "run",
+  "stage": "Main",
+  "stepId": "6c40a2c9-57b7-4010-a439-c8a108146e87",
+  "stepContextName": "server_version",
+  "result": "succeeded",
+  "errorMessages": [],
+  "executionTimeInSeconds": 1,
+  "startTime": "2026-04-13T06:17:50.233437Z",
+  "finishTime": "2026-04-13T06:17:50.6047837Z"
+}.
+[2026-04-13 06:17:50Z INFO StepsRunner] No need for updating job result with current step result 'Succeeded'.
+[2026-04-13 06:17:50Z INFO StepsRunner] Current state: job state = ''
+[2026-04-13 06:17:50Z INFO StepsRunner] Processing step: DisplayName='이전 캐시와 비교'
+[2026-04-13 06:17:50Z INFO StepsRunner] Evaluating: success()
+[2026-04-13 06:17:50Z INFO StepsRunner] Result: true
+[2026-04-13 06:17:50Z INFO StepsRunner] Starting the step.
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO StepsRunner] Which2: 'chcp'
+[2026-04-13 06:17:50Z INFO StepsRunner] Location: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   File name: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Arguments: '65001'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Encoding web name:  ; code page: ''
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Process started with process id 12440, waiting for process exit.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Finished process 12440 with exit code 0, and elapsed time 00:00:00.0117553.
+[2026-04-13 06:17:50Z INFO StepsRunner] Successfully returned to code page 65001 (UTF8)
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:50Z INFO ExecutionContext] Write event payload to C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_github_workflow\event.json
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:50Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IFileCommandExtension'
+[2026-04-13 06:17:50Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IActionCommandExtension'
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command internal-set-repo-path
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command set-env
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command set-output
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command save-state
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-path
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-mask
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-matcher
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command remove-matcher
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command warning
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command error
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command notice
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command debug
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command group
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command endgroup
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command echo
+[2026-04-13 06:17:50Z INFO ScriptHandler] Which2: 'powershell'
+[2026-04-13 06:17:50Z INFO ScriptHandler] Location: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:50Z INFO ScriptHandler] Which2: 'powershell'
+[2026-04-13 06:17:50Z INFO ScriptHandler] Location: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   File name: 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.EXE'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Arguments: '-command ". 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\683ae5ac-51ae-4231-89fe-ea60d8182f30.ps1'"'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work\Test_Auto\Test_Auto'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Encoding web name:  ; code page: ''
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Process started with process id 10332, waiting for process exit.
+[2026-04-13 06:17:50Z INFO JobServerQueue] Try to append 1 batches web console lines for record '6c40a2c9-57b7-4010-a439-c8a108146e87', success rate: 1/1.
+[2026-04-13 06:17:50Z INFO JobServerQueue] Try to append 1 batches web console lines for record 'e861654c-9fed-45d3-8fa3-71054a0d4303', success rate: 1/1.
+[2026-04-13 06:17:50Z INFO JobServerQueue] Tried to upload 1 file(s) to results, success rate: 1/1.
+[2026-04-13 06:17:50Z INFO JobServerQueue] Try to upload 3 log files or attachments, success rate: 3/3.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Finished process 10332 with exit code 0, and elapsed time 00:00:00.2536246.
+[2026-04-13 06:17:50Z INFO CreateStepSummaryCommand] Step Summary file (C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_runner_file_commands\step_summary_8de5f6c5-7a84-45fb-a51f-c05100a6f936) is empty; skipping attachment upload
+[2026-04-13 06:17:50Z INFO StepsRunner] Step result: 
+[2026-04-13 06:17:50Z INFO ExecutionContext] Publish step telemetry for current step {
+  "action": "powershell",
+  "type": "run",
+  "stage": "Main",
+  "stepId": "e861654c-9fed-45d3-8fa3-71054a0d4303",
+  "stepContextName": "compare",
+  "result": "succeeded",
+  "errorMessages": [],
+  "executionTimeInSeconds": 1,
+  "startTime": "2026-04-13T06:17:50.6064278Z",
+  "finishTime": "2026-04-13T06:17:50.8913667Z"
+}.
+[2026-04-13 06:17:50Z INFO StepsRunner] No need for updating job result with current step result 'Succeeded'.
+[2026-04-13 06:17:50Z INFO StepsRunner] Current state: job state = ''
+[2026-04-13 06:17:50Z INFO StepsRunner] Processing step: DisplayName='Post Checkout'
+[2026-04-13 06:17:50Z INFO StepsRunner] Evaluating: always()
+[2026-04-13 06:17:50Z INFO StepsRunner] Result: true
+[2026-04-13 06:17:50Z INFO StepsRunner] Starting the step.
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO StepsRunner] Which2: 'chcp'
+[2026-04-13 06:17:50Z INFO StepsRunner] Location: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   File name: 'C:\WINDOWS\system32\chcp.COM'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Arguments: '65001'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Encoding web name:  ; code page: ''
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Process started with process id 8372, waiting for process exit.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Finished process 8372 with exit code 0, and elapsed time 00:00:00.0099307.
+[2026-04-13 06:17:50Z INFO StepsRunner] Successfully returned to code page 65001 (UTF8)
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:50Z INFO ActionManager] Load action that reference repository from 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions\actions\checkout\v4'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Actions': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_actions'
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Loaded action.yml file: {
+  "name": "Checkout",
+  "description": "Checkout a Git repository at a particular version",
+  "inputs": {
+    "type": 2,
+    "map": [
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 4,
+          "col": 3,
+          "lit": "repository"
+        },
+        "value": {
+          "type": 3,
+          "file": 2,
+          "line": 6,
+          "col": 14,
+          "expr": "github.repository"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 7,
+          "col": 3,
+          "lit": "ref"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 12,
+          "col": 3,
+          "lit": "token"
+        },
+        "value": {
+          "type": 3,
+          "file": 2,
+          "line": 24,
+          "col": 14,
+          "expr": "github.token"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 25,
+          "col": 3,
+          "lit": "ssh-key"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 37,
+          "col": 3,
+          "lit": "ssh-known-hosts"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 42,
+          "col": 3,
+          "lit": "ssh-strict"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 47,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 48,
+          "col": 3,
+          "lit": "ssh-user"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 51,
+          "col": 14,
+          "lit": "git"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 52,
+          "col": 3,
+          "lit": "persist-credentials"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 54,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 55,
+          "col": 3,
+          "lit": "path"
+        },
+        "value": ""
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 57,
+          "col": 3,
+          "lit": "clean"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 59,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 60,
+          "col": 3,
+          "lit": "filter"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 64,
+          "col": 14,
+          "lit": ""
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 65,
+          "col": 3,
+          "lit": "sparse-checkout"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 69,
+          "col": 14,
+          "lit": ""
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 70,
+          "col": 3,
+          "lit": "sparse-checkout-cone-mode"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 73,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 74,
+          "col": 3,
+          "lit": "fetch-depth"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 76,
+          "col": 14,
+          "lit": "1"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 77,
+          "col": 3,
+          "lit": "fetch-tags"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 79,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 80,
+          "col": 3,
+          "lit": "show-progress"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 82,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 83,
+          "col": 3,
+          "lit": "lfs"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 85,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 86,
+          "col": 3,
+          "lit": "submodules"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 94,
+          "col": 14,
+          "lit": "false"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 95,
+          "col": 3,
+          "lit": "set-safe-directory"
+        },
+        "value": {
+          "type": 0,
+          "file": 2,
+          "line": 97,
+          "col": 14,
+          "lit": "true"
+        }
+      },
+      {
+        "key": {
+          "type": 0,
+          "file": 2,
+          "line": 98,
+          "col": 3,
+          "lit": "github-server-url"
+        },
+        "value": ""
+      }
+    ]
+  },
+  "execution": {
+    "executionType": "nodeJS",
+    "hasPre": false,
+    "hasPost": true,
+    "script": "dist/index.js",
+    "pre": null,
+    "post": "dist/index.js",
+    "nodeVersion": "node20",
+    "cleanupCondition": "always()",
+    "initCondition": "always()"
+  },
+  "deprecated": null
+}
+[2026-04-13 06:17:50Z INFO ActionManager] Action pre node.js file: N/A.
+[2026-04-13 06:17:50Z INFO ActionManager] Action node.js file: dist/index.js.
+[2026-04-13 06:17:50Z INFO ActionManager] Action post node.js file: dist/index.js.
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:50Z INFO ExecutionContext] Write event payload to C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_github_workflow\event.json
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Work': 'C:\Users\sypark5\TestAgent\actions-runner\_work'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Temp': 'C:\Users\sypark5\TestAgent\actions-runner\_work\_temp'
+[2026-04-13 06:17:50Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IFileCommandExtension'
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'repository': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 6,
+  "col": 14,
+  "lit": "soyeon911/Test_Auto"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'ref': default value evaluate result: ""
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'token': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 24,
+  "col": 14,
+  "lit": "***"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'ssh-key': default value evaluate result: ""
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'ssh-known-hosts': default value evaluate result: ""
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'ssh-strict': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 47,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'ssh-user': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 51,
+  "col": 14,
+  "lit": "git"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'persist-credentials': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 54,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'path': default value evaluate result: ""
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'clean': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 59,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'filter': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 64,
+  "col": 14,
+  "lit": ""
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'sparse-checkout': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 69,
+  "col": 14,
+  "lit": ""
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'sparse-checkout-cone-mode': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 73,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'fetch-tags': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 79,
+  "col": 14,
+  "lit": "false"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'show-progress': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 82,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'lfs': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 85,
+  "col": 14,
+  "lit": "false"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'submodules': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 94,
+  "col": 14,
+  "lit": "false"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'set-safe-directory': default value evaluate result: {
+  "type": 0,
+  "file": 2,
+  "line": 97,
+  "col": 14,
+  "lit": "true"
+}
+[2026-04-13 06:17:50Z INFO ActionManifestManagerLegacy] Input 'github-server-url': default value evaluate result: ""
+[2026-04-13 06:17:50Z INFO ExtensionManager] Getting extensions for interface: 'GitHub.Runner.Worker.IActionCommandExtension'
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command internal-set-repo-path
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command set-env
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command set-output
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command save-state
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-path
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-mask
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command add-matcher
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command remove-matcher
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command warning
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command error
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command notice
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command debug
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command group
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command endgroup
+[2026-04-13 06:17:50Z INFO ActionCommandManager] Register action command extension for command echo
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:50Z INFO HostContext] Well known directory 'Externals': 'C:\Users\sypark5\TestAgent\actions-runner\externals'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Starting process:
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   File name: 'C:\Users\sypark5\TestAgent\actions-runner\externals\node20\bin\node.exe'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Arguments: '"C:\Users\sypark5\TestAgent\actions-runner\_work\_actions\actions\checkout\v4\dist/index.js"'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Working directory: 'C:\Users\sypark5\TestAgent\actions-runner\_work\Test_Auto\Test_Auto'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Require exit code zero: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Encoding web name: utf-8 ; code page: '65001'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Force kill process on cancellation: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Redirected STDIN: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Persist current code page: 'True'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   Keep redirected STDIN open: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper]   High priority process: 'False'
+[2026-04-13 06:17:50Z INFO ProcessInvokerWrapper] Process started with process id 14064, waiting for process exit.
+[2026-04-13 06:17:51Z INFO JobServerQueue] Try to append 1 batches web console lines for record 'e861654c-9fed-45d3-8fa3-71054a0d4303', success rate: 1/1.
+[2026-04-13 06:17:51Z INFO JobServerQueue] Try to append 1 batches web console lines for record '185aff92-0b60-4c4a-8dde-b266959ccd14', success rate: 1/1.
+[2026-04-13 06:17:51Z INFO AddMaskCommandExtension] Add new secret mask with length of 32
+[2026-04-13 06:17:51Z INFO JobServerQueue] Try to append 1 batches web console lines for record '185aff92-0b60-4c4a-8dde-b266959ccd14', success rate: 1/1.
+[2026-04-13 06:17:51Z INFO JobServerQueue] Got a step log file to send to results service.
+[2026-04-13 06:17:51Z INFO JobServerQueue] Starting upload of step log file to results service ResultsLog, C:\Users\sypark5\TestAgent\actions-runner\_diag\blocks\1cf6f631-a9a0-4c6c-888e-eddf6aae6961_1cf38d7d-5c0d-4111-8a7d-519049219c78.1
+[2026-04-13 06:17:51Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:51Z INFO ProcessInvokerWrapper] STDOUT/STDERR stream read finished.
+[2026-04-13 06:17:51Z INFO ProcessInvokerWrapper] Finished process 14064 with exit code 0, and elapsed time 00:00:00.9479240.
+[2026-04-13 06:17:51Z INFO CreateStepSummaryCommand] Step Summary file (C:\Users\sypark5\TestAgent\actions-runner\_work\_temp\_runner_file_commands\step_summary_7cb73e69-eee4-4499-b707-3de3fc3d13d7) is empty; skipping attachment upload
+[2026-04-13 06:17:51Z INFO StepsRunner] Step result: 
+[2026-04-13 06:17:51Z INFO ExecutionContext] Publish step telemetry for current step {
+  "action": "actions/checkout",
+  "ref": "v4",
+  "type": "node20",
+  "stage": "Post",
+  "stepId": "185aff92-0b60-4c4a-8dde-b266959ccd14",
+  "result": "succeeded",
+  "errorMessages": [
+    "The process 'C:\\Program Files\\Git\\cmd\\git.exe' failed with exit code 128"
+  ],
+  "executionTimeInSeconds": 1,
+  "startTime": "2026-04-13T06:17:50.8921971Z",
+  "finishTime": "2026-04-13T06:17:51.859987Z"
+}.
+[2026-04-13 06:17:51Z INFO StepsRunner] No need for updating job result with current step result 'Succeeded'.
+[2026-04-13 06:17:51Z INFO StepsRunner] Current state: job state = ''
+[2026-04-13 06:17:51Z INFO JobRunner] Finalize job.
+[2026-04-13 06:17:51Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:51Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:51Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:51Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:51Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:51Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:51Z INFO JobExtension] Initialize Env context
+[2026-04-13 06:17:51Z INFO JobExtension] Initialize steps context
+[2026-04-13 06:17:51Z INFO JobExtension] Initialize Env context for evaluating job outputs
+[2026-04-13 06:17:51Z INFO JobExtension] Total accessible running process: 273.
+[2026-04-13 06:17:51Z INFO JobExtension] Inspecting process environment variables. PID: 16612 (chrome)
+[2026-04-13 06:17:51Z INFO JobServerQueue] Try to upload 2 log files or attachments, success rate: 2/2.
+[2026-04-13 06:17:51Z INFO JobExtension] Wait for all connectivity checks to finish.
+[2026-04-13 06:17:51Z INFO JobExtension] Connectivity check result: GitHub.Runner.Worker.JobExtension+CheckResult
+[2026-04-13 06:17:51Z INFO JobExtension] Connectivity check result: GitHub.Runner.Worker.JobExtension+CheckResult
+[2026-04-13 06:17:51Z INFO JobExtension] Connectivity check result: GitHub.Runner.Worker.JobExtension+CheckResult
+[2026-04-13 06:17:51Z INFO ExecutionContext] Publish step telemetry for current step {
+  "action": "complete_job",
+  "type": "runner",
+  "stage": "Post",
+  "stepId": "22829173-6031-4ac7-ae70-7285564b61dc",
+  "result": "succeeded",
+  "errorMessages": [
+    "Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@v4. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Node.js 20 will be removed from the runn"
+  ],
+  "executionTimeInSeconds": 1,
+  "startTime": "2026-04-13T06:17:51.8635708Z",
+  "finishTime": "2026-04-13T06:17:51.8863623Z"
+}.
+[2026-04-13 06:17:51Z INFO JobRunner] Job result after all job steps finish: Succeeded
+[2026-04-13 06:17:51Z INFO JobRunner] Completing the job execution context.
+[2026-04-13 06:17:51Z INFO JobRunner] Shutting down the job server queue.
+[2026-04-13 06:17:51Z INFO JobServerQueue] Fire signal to shutdown all queues.
+[2026-04-13 06:17:52Z INFO JobServerQueue] Got a step log file to send to results service.
+[2026-04-13 06:17:52Z INFO JobServerQueue] Starting upload of step log file to results service ResultsLog, C:\Users\sypark5\TestAgent\actions-runner\_diag\blocks\1cf6f631-a9a0-4c6c-888e-eddf6aae6961_6c40a2c9-57b7-4010-a439-c8a108146e87.1
+[2026-04-13 06:17:53Z INFO JobServerQueue] Got a step log file to send to results service.
+[2026-04-13 06:17:53Z INFO JobServerQueue] Starting upload of step log file to results service ResultsLog, C:\Users\sypark5\TestAgent\actions-runner\_diag\blocks\1cf6f631-a9a0-4c6c-888e-eddf6aae6961_e861654c-9fed-45d3-8fa3-71054a0d4303.1
+[2026-04-13 06:17:53Z INFO JobServerQueue] Tried to upload 3 file(s) to results, success rate: 3/3.
+[2026-04-13 06:17:54Z INFO JobServerQueue] All queue process task stopped.
+[2026-04-13 06:17:54Z INFO JobServerQueue] Try to append 1 batches web console lines for record '185aff92-0b60-4c4a-8dde-b266959ccd14', success rate: 1/1.
+[2026-04-13 06:17:54Z INFO JobServerQueue] Try to append 1 batches web console lines for record '22829173-6031-4ac7-ae70-7285564b61dc', success rate: 1/1.
+[2026-04-13 06:17:54Z INFO JobServerQueue] Web console line queue drained.
+[2026-04-13 06:17:54Z INFO JobServerQueue] Uploading 2 files in one shot.
+[2026-04-13 06:17:54Z INFO JobServerQueue] Try to upload 2 log files or attachments, success rate: 2/2.
+[2026-04-13 06:17:54Z INFO JobServerQueue] File upload queue drained.
+[2026-04-13 06:17:54Z INFO JobServerQueue] Starting results-based upload queue...
+[2026-04-13 06:17:54Z INFO JobServerQueue] Uploading 3 file(s) in one shot through results service.
+[2026-04-13 06:17:54Z INFO JobServerQueue] Got a step log file to send to results service.
+[2026-04-13 06:17:54Z INFO JobServerQueue] Starting upload of step log file to results service ResultsLog, C:\Users\sypark5\TestAgent\actions-runner\_diag\blocks\1cf6f631-a9a0-4c6c-888e-eddf6aae6961_185aff92-0b60-4c4a-8dde-b266959ccd14.1
+[2026-04-13 06:17:55Z INFO JobServerQueue] Got a step log file to send to results service.
+[2026-04-13 06:17:55Z INFO JobServerQueue] Starting upload of step log file to results service ResultsLog, C:\Users\sypark5\TestAgent\actions-runner\_diag\blocks\1cf6f631-a9a0-4c6c-888e-eddf6aae6961_22829173-6031-4ac7-ae70-7285564b61dc.1
+[2026-04-13 06:17:56Z INFO JobServerQueue] Got a job log file to send to results service.
+[2026-04-13 06:17:56Z INFO JobServerQueue] Starting upload of job log file to results service ResultsLog, C:\Users\sypark5\TestAgent\actions-runner\_diag\blocks\1cf6f631-a9a0-4c6c-888e-eddf6aae6961_f4f6a481-75b3-5ceb-86b9-3b6a1ebc8028.1
+[2026-04-13 06:17:56Z INFO JobServerQueue] Tried to upload 3 file(s) to results, success rate: 3/3.
+[2026-04-13 06:17:56Z INFO JobServerQueue] Results upload queue drained.
+[2026-04-13 06:17:56Z INFO JobServerQueue] Timeline update queue drained.
+[2026-04-13 06:17:56Z INFO JobServerQueue] Disposing job server ...
+[2026-04-13 06:17:56Z INFO JobServerQueue] Disposing results server ...
+[2026-04-13 06:17:56Z INFO JobServerQueue] All queue process tasks have been stopped, and all queues are drained.
+[2026-04-13 06:17:56Z INFO TempDirectoryManager] Cleaning runner temp folder: C:\Users\sypark5\TestAgent\actions-runner\_work\_temp
+[2026-04-13 06:17:56Z INFO HostContext] Well known directory 'Bin': 'C:\Users\sypark5\TestAgent\actions-runner\bin'
+[2026-04-13 06:17:56Z INFO HostContext] Well known directory 'Root': 'C:\Users\sypark5\TestAgent\actions-runner'
+[2026-04-13 06:17:56Z INFO HostContext] Well known directory 'Diag': 'C:\Users\sypark5\TestAgent\actions-runner\_diag'
+[2026-04-13 06:17:56Z INFO HostContext] Well known config file 'Telemetry': 'C:\Users\sypark5\TestAgent\actions-runner\_diag\.telemetry'
+[2026-04-13 06:17:56Z INFO JobRunner] Raising job completed against run service
+[2026-04-13 06:17:57Z INFO Worker] Job completed.
