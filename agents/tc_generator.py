@@ -214,6 +214,8 @@ class TCGeneratorAgent:
         self.rule_enabled: bool = rb_cfg.get("enabled", True)
         self.ai_enabled:   bool = ai_cfg.get("enabled", True)
         self.max_extra:    int  = int(ai_cfg.get("max_extra_tc", 3))
+        self.max_ai_endpoints: int = int(ai_cfg.get("max_endpoints_to_augment", 1))  # ⚠️ Quota 제한
+        self._ai_endpoints_count: int = 0  # AI 호출 카운터
 
         self._rule_gen = RuleBasedTCGenerator(config)
         self._llm: BaseLLMClient | None = None   # lazy-init
@@ -248,9 +250,14 @@ class TCGeneratorAgent:
             rule_code = self._rule_gen.generate(endpoint)
 
         # ── Layer 2: AI edge cases ──────────────────────────────
+        # ⚠️ Quota 제한: max_endpoints_to_augment 초과 시 AI 호출 스킵
         ai_code = ""
-        if self.ai_enabled:
+        if self.ai_enabled and self._ai_endpoints_count < self.max_ai_endpoints:
             ai_code = self._ai_generate(endpoint, rule_code)
+            self._ai_endpoints_count += 1
+            print(f"[TCAgent] AI augmentation: {self._ai_endpoints_count}/{self.max_ai_endpoints} endpoints")
+        elif self.ai_enabled and self._ai_endpoints_count >= self.max_ai_endpoints:
+            print(f"[TCAgent] AI quota limit reached ({self.max_ai_endpoints} endpoints). Skipping AI for {op_id}")
 
         # Save each layer to its own directory
         written: list[Path] = []
@@ -427,4 +434,4 @@ class TCGeneratorAgent:
                     m = re.search(r"# spec_hash\s*:\s*([a-f0-9]{64})", line)
                     if m:
                         fps.add(m.group(1))
-        return fps
+        return fps
