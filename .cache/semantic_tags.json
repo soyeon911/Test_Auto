@@ -13,5 +13,6 @@
   "threshold|number|||[]": "threshold_float",
   "max_face|integer|||[]": "integer_count",
   "user_id||||[]": "identifier",
-  "sub_id||||[]": "identifier"
+  "sub_id||||[]": "identifier",
+  "request||||[]": "plain_string"
 }

@@ -41,6 +41,7 @@ from typing import Any
 
 from .llm_client import BaseLLMClient, create_llm_client
 from .rule_based_generator import RuleBasedTCGenerator
+from .semantic_tagger import SemanticTagger
 
 
 # ─── AI prompts ───────────────────────────────────────────────────────────────
@@ -208,6 +209,7 @@ class TCGeneratorAgent:
         self.ai_dir   = Path(output_dirs.get("ai",   "./tests/generated/ai"))
         self.rule_dir.mkdir(parents=True, exist_ok=True)
         self.ai_dir.mkdir(parents=True, exist_ok=True)
+        self._semantic_tagger = SemanticTagger(config)
 
         rb_cfg = tc_cfg.get("rule_based", {})
         ai_cfg = tc_cfg.get("ai_augment", {})
@@ -236,6 +238,8 @@ class TCGeneratorAgent:
     # ─── internal ─────────────────────────────────────────────────────────────
 
     def _generate_one(self, endpoint: dict[str, Any]) -> list[Path]:
+        endpoint = self._semantic_tagger.tag_endpoint(endpoint)
+        
         op_id       = _safe_name(endpoint.get("operation_id", "unknown"))
         fingerprint = _endpoint_fingerprint(endpoint)
 

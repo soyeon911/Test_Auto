@@ -665,3 +665,77 @@ class RuleBasedTCGenerator:
             for field in required
             if field in properties
         }
+    
+    def _semantic_cases(
+        self,
+        op_id: str,
+        method: str,
+        path: str,
+        params: list[dict],
+        req_body: dict | None,
+    ) -> list[str]:
+        blocks: list[str] = []
+
+        if not req_body:
+            return blocks
+
+        body_schema = req_body.get("schema", {})
+        properties = body_schema.get("properties", {})
+        path_params = {
+            p["name"]: _GOOD.get(p["schema"].get("type", "string"), "test")
+            for p in params if p["in"] == "path"
+        }
+
+        valid_body = self._build_valid_body(req_body) or {}
+
+        for field, field_schema in properties.items():
+            tag = field_schema.get("semantic_tag")
+            if tag not in {"base64_image", "base64_template"}:
+                continue
+
+            semantic_probes = [
+                ("invalid_base64", "this_is_not_base64!!!"),
+                ("empty_string", ""),
+                ("whitespace_only", "   "),
+                ("bad_padding", "dGVzdA"),
+            ]
+
+            for suffix, probe in semantic_probes:
+                fname = f"test_{op_id}_semantic_{_safe_name(field)}_{suffix}"
+                bad_body = {**valid_body, field: probe}
+                call = _render_call(method, path, path_params, {}, bad_body)
+
+                if self.error_mode == "qfe":
+                    assertion = textwrap.dedent(f"""\
+                        assert resp.status_code == 200, (
+                            f"[FAIL] semantic invalid {tag} for body field '{field}' — unexpected HTTP status\\n"
+                            f"  Status : {{resp.status_code}}\\n"
+                            f"  Body   : {{resp.text[:300]}}"
+                        )
+                        body = resp.json()
+                        assert body.get("success") == False or body.get("error_code", 0) < 0, (
+                            f"[FAIL] semantic invalid {tag} for body field '{field}' — expected error response\\n"
+                            f"  success    : {{body.get('success')}}\\n"
+                            f"  error_code : {{body.get('error_code')}}\\n"
+                            f"  msg        : {{body.get('msg')}}\\n"
+                            f"  Full body  : {{resp.text[:300]}}"
+                        )
+                    """)
+                else:
+                    assertion = textwrap.dedent(f"""\
+                        assert resp.status_code in [400, 422], (
+                            f"[FAIL] semantic invalid {tag} for body field '{field}' — expected 400/422\\n"
+                            f"  Status : {{resp.status_code}}\\n"
+                            f"  Body   : {{resp.text[:300]}}"
+                        )
+                    """)
+
+                block = (
+                    f"def {fname}(base_url):\n"
+                    f"    \"\"\"[rule:semantic] Invalid semantic value for '{field}' ({tag}) → error response.\"\"\"\n"
+                    f"    resp = {call}\n"
+                    f"{textwrap.indent(assertion, '    ')}\n"
+                )
+                blocks.append(block)
+
+        return blocks
