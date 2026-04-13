@@ -42,14 +42,7 @@ pytest_report.json
 tests/generated/
 !tests/generated/.gitkeep
 
-# ─────────────────────────────────────────────
-# Input / temporary files
-# ─────────────────────────────────────────────
-input/
-!input/.gitkeep
 
-*.log
-*.tmp
 
 # ─────────────────────────────────────────────
 # Database / runtime data
