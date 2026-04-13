@@ -33,6 +33,8 @@ on:
       - 'input/**'
       - 'QFEapi.yaml'
       - 'QFEapi.json'
+      - 'tests/generated/**'
+      - 'tests/manual/**'
 
   # 수동 실행
   workflow_dispatch:
@@ -280,30 +282,28 @@ jobs:
             exit 1
           }
 
-
+      # ── 기존 TC 삭제 ─────────────────────────────────────────────────
+      - name: 기존 생성 TC 삭제
+        shell: powershell
+        run: |
+          if (Test-Path "tests\generated\rule") { Remove-Item "tests\generated\rule\*" -Recurse -Force }
+          if (Test-Path "tests\generated\ai")   { Remove-Item "tests\generated\ai\*" -Recurse -Force }
+      
+      
       # ── TC 생성 ─────────────────────────────────────────────────
-      # - name: TC 생성 (generate)
-      #   shell: powershell
-      #   run: |
-      #     $swaggerFile = @("input\QFEapi.json","input\QFEapi.yaml","QFEapi.json","QFEapi.yaml") |
-      #       Where-Object { Test-Path $_ } | Select-Object -First 1
+      - name: TC 생성 (generate)
+        shell: powershell
+        run: |
+          $swaggerFile = @("input\QFEapi.json","input\QFEapi.yaml","QFEapi.json","QFEapi.yaml") |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
 
-      #     if (-not $swaggerFile) {
-      #       Write-Error "Swagger 파일을 찾을 수 없습니다."
-      #       exit 1
-      #     }
+          if (-not $swaggerFile) {
+            Write-Error "Swagger 파일을 찾을 수 없습니다."
+            exit 1
+          }
 
-      #     Write-Host "[Generate] 사용 파일: $swaggerFile"
-
-      #     if ($env:GEMINI_API_KEY) {
-      #       $prefixLen = [Math]::Min(5, $env:GEMINI_API_KEY.Length)
-      #       $prefix = $env:GEMINI_API_KEY.Substring(0, $prefixLen)
-      #       Write-Host "[Generate] GEMINI_API_KEY detected: $prefix..."
-      #     } else {
-      #       Write-Host "[Generate] GEMINI_API_KEY is not set"
-      #     }
-
-      #     python main.py generate $swaggerFile
+          Write-Host "[Generate] 사용 파일: $swaggerFile"
+          python main.py generate $swaggerFile
 
       # ── 테스트 실행 ────────────────────────────────────────────────────────
       - name: 테스트 실행
