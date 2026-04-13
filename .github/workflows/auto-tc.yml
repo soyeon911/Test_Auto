@@ -257,22 +257,10 @@ jobs:
           Write-Host "::error::서버가 다운 상태입니다. 파이프라인을 중단합니다. Crash 로그를 확인하세요."
           exit 1
 
-      # ── TC 생성 ────────────────────────────────────────────────────────────
+      # ── TC 생성 ─────────────────────────────────────────────────
       - name: TC 생성 (generate)
         shell: powershell
         run: |
-          # UTF-8 인코딩 설정 (Windows 한글 문제 해결)
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $env:PYTHONIOENCODING = "utf-8"
-
-          # GEMINI_API_KEY 환경변수 확인
-          if (-not $env:GEMINI_API_KEY) {
-            Write-Error "GEMINI_API_KEY 환경변수가 설정되지 않았습니다."
-            exit 1
-          }
-          Write-Host "[Generate] GEMINI_API_KEY 설정됨"
-
-          # 우선순위: JSON > YAML (경로 순서)
           $swaggerFile = @("input\QFEapi.json","input\QFEapi.yaml","QFEapi.json","QFEapi.yaml") |
             Where-Object { Test-Path $_ } | Select-Object -First 1
 
@@ -282,7 +270,15 @@ jobs:
           }
 
           Write-Host "[Generate] 사용 파일: $swaggerFile"
-          Write-Host "[Generate] API Key Env: $($env:GEMINI_API_KEY.Substring(0, 5))..."
+
+          if ($env:GEMINI_API_KEY) {
+            $prefixLen = [Math]::Min(5, $env:GEMINI_API_KEY.Length)
+            $prefix = $env:GEMINI_API_KEY.Substring(0, $prefixLen)
+            Write-Host "[Generate] GEMINI_API_KEY detected: $prefix..."
+          } else {
+            Write-Host "[Generate] GEMINI_API_KEY is not set"
+          }
+
           python main.py generate $swaggerFile
 
       # ── 테스트 실행 ────────────────────────────────────────────────────────
