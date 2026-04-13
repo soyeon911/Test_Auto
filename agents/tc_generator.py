@@ -434,4 +434,4 @@ class TCGeneratorAgent:
                     m = re.search(r"# spec_hash\s*:\s*([a-f0-9]{64})", line)
                     if m:
                         fps.add(m.group(1))
-        return fps
+        return fps

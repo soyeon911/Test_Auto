@@ -11,7 +11,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--base-url",
         action="store",
-        default=os.environ.get("BASE_URL", "http://localhost:8000"),
+        default=os.environ.get("BASE_URL", "http://192.168.150.162:8080"),
         help="Base URL of the local server under test",
     )
 

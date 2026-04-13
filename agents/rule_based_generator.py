@@ -343,9 +343,17 @@ class RuleBasedTCGenerator:
             }
             query_params = {
                 pp["name"]: _GOOD.get(pp["schema"].get("type", "string"), "test")
-                for pp in params if pp["in"] == "query" and pp.get("required") and pp["name"] != p["name"]
+                for pp in params
+                if pp["in"] == "query" and pp.get("required") and pp["name"] != p["name"]
             }
-            call = _render_call(method, path, path_params, query_params, self._build_valid_body(req_body))
+            call = _render_call(
+                method,
+                path,
+                path_params,
+                query_params,
+                self._build_valid_body(req_body),
+            )
+
             if self.error_mode == "qfe":
                 assertion = textwrap.dedent(f"""\
                     assert resp.status_code == 200, (
@@ -360,20 +368,24 @@ class RuleBasedTCGenerator:
                         f"  error_code : {{body.get('error_code')}}\\n"
                         f"  msg        : {{body.get('msg')}}\\n"
                         f"  Full body  : {{resp.text[:300]}}"
-                    )""")
+                    )
+                """)
             else:
                 assertion = textwrap.dedent(f"""\
                     assert resp.status_code in [400, 422], (
                         f"[FAIL] missing param '{p['name']}' — expected 400/422\\n"
                         f"  Status : {{resp.status_code}}\\n"
                         f"  Body   : {{resp.text[:300]}}"
-                    )""")
-            blocks.append(textwrap.dedent(f"""\
-                def {fname}(base_url):
-                    \"\"\"[rule:missing_required] Omit required param '{p['name']}' → error response.\"\"\"
-                    resp = {call}
-                    {assertion}
-            """))
+                    )
+                """)
+
+            block = (
+                f"def {fname}(base_url):\n"
+                f"    \"\"\"[rule:missing_required] Omit required param '{p['name']}' → error response.\"\"\"\n"
+                f"    resp = {call}\n"
+                f"{textwrap.indent(assertion, '    ')}\n"
+            )
+            blocks.append(block)
 
         # Required body fields
         if req_body:
@@ -393,6 +405,7 @@ class RuleBasedTCGenerator:
                     if k != field
                 }
                 call = _render_call(method, path, path_params, {}, partial_body)
+
                 if self.error_mode == "qfe":
                     assertion = textwrap.dedent(f"""\
                         assert resp.status_code == 200, (
@@ -407,20 +420,24 @@ class RuleBasedTCGenerator:
                             f"  error_code : {{body.get('error_code')}}\\n"
                             f"  msg        : {{body.get('msg')}}\\n"
                             f"  Full body  : {{resp.text[:300]}}"
-                        )""")
+                        )
+                    """)
                 else:
                     assertion = textwrap.dedent(f"""\
                         assert resp.status_code in [400, 422], (
                             f"[FAIL] missing body field '{field}' — expected 400/422\\n"
                             f"  Status : {{resp.status_code}}\\n"
                             f"  Body   : {{resp.text[:300]}}"
-                        )""")
-                blocks.append(textwrap.dedent(f"""\
-                    def {fname}(base_url):
-                        \"\"\"[rule:missing_required] Omit required body field '{field}' → error response.\"\"\"
-                        resp = {call}
-                        {assertion}
-                """))
+                        )
+                    """)
+
+                block = (
+                    f"def {fname}(base_url):\n"
+                    f"    \"\"\"[rule:missing_required] Omit required body field '{field}' → error response.\"\"\"\n"
+                    f"    resp = {call}\n"
+                    f"{textwrap.indent(assertion, '    ')}\n"
+                )
+                blocks.append(block)
 
         return blocks
 
@@ -441,7 +458,7 @@ class RuleBasedTCGenerator:
         for p in params:
             ptype = p["schema"].get("type", "string")
             wrong = _WRONG.get(ptype)
-            if wrong is None or ptype == "string":  # strings accept anything
+            if wrong is None or ptype == "string":
                 continue
 
             fname = f"test_{op_id}_wrong_type_{_safe_name(p['name'])}"
@@ -466,22 +483,25 @@ class RuleBasedTCGenerator:
                         f"  error_code : {{body.get('error_code')}}\\n"
                         f"  msg        : {{body.get('msg')}}\\n"
                         f"  Full body  : {{resp.text[:300]}}"
-                    )""")
+                    )
+                """)
             else:
                 assertion = textwrap.dedent(f"""\
                     assert resp.status_code in [400, 422], (
                         f"[FAIL] wrong type for '{p['name']}' — expected 400/422\\n"
                         f"  Status : {{resp.status_code}}\\n"
                         f"  Body   : {{resp.text[:300]}}"
-                    )""")
-            blocks.append(textwrap.dedent(f"""\
-                def {fname}(base_url):
-                    \"\"\"[rule:wrong_type] Pass wrong type for '{p['name']}' (expected {ptype}) → error response.\"\"\"
-                    resp = {call}
-                    {assertion}
-            """))
+                    )
+                """)
 
-        # Body fields wrong type
+            block = (
+                f"def {fname}(base_url):\n"
+                f"    \"\"\"[rule:wrong_type] Pass wrong type for '{p['name']}' (expected {ptype}) → error response.\"\"\"\n"
+                f"    resp = {call}\n"
+                f"{textwrap.indent(assertion, '    ')}\n"
+            )
+            blocks.append(block)
+
         if req_body:
             body_schema = req_body.get("schema", {})
             properties = body_schema.get("properties", {})
@@ -490,10 +510,12 @@ class RuleBasedTCGenerator:
                 wrong = _WRONG.get(ftype)
                 if wrong is None or ftype == "string":
                     continue
+
                 fname = f"test_{op_id}_wrong_type_body_{_safe_name(field)}"
                 valid_body = self._build_valid_body(req_body) or {}
                 bad_body = {**valid_body, field: wrong}
                 call = _render_call(method, path, path_params, {}, bad_body)
+
                 if self.error_mode == "qfe":
                     assertion = textwrap.dedent(f"""\
                         assert resp.status_code < 500, (
@@ -508,20 +530,24 @@ class RuleBasedTCGenerator:
                             f"  error_code : {{body.get('error_code')}}\\n"
                             f"  msg        : {{body.get('msg')}}\\n"
                             f"  Full body  : {{resp.text[:300]}}"
-                        )""")
+                        )
+                    """)
                 else:
                     assertion = textwrap.dedent(f"""\
                         assert resp.status_code in [400, 422], (
                             f"[FAIL] wrong type for body field '{field}' — expected 400/422\\n"
                             f"  Status : {{resp.status_code}}\\n"
                             f"  Body   : {{resp.text[:300]}}"
-                        )""")
-                blocks.append(textwrap.dedent(f"""\
-                    def {fname}(base_url):
-                        \"\"\"[rule:wrong_type] Pass wrong type for body field '{field}' (expected {ftype}) → error response.\"\"\"
-                        resp = {call}
-                        {assertion}
-                """))
+                        )
+                    """)
+
+                block = (
+                    f"def {fname}(base_url):\n"
+                    f"    \"\"\"[rule:wrong_type] Pass wrong type for body field '{field}' (expected {ftype}) → error response.\"\"\"\n"
+                    f"    resp = {call}\n"
+                    f"{textwrap.indent(assertion, '    ')}\n"
+                )
+                blocks.append(block)
 
         return blocks
 
@@ -580,8 +606,10 @@ class RuleBasedTCGenerator:
             enum_vals = p["schema"].get("enum")
             if not enum_vals:
                 continue
+
             fname = f"test_{op_id}_invalid_enum_{_safe_name(p['name'])}"
             invalid_val = "__INVALID_ENUM_VALUE__"
+
             if p["in"] == "path":
                 bad_path = {**path_params, p["name"]: invalid_val}
                 call = _render_call(method, path, bad_path, {}, self._build_valid_body(req_body))
@@ -602,20 +630,24 @@ class RuleBasedTCGenerator:
                         f"  error_code : {{body.get('error_code')}}\\n"
                         f"  msg        : {{body.get('msg')}}\\n"
                         f"  Full body  : {{resp.text[:300]}}"
-                    )""")
+                    )
+                """)
             else:
                 assertion = textwrap.dedent(f"""\
                     assert resp.status_code in [400, 422], (
                         f"[FAIL] invalid enum '{p['name']}' — expected 400/422\\n"
                         f"  Status : {{resp.status_code}}\\n"
                         f"  Body   : {{resp.text[:300]}}"
-                    )""")
-            blocks.append(textwrap.dedent(f"""\
-                def {fname}(base_url):
-                    \"\"\"[rule:invalid_enum] '{p['name']}' outside allowed enum {enum_vals} → error response.\"\"\"
-                    resp = {call}
-                    {assertion}
-            """))
+                    )
+                """)
+
+            block = (
+                f"def {fname}(base_url):\n"
+                f"    \"\"\"[rule:invalid_enum] '{p['name']}' outside allowed enum {enum_vals} → error response.\"\"\"\n"
+                f"    resp = {call}\n"
+                f"{textwrap.indent(assertion, '    ')}\n"
+            )
+            blocks.append(block)
 
         return blocks
 
