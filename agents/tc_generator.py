@@ -457,7 +457,7 @@ class TCGeneratorAgent:
             rule_summary     = rule_summary,
             max_extra        = self.max_extra,
         )
-        print(f"[TCAgent] prompt tokens ≈ {len(base_user_prompt) // 4} "
+        print(f"[TCAgent] prompt tokens ~= {len(base_user_prompt) // 4} "
               f"(system {len(system_prompt)//4} + user {len(base_user_prompt)//4})")
 
         user_prompt = base_user_prompt   # start clean; rebuilt on each retry
