@@ -1,0 +1,374 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# AutoTC Pipeline — GitHub Actions Workflow
+#
+# 트리거
+#   1. 매 1시간 정각 (cron)
+#   2. Swagger 파일 변경 push 시 자동 실행
+#   3. 수동 실행 (workflow_dispatch)
+#
+# 실행 조건
+#   - 서버 버전 OR Swagger 해시가 이전 실행과 달라졌을 때만 파이프라인 실행
+#   - 변경 없으면 skip (불필요한 테스트 방지)
+#
+# 환경
+#   - Windows self-hosted runner (runs-on: [self-hosted, windows])
+#   - PowerShell (pwsh) 기반 스크립트
+#
+# 서버 crash 처리
+#   - 테스트 전·후 health check
+#   - crash 시 로그 수집 후 Artifact 업로드
+#   - SCM이 서버를 재기동할 때까지 재시도 대기
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: AutoTC Pipeline
+
+on:
+  # 1. 1시간 주기 실행
+  schedule:
+    - cron: '0 * * * *'
+
+  # 2. Swagger 파일 변경 시 자동 트리거
+  push:
+    paths:
+      - 'input/**'
+      - 'QFEapi.yaml'
+      - 'QFEapi.json'
+
+  # 수동 실행
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: '변경 없어도 강제 실행'
+        required: false
+        default: 'false'
+        type: boolean
+      base_url:
+        description: '서버 Base URL (기본값: vars.SERVER_BASE_URL)'
+        required: false
+        default: ''
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Job 1 — 변경 감지 (swagger hash + server version 비교)
+# ──────────────────────────────────────────────────────────────────────────────
+jobs:
+  detect-changes:
+    name: 변경 감지 (Swagger Hash + Server Version)
+    runs-on: [self-hosted, windows]
+    outputs:
+      should_run: ${{ steps.compare.outputs.should_run }}
+      swagger_hash: ${{ steps.hash.outputs.swagger_hash }}
+      server_version: ${{ steps.server_version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── Swagger 파일 해시 계산 ──────────────────────────────────────────────
+      - name: Swagger 해시 계산
+        id: hash
+        shell: pwsh
+        run: |
+          $swaggerFiles = @()
+          if (Test-Path "input") {
+            $swaggerFiles += Get-ChildItem -Path "input" -Include "*.yaml","*.yml","*.json" -Recurse
+          }
+          foreach ($extra in @("QFEapi.yaml","QFEapi.json")) {
+            if (Test-Path $extra) { $swaggerFiles += Get-Item $extra }
+          }
+
+          if ($swaggerFiles.Count -eq 0) {
+            Write-Error "Swagger 파일을 찾을 수 없습니다."
+            exit 1
+          }
+
+          $hasher   = [System.Security.Cryptography.SHA256]::Create()
+          $combined = ""
+          foreach ($f in ($swaggerFiles | Sort-Object FullName)) {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            $h     = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace("-","").ToLower()
+            $combined += "$($f.Name):$h;"
+            Write-Host "[Hash] $($f.Name) → $h"
+          }
+          $finalHash = [System.BitConverter]::ToString(
+            $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($combined))
+          ).Replace("-","").ToLower()
+
+          Write-Host "[Hash] 최종 Swagger 해시: $finalHash"
+          "swagger_hash=$finalHash" | Out-File $env:GITHUB_OUTPUT -Append
+
+      # ── 서버 버전/commit 조회 ───────────────────────────────────────────────
+      - name: 서버 버전 조회
+        id: server_version
+        shell: pwsh
+        run: |
+          $baseUrl = "${{ vars.SERVER_BASE_URL }}"
+          if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
+          if (-not $baseUrl) { $baseUrl = "http://192.168.150.162:8080" }
+
+          $version = "unknown"
+          $endpoints = @("/health", "/version", "/api/version", "/api/v1/version", "/api/v2/version")
+
+          foreach ($ep in $endpoints) {
+            try {
+              $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
+              # version / commit / build_hash 필드를 순서대로 탐색
+              $candidate = $resp.version ?? $resp.commit ?? $resp.build_hash ?? $resp.hash ?? $null
+              if ($candidate) {
+                $version = $candidate
+                Write-Host "[Version] $ep → $version"
+                break
+              }
+              # 응답 자체가 문자열인 경우
+              if ($resp -is [string] -and $resp.Length -lt 100) {
+                $version = $resp.Trim()
+                Write-Host "[Version] $ep → $version"
+                break
+              }
+            } catch {
+              Write-Host "[Version] $ep 접근 실패: $_"
+            }
+          }
+
+          Write-Host "[Version] 최종 서버 버전: $version"
+          "version=$version" | Out-File $env:GITHUB_OUTPUT -Append
+
+      # ── 이전 실행 캐시와 비교 ──────────────────────────────────────────────
+      - name: 이전 캐시와 비교
+        id: compare
+        shell: pwsh
+        run: |
+          $forceRun    = "${{ inputs.force_run }}" -eq "true"
+          $cacheFile   = ".cache\last_run_state.txt"
+          $currentKey  = "${{ steps.hash.outputs.swagger_hash }}::${{ steps.server_version.outputs.version }}"
+
+          Write-Host "[Compare] 현재 상태 키: $currentKey"
+
+          if ($forceRun) {
+            Write-Host "[Compare] 강제 실행 요청 → 실행"
+            "should_run=true" | Out-File $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          if (-not (Test-Path $cacheFile)) {
+            Write-Host "[Compare] 캐시 없음 (최초 실행) → 실행"
+            "should_run=true" | Out-File $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          $cachedKey = (Get-Content $cacheFile -Raw).Trim()
+          Write-Host "[Compare] 캐시된 상태 키: $cachedKey"
+
+          if ($cachedKey -eq $currentKey) {
+            Write-Host "[Compare] 변경 없음 → 스킵"
+            "should_run=false" | Out-File $env:GITHUB_OUTPUT -Append
+          } else {
+            Write-Host "[Compare] 변경 감지됨 → 실행"
+            "should_run=true"  | Out-File $env:GITHUB_OUTPUT -Append
+          }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Job 2 — 테스트 파이프라인 실행
+# ──────────────────────────────────────────────────────────────────────────────
+  run-pipeline:
+    name: AutoTC 파이프라인 실행
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should_run == 'true'
+    runs-on: [self-hosted, windows]
+
+    env:
+      BASE_URL: ${{ inputs.base_url || vars.SERVER_BASE_URL || 'http://192.168.150.162:8080' }}
+      REPORT_DIR: reports
+      CRASH_LOG_DIR: crash_logs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Python 환경 ────────────────────────────────────────────────────────
+      - name: Python 환경 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 의존성 설치
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 사전 health check (재시도 포함) ───────────────────────────────────
+      - name: 서버 health check (테스트 전)
+        id: pre_health
+        shell: pwsh
+        run: |
+          $healthUrl  = "$env:BASE_URL/health"
+          $maxRetries = 6      # SCM 재기동 대기 최대 3분 (30초 × 6)
+          $retryDelay = 30
+          $serverUp   = $false
+
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            try {
+              $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+              if ($resp.StatusCode -lt 500) {
+                Write-Host "[Health] OK (HTTP $($resp.StatusCode))"
+                $serverUp = $true
+                break
+              }
+            } catch {
+              Write-Host "[Health] 시도 $i/$maxRetries 실패: $_"
+            }
+            if ($i -lt $maxRetries) {
+              Write-Host "[Health] ${retryDelay}초 후 재시도... (SCM 재기동 대기)"
+              Start-Sleep -Seconds $retryDelay
+            }
+          }
+
+          "server_up=$($serverUp.ToString().ToLower())" | Out-File $env:GITHUB_OUTPUT -Append
+          if (-not $serverUp) {
+            Write-Host "::warning::서버가 응답하지 않습니다. 로그를 수집합니다."
+          }
+
+      # ── crash 로그 수집 (서버 다운 시) ────────────────────────────────────
+      - name: Crash 로그 수집
+        if: steps.pre_health.outputs.server_up == 'false'
+        shell: pwsh
+        run: scripts\collect_crash_logs.ps1 -OutputDir $env:CRASH_LOG_DIR -Label "pre_test"
+
+      - name: Crash 로그 업로드 (테스트 전)
+        if: steps.pre_health.outputs.server_up == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-logs-pre-${{ github.run_id }}
+          path: ${{ env.CRASH_LOG_DIR }}/
+          retention-days: 14
+
+      - name: 서버 다운 시 중단
+        if: steps.pre_health.outputs.server_up == 'false'
+        shell: pwsh
+        run: |
+          Write-Host "::error::서버가 다운 상태입니다. 파이프라인을 중단합니다. Crash 로그를 확인하세요."
+          exit 1
+
+      # ── TC 생성 ────────────────────────────────────────────────────────────
+      - name: TC 생성 (generate)
+        shell: pwsh
+        run: |
+          # 우선순위: JSON > YAML (경로 순서)
+          $swaggerFile = @("input\QFEapi.json","input\QFEapi.yaml","QFEapi.json","QFEapi.yaml") |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $swaggerFile) {
+            Write-Error "Swagger 파일을 찾을 수 없습니다."
+            exit 1
+          }
+
+          Write-Host "[Generate] 사용 파일: $swaggerFile"
+          python main.py generate $swaggerFile
+
+      # ── 테스트 실행 ────────────────────────────────────────────────────────
+      - name: 테스트 실행
+        id: pytest
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path $env:REPORT_DIR -Force | Out-Null
+
+          $testDirs = @()
+          foreach ($d in @("tests\generated\rule","tests\generated\ai","tests\manual")) {
+            if (Test-Path $d) { $testDirs += $d }
+          }
+
+          if ($testDirs.Count -eq 0) {
+            Write-Host "::warning::실행할 테스트 디렉터리가 없습니다."
+            "exit_code=0" | Out-File $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          Write-Host "[Pytest] 테스트 디렉터리: $($testDirs -join ', ')"
+
+          python -m pytest $testDirs `
+            --base-url $env:BASE_URL `
+            --html="$env:REPORT_DIR\summary.html" --self-contained-html `
+            --json-report --json-report-file="$env:REPORT_DIR\report.json" `
+            -v --tb=short 2>&1 | Tee-Object -FilePath "$env:REPORT_DIR\pytest_output.txt"
+
+          $code = $LASTEXITCODE
+          Write-Host "[Pytest] 종료 코드: $code"
+          "exit_code=$code" | Out-File $env:GITHUB_OUTPUT -Append
+          # 여기서는 exit 0 — 뒤에서 서버 상태 확인 후 최종 판정
+          exit 0
+
+      # ── 테스트 후 health check ─────────────────────────────────────────────
+      - name: 서버 health check (테스트 후)
+        id: post_health
+        if: always()
+        shell: pwsh
+        run: |
+          try {
+            $resp = Invoke-WebRequest -Uri "$env:BASE_URL/health" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+            $up   = $resp.StatusCode -lt 500
+          } catch {
+            $up = $false
+          }
+          "server_up=$($up.ToString().ToLower())" | Out-File $env:GITHUB_OUTPUT -Append
+          if (-not $up) {
+            Write-Host "::warning::테스트 실행 중 서버가 다운됐습니다. Crash 로그를 수집합니다."
+          }
+
+      - name: Crash 로그 수집 (테스트 후)
+        if: always() && steps.post_health.outputs.server_up == 'false'
+        shell: pwsh
+        run: scripts\collect_crash_logs.ps1 -OutputDir "$env:CRASH_LOG_DIR`_post" -Label "post_test"
+
+      - name: Crash 로그 업로드 (테스트 후)
+        if: always() && steps.post_health.outputs.server_up == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-logs-post-${{ github.run_id }}
+          path: ${{ env.CRASH_LOG_DIR }}_post/
+          retention-days: 14
+
+      # ── 레포트 업로드 ──────────────────────────────────────────────────────
+      - name: 테스트 레포트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.run_id }}
+          path: |
+            ${{ env.REPORT_DIR }}/summary.html
+            ${{ env.REPORT_DIR }}/report.json
+            ${{ env.REPORT_DIR }}/pytest_output.txt
+            ${{ env.REPORT_DIR }}/allure-results/
+            ${{ env.REPORT_DIR }}/test_report.xlsx
+          retention-days: 14
+
+      # ── 캐시 업데이트 (성공/실패 무관, 서버 다운이 아닐 때만) ──────────────
+      - name: 상태 캐시 업데이트
+        if: steps.pre_health.outputs.server_up == 'true'
+        shell: pwsh
+        run: |
+          $cacheDir = ".cache"
+          if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir | Out-Null }
+          $key = "${{ needs.detect-changes.outputs.swagger_hash }}::${{ needs.detect-changes.outputs.server_version }}"
+          $key | Out-File "$cacheDir\last_run_state.txt" -NoNewline -Encoding utf8
+          Write-Host "[Cache] 저장된 상태 키: $key"
+
+      # ── 최종 결과 판정 ─────────────────────────────────────────────────────
+      - name: 최종 결과 판정
+        if: always()
+        shell: pwsh
+        run: |
+          $pytestExit  = "${{ steps.pytest.outputs.exit_code }}"
+          $serverCrash = "${{ steps.post_health.outputs.server_up }}" -eq "false"
+
+          if ($serverCrash) {
+            Write-Host "::error::서버가 테스트 중 크래시됐습니다. Crash 로그 아티팩트를 확인하세요."
+            exit 2
+          }
+          if ($pytestExit -ne "0" -and $pytestExit -ne "") {
+            Write-Host "::error::pytest 실패 (exit=$pytestExit). 테스트 레포트를 확인하세요."
+            exit $pytestExit
+          }
+          Write-Host "[Result] 파이프라인 완료."

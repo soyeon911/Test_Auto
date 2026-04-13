@@ -1,2 +1,2251 @@
-<a href="/docs/index.html">Moved Permanently</a>.
-
+{
+    "schemes": [],
+    "swagger": "2.0",
+    "info": {
+        "description": "**Quick Face Engine REST API**\n\nProvides face detection, recognition, and database management capabilities.\n\n---\n\n**Response Format**\n\nAll endpoints return JSON with the following structure:\n```json\n{\n\"success\": true,\n\"error_code\": 0,\n\"msg\": \"Operation completed\",\n\"data\": { ... }\n}\n```\n\n- `success`: Operation result (true/false)\n- `error_code`: 0 = success, negative = error (see QFE_RET_CODE)\n- `msg`: Human-readable message\n- `data`: Response payload",
+        "title": "QFE REST API",
+        "contact": {},
+        "version": "1.1.5"
+    },
+    "host": "",
+    "basePath": "/",
+    "paths": {
+        "/api/v2/all-in-one": {
+            "post": {
+                "description": "Performs face detection and head pose estimation in a single API call. Accepts raw image data with dimensions.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Algorithm"
+                ],
+                "summary": "Face detection and head pose estimation (All-in-One)",
+                "parameters": [
+                    {
+                        "description": "Raw image with dimensions",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.RawImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/auto-template-update": {
+            "get": {
+                "description": "Gets the current automatic template update mode setting.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Parameter"
+                ],
+                "summary": "Get auto template update mode",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Sets the automatic template update mode for enrolled faces during identification.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Parameter"
+                ],
+                "summary": "Set auto template update mode",
+                "parameters": [
+                    {
+                        "description": "Auto update mode (0=disabled, 1=enabled)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.SetAutoUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/delete": {
+            "post": {
+                "description": "Deletes a user and their enrolled face templates from the face database.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Database"
+                ],
+                "summary": "Delete a user",
+                "parameters": [
+                    {
+                        "description": "User ID to delete",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.DeleteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/detect": {
+            "post": {
+                "description": "Detects all faces in the provided image and returns face locations with 5-point landmarks.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Algorithm"
+                ],
+                "summary": "Detect faces in an image",
+                "parameters": [
+                    {
+                        "description": "Base64 encoded image data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/enroll": {
+            "post": {
+                "description": "Enrolls a face from an image to the face database with a user ID. Used for 1:N identification.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Enroll a face",
+                "parameters": [
+                    {
+                        "description": "Face image and user ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.EnrollRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/enroll-template": {
+            "post": {
+                "description": "Enrolls a user using a pre-extracted template instead of an image.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Enroll with template",
+                "parameters": [
+                    {
+                        "description": "Template data and user ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.EnrollTemplateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/extract": {
+            "post": {
+                "description": "Extracts a face recognition template (feature vector) from an image containing a face.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Algorithm"
+                ],
+                "summary": "Extract face template",
+                "parameters": [
+                    {
+                        "description": "Base64 encoded image data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/fam": {
+            "post": {
+                "description": "Estimates face attributes including age, gender, emotion, glasses, and ethnicity from a face image.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Algorithm"
+                ],
+                "summary": "Estimate face attributes",
+                "parameters": [
+                    {
+                        "description": "Base64 encoded image data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/hpe": {
+            "post": {
+                "description": "Estimates head pose angles (yaw, pitch, roll) from a face image. Range is approximately ±90 degrees.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Algorithm"
+                ],
+                "summary": "Estimate head pose",
+                "parameters": [
+                    {
+                        "description": "Base64 encoded image data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/identify": {
+            "post": {
+                "description": "Identifies a face from an image by comparing against all enrolled faces in the database.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Identify a face (1:N)",
+                "parameters": [
+                    {
+                        "description": "Base64 encoded image data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/identify-template": {
+            "post": {
+                "description": "Identifies a face using a pre-extracted template instead of an image.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Identify with template",
+                "parameters": [
+                    {
+                        "description": "Template data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.IdentifyTemplateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/info": {
+            "get": {
+                "description": "Returns basic information about the QFE SDK including version, status, and initialization details.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Get SDK information",
+                "responses": {
+                    "200": {
+                        "description": "SDK information response",
+                        "schema": {
+                            "$ref": "#/definitions/models.SDKInfoResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/load-config": {
+            "get": {
+                "description": "Loads system parameters from the default configuration file (system_parameter.cfg).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Config"
+                ],
+                "summary": "Load system configuration",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/mask": {
+            "post": {
+                "description": "Detects whether a person is wearing a mask in the provided face image.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Algorithm"
+                ],
+                "summary": "Check mask presence",
+                "parameters": [
+                    {
+                        "description": "Base64 encoded image data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/match": {
+            "post": {
+                "description": "Compares two face recognition templates and returns a similarity score for 1:1 verification.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Algorithm"
+                ],
+                "summary": "Match two face templates",
+                "parameters": [
+                    {
+                        "description": "Two Base64 encoded templates",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.MatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/match-images": {
+            "post": {
+                "description": "Performs end-to-end face matching on two images. Extracts templates from both images and compares them.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Utility"
+                ],
+                "summary": "Match two images directly",
+                "parameters": [
+                    {
+                        "description": "Two Base64 encoded images",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.MatchImagesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/matching-threshold": {
+            "get": {
+                "description": "Gets the current face matching threshold value used for verification and identification.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Parameter"
+                ],
+                "summary": "Get matching threshold",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Sets the face matching threshold value used for verification and identification decisions.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Parameter"
+                ],
+                "summary": "Set matching threshold",
+                "parameters": [
+                    {
+                        "description": "Threshold value (0-100000)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.SetThresholdRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/max-face": {
+            "get": {
+                "description": "Gets the current maximum number of faces that will be detected in a single image.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Parameter"
+                ],
+                "summary": "Get max face count",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Sets the maximum number of faces that will be detected in a single image.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Parameter"
+                ],
+                "summary": "Set max face count",
+                "parameters": [
+                    {
+                        "description": "Max face count to set",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.SetMaxFaceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/max-instance": {
+            "get": {
+                "description": "Gets the maximum number of SDK instances allowed by license and current active instance count.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Parameter"
+                ],
+                "summary": "Get max instance info",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/multi-detect": {
+            "post": {
+                "description": "Performs multi-face detection without identity matching. Returns detection results including bounding boxes, landmarks, image quality, and warped face images.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Algorithm"
+                ],
+                "summary": "Multi-face detection only",
+                "parameters": [
+                    {
+                        "description": "Raw image with dimensions",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.RawImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/reset-config": {
+            "post": {
+                "description": "Resets all system parameters to default values.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Config"
+                ],
+                "summary": "Reset configuration",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/save-config": {
+            "post": {
+                "description": "Saves current system parameters to the default configuration file (system_parameter.cfg).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Config"
+                ],
+                "summary": "Save system configuration",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/templates-count": {
+            "get": {
+                "description": "Returns the total number of templates in the database.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Database"
+                ],
+                "summary": "Get template count",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/user/{user_id}/template": {
+            "get": {
+                "description": "Exports the template for a specific user and sub_id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Database"
+                ],
+                "summary": "Get user template",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Sub ID (default: 0)",
+                        "name": "sub_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/user/{user_id}/templates/count": {
+            "get": {
+                "description": "Returns the number of templates for a specific user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Database"
+                ],
+                "summary": "Get user template count",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/users": {
+            "get": {
+                "description": "Returns a list of all user IDs enrolled in the face database.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Database"
+                ],
+                "summary": "Get all enrolled users",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Deletes all enrolled users from the face database. Use with caution.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Database"
+                ],
+                "summary": "Delete all users",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/users-count": {
+            "get": {
+                "description": "Returns the total number of enrolled users in the database.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Database"
+                ],
+                "summary": "Get user count",
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/validate-image": {
+            "post": {
+                "description": "Validates image quality based on blur detection, luminance, face positioning, and head pose criteria.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Utility"
+                ],
+                "summary": "Validate image quality",
+                "parameters": [
+                    {
+                        "description": "Base64 encoded image data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/verify": {
+            "post": {
+                "description": "Performs 1:1 face verification against a specific enrolled user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Verify face (1:1)",
+                "parameters": [
+                    {
+                        "description": "Face image and target user ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.VerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v2/verify-template": {
+            "post": {
+                "description": "Performs 1:1 verification of a template against a specific enrolled user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Verify with template",
+                "parameters": [
+                    {
+                        "description": "Template data and user ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.VerifyTemplateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Error response with error_code",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Returns the health status of the API server and QFE SDK. Used for monitoring and load balancer health checks.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Health check endpoint",
+                "responses": {
+                    "200": {
+                        "description": "Health status response",
+                        "schema": {
+                            "$ref": "#/definitions/models.HealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats": {
+            "get": {
+                "description": "Returns server statistics including memory usage, request counts, and concurrency information.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Get server statistics",
+                "responses": {
+                    "200": {
+                        "description": "Server statistics response",
+                        "schema": {
+                            "$ref": "#/definitions/models.ServerStatsResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "models.AllInOneData": {
+            "type": "object",
+            "properties": {
+                "face_count": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "faces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AllInOneFace"
+                    }
+                }
+            }
+        },
+        "models.AllInOneFace": {
+            "type": "object",
+            "properties": {
+                "face_rect": {
+                    "$ref": "#/definitions/models.FaceRect"
+                },
+                "head_pose": {
+                    "$ref": "#/definitions/models.HeadPose"
+                },
+                "landmarks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Landmark"
+                    }
+                }
+            }
+        },
+        "models.AllInOneResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.AllInOneData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "All-in-one processing completed"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.BaseResponse": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Operation completed successfully"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.DeleteData": {
+            "type": "object",
+            "properties": {
+                "deleted": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.DeleteRequest": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.DeleteResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.DeleteData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "User deleted"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.DetectFaceData": {
+            "type": "object",
+            "properties": {
+                "face_count": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "faces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.FaceInfo"
+                    }
+                }
+            }
+        },
+        "models.DetectFaceResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.DetectFaceData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Face detection completed"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.EnrollData": {
+            "type": "object",
+            "properties": {
+                "template_count": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.EnrollRequest": {
+            "type": "object",
+            "properties": {
+                "image_data": {
+                    "type": "string",
+                    "example": "base64_encoded_image"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.EnrollResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.EnrollData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Face enrolled successfully"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.EnrollTemplateRequest": {
+            "type": "object",
+            "properties": {
+                "template_data": {
+                    "type": "string",
+                    "example": "base64_encoded_template"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "any"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": -1
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Operation failed"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
+        "models.ExtractTemplateData": {
+            "type": "object",
+            "properties": {
+                "template": {
+                    "type": "string",
+                    "example": "base64_encoded_template_data"
+                }
+            }
+        },
+        "models.ExtractTemplateResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.ExtractTemplateData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Template extracted successfully"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.FaceAttribute": {
+            "type": "object",
+            "properties": {
+                "age": {
+                    "type": "integer",
+                    "example": 25
+                },
+                "gender": {
+                    "type": "string",
+                    "example": "male"
+                }
+            }
+        },
+        "models.FaceAttributeData": {
+            "type": "object",
+            "properties": {
+                "attribute": {
+                    "$ref": "#/definitions/models.FaceAttribute"
+                },
+                "face_rect": {
+                    "$ref": "#/definitions/models.FaceRect"
+                }
+            }
+        },
+        "models.FaceAttributeResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.FaceAttributeData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Face attribute estimated"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.FaceInfo": {
+            "type": "object",
+            "properties": {
+                "face_rect": {
+                    "$ref": "#/definitions/models.FaceRect"
+                },
+                "landmarks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Landmark"
+                    }
+                }
+            }
+        },
+        "models.FaceRect": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "width": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "x": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "y": {
+                    "type": "integer",
+                    "example": 50
+                }
+            }
+        },
+        "models.GetAutoUpdateResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "integer",
+                            "example": 1
+                        }
+                    }
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Auto template update mode retrieved successfully"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.GetTemplateData": {
+            "type": "object",
+            "properties": {
+                "sub_id": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "template_data": {
+                    "type": "string",
+                    "example": "base64_encoded_template"
+                },
+                "template_size": {
+                    "type": "integer",
+                    "example": 512
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.GetTemplateResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.GetTemplateData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Template retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.GetUsersData": {
+            "type": "object",
+            "properties": {
+                "user_count": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.UserInfo"
+                    }
+                }
+            }
+        },
+        "models.GetUsersResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.GetUsersData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Users retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.HeadPose": {
+            "type": "object",
+            "properties": {
+                "pitch": {
+                    "type": "number",
+                    "example": -3.1
+                },
+                "roll": {
+                    "type": "number",
+                    "example": 1.5
+                },
+                "yaw": {
+                    "type": "number",
+                    "example": 5.2
+                }
+            }
+        },
+        "models.HeadPoseData": {
+            "type": "object",
+            "properties": {
+                "face_rect": {
+                    "$ref": "#/definitions/models.FaceRect"
+                },
+                "head_pose": {
+                    "$ref": "#/definitions/models.HeadPose"
+                }
+            }
+        },
+        "models.HeadPoseResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.HeadPoseData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Head pose estimated"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.SDKStatus"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Server is healthy"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.IdentifyData": {
+            "type": "object",
+            "properties": {
+                "score": {
+                    "type": "number",
+                    "example": 0.95
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.IdentifyResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.IdentifyData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Face identified"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.IdentifyTemplateRequest": {
+            "type": "object",
+            "properties": {
+                "template_data": {
+                    "type": "string",
+                    "example": "base64_encoded_template"
+                }
+            }
+        },
+        "models.ImageRequest": {
+            "type": "object",
+            "properties": {
+                "image_data": {
+                    "type": "string",
+                    "example": "base64_encoded_image"
+                }
+            }
+        },
+        "models.Landmark": {
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "integer",
+                    "example": 150
+                },
+                "y": {
+                    "type": "integer",
+                    "example": 120
+                }
+            }
+        },
+        "models.MaskData": {
+            "type": "object",
+            "properties": {
+                "face_rect": {
+                    "$ref": "#/definitions/models.FaceRect"
+                },
+                "has_mask": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
+        "models.MaskResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.MaskData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Mask detection completed"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.MatchData": {
+            "type": "object",
+            "properties": {
+                "is_match": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "score": {
+                    "type": "number",
+                    "example": 0.95
+                }
+            }
+        },
+        "models.MatchImagesRequest": {
+            "type": "object",
+            "properties": {
+                "image1_data": {
+                    "type": "string",
+                    "example": "base64_encoded_image"
+                },
+                "image2_data": {
+                    "type": "string",
+                    "example": "base64_encoded_image"
+                }
+            }
+        },
+        "models.MatchRequest": {
+            "type": "object",
+            "properties": {
+                "template1": {
+                    "type": "string",
+                    "example": "base64_encoded_template"
+                },
+                "template2": {
+                    "type": "string",
+                    "example": "base64_encoded_template"
+                }
+            }
+        },
+        "models.MatchResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.MatchData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Templates matched"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.MaxFaceData": {
+            "type": "object",
+            "properties": {
+                "max_face": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
+        "models.MaxFaceResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.MaxFaceData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Max face retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.MaxInstanceData": {
+            "type": "object",
+            "properties": {
+                "active_instances": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "max_instances": {
+                    "type": "integer",
+                    "example": 4
+                }
+            }
+        },
+        "models.MaxInstanceResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.MaxInstanceData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Max instance info retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.MultiDetectResponse": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Multi-face detection completed"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.RawImageRequest": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "height": {
+                    "type": "integer",
+                    "example": 480
+                },
+                "image_data": {
+                    "type": "string",
+                    "example": "base64_encoded_raw_image"
+                },
+                "width": {
+                    "type": "integer",
+                    "example": 640
+                }
+            }
+        },
+        "models.SDKInfoData": {
+            "type": "object",
+            "properties": {
+                "max_instances": {
+                    "type": "integer",
+                    "example": 4
+                },
+                "version": {
+                    "type": "string",
+                    "example": "1.0.0"
+                }
+            }
+        },
+        "models.SDKInfoResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.SDKInfoData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "SDK info retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.SDKStatus": {
+            "type": "object",
+            "properties": {
+                "initialization_error": {
+                    "type": "string"
+                },
+                "initialized": {
+                    "type": "boolean"
+                },
+                "instance_created": {
+                    "type": "boolean"
+                },
+                "last_health_check": {
+                    "type": "string"
+                },
+                "license_activated": {
+                    "type": "boolean"
+                },
+                "model_loaded": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "models.ServerStatsData": {
+            "type": "object",
+            "properties": {
+                "active_requests": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "completed_requests": {
+                    "type": "integer",
+                    "example": 990
+                },
+                "memory_usage_mb": {
+                    "type": "integer",
+                    "example": 256
+                },
+                "rejected_requests": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "timed_out_requests": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "total_requests": {
+                    "type": "integer",
+                    "example": 1000
+                }
+            }
+        },
+        "models.ServerStatsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.ServerStatsData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Server stats retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.SetAutoUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.SetMaxFaceRequest": {
+            "type": "object",
+            "properties": {
+                "max_face": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
+        "models.SetThresholdRequest": {
+            "type": "object",
+            "properties": {
+                "threshold": {
+                    "type": "number",
+                    "example": 0.7
+                }
+            }
+        },
+        "models.TemplateCountData": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 250
+                }
+            }
+        },
+        "models.TemplateCountResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.TemplateCountData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Template count retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.ThresholdData": {
+            "type": "object",
+            "properties": {
+                "threshold": {
+                    "type": "number",
+                    "example": 0.7
+                }
+            }
+        },
+        "models.ThresholdResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.ThresholdData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Threshold retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.UserCountData": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 100
+                }
+            }
+        },
+        "models.UserCountResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.UserCountData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "User count retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.UserInfo": {
+            "type": "object",
+            "properties": {
+                "template_count": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.UserTemplateCountData": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.UserTemplateCountResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.UserTemplateCountData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "User template count retrieved"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.ValidateImageData": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer",
+                    "example": 480
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Image is valid"
+                },
+                "valid": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "width": {
+                    "type": "integer",
+                    "example": 640
+                }
+            }
+        },
+        "models.ValidateImageResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.ValidateImageData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Image validated"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.VerifyData": {
+            "type": "object",
+            "properties": {
+                "match_score": {
+                    "type": "number",
+                    "example": 0.95
+                },
+                "sub_id": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "threshold": {
+                    "type": "number",
+                    "example": 0.7
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "verified": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.VerifyRequest": {
+            "type": "object",
+            "properties": {
+                "image_data": {
+                    "type": "string",
+                    "example": "base64_encoded_image"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.VerifyResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.VerifyData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Face verified successfully"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.VerifyTemplateRequest": {
+            "type": "object",
+            "required": [
+                "template_data",
+                "user_id"
+            ],
+            "properties": {
+                "template_data": {
+                    "type": "string",
+                    "example": "base64_encoded_template"
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 12345
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "description": "Health check, SDK information, and server statistics",
+            "name": "System"
+        },
+        {
+            "description": "Face detection, multi-detect, template extraction, matching, HPE, FAM, mask detection",
+            "name": "Algorithm"
+        },
+        {
+            "description": "Image validation, direct image matching, all-in-one processing",
+            "name": "Utility"
+        },
+        {
+            "description": "Face enrollment, identification (1:N), and verification (1:1) with image or template",
+            "name": "Authentication"
+        },
+        {
+            "description": "User list, template export, user/template count, deletion",
+            "name": "Database"
+        },
+        {
+            "description": "Max instance, matching threshold, max face count, auto template update",
+            "name": "System Parameter"
+        },
+        {
+            "description": "Load, save, and reset configuration file",
+            "name": "Config"
+        }
+    ]
+}

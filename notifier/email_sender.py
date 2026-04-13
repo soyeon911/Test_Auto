@@ -17,6 +17,7 @@ from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
@@ -58,10 +59,10 @@ class EmailSender:
     def __init__(self, config: dict):
         email_cfg = config.get("email", {})
         self.enabled: bool = email_cfg.get("enabled", False)
-        self.smtp_host: str = email_cfg.get("smtp_host", "smtp.gmail.com")
+        self.smtp_host: str = email_cfg.get("smtp_host", "")
         self.smtp_port: int = int(email_cfg.get("smtp_port", 587))
         self.sender: str = email_cfg.get("sender", "")
-        self.password_env: str = email_cfg.get("password_env", "SMTP_PASSWORD")
+        self.password_env: str = email_cfg.get("password_env", "")
         self.recipients: list[str] = email_cfg.get("recipients", [])
         self.attach_report: bool = email_cfg.get("attach_report", True)
 
