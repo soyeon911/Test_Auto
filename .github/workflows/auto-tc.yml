@@ -373,18 +373,30 @@ jobs:
         if: always()
         shell: powershell
         run: |
-          # 이전 step의 결과 값 읽기
-          $serverCrash = "${{ steps.post_health.outputs.server_up }}" -eq "false"
-          $pytestExit  = "${{ steps.pytest.outputs.exit_code }}"
-
-          Write-Host "[Result] serverCrash=$serverCrash, pytestExit=$pytestExit"
-
-          if ($serverCrash) {
-            Write-Host "::error::Server crashed during test run. Check crash log artifacts."
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+ 
+          # 이전 step 결과 읽기
+          $serverUpRaw = "${{ steps.post_health.outputs.server_up }}"
+          $exitCodeRaw = "${{ steps.pytest.outputs.exit_code }}"
+ 
+          Write-Host "[Result] server_up='$serverUpRaw'  pytest_exit='$exitCodeRaw'"
+ 
+          # 1. 서버 크래시 여부
+          if ($serverUpRaw -eq "false") {
+            Write-Host "::error::Server crashed during test run. Check crash-log artifacts."
             exit 2
           }
-          if ($pytestExit -ne "0" -and $pytestExit -ne "" -and $pytestExit -ne $null) {
-            Write-Host "::error::pytest failed (exit=$pytestExit). Check uploaded test reports."
-            exit [int]$pytestExit
+ 
+          # 2. pytest 결과 — 빈 문자열(step skip) 은 통과로 처리
+          if ($exitCodeRaw -ne "" -and $exitCodeRaw -ne "0") {
+            $code = 0
+            if ([int]::TryParse($exitCodeRaw, [ref]$code)) {
+              Write-Host "::error::pytest failed (exit=$code). Check uploaded test reports."
+              exit $code
+            } else {
+              Write-Host "::error::pytest exit code unreadable: '$exitCodeRaw'"
+              exit 1
+            }
           }
-          Write-Host "[Result] Pipeline completed successfully."                                                                                                                                               
+ 
+          Write-Host "[Result] Pipeline completed successfully."
