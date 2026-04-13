@@ -52,3 +52,23 @@ def test_post__api_v2_identify_template_semantic_template_data_empty_b64(base_ur
         f"  Full body  : {resp.text[:300]}"
     )
 
+
+
+
+def test_post__api_v2_identify_template_semantic_template_data_null_value(base_url):
+    """[rule:semantic_probe] 'template_data' tag=base64_template probe=null_value."""
+    resp = requests.post(f"{base_url}/api/v2/identify-template", json={'template_data': None}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:null_value on 'template_data' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:null_value on 'template_data' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+

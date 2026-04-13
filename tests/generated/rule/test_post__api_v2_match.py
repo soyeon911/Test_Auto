@@ -55,6 +55,26 @@ def test_post__api_v2_match_semantic_template1_empty_b64(base_url):
 
 
 
+def test_post__api_v2_match_semantic_template1_null_value(base_url):
+    """[rule:semantic_probe] 'template1' tag=base64_template probe=null_value."""
+    resp = requests.post(f"{base_url}/api/v2/match", json={'template1': None, 'template2': 'AAEC'}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:null_value on 'template1' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:null_value on 'template1' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
+
+
+
 def test_post__api_v2_match_semantic_template2_invalid_b64(base_url):
     """[rule:semantic_probe] 'template2' tag=base64_template probe=invalid_b64."""
     resp = requests.post(f"{base_url}/api/v2/match", json={'template1': 'AAEC', 'template2': 'not_base64!@#'}, timeout=10)
@@ -86,6 +106,26 @@ def test_post__api_v2_match_semantic_template2_empty_b64(base_url):
     body_json = resp.json()
     assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
         f"[FAIL] semantic:empty_b64 on 'template2' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
+
+
+
+def test_post__api_v2_match_semantic_template2_null_value(base_url):
+    """[rule:semantic_probe] 'template2' tag=base64_template probe=null_value."""
+    resp = requests.post(f"{base_url}/api/v2/match", json={'template1': 'AAEC', 'template2': None}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:null_value on 'template2' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:null_value on 'template2' — expected error response\n"
         f"  success    : {body_json.get('success')}\n"
         f"  error_code : {body_json.get('error_code')}\n"
         f"  msg        : {body_json.get('msg')}\n"

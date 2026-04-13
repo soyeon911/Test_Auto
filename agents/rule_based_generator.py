@@ -54,17 +54,27 @@ _GOOD_BY_TAG: dict[str, Any] = {
 
 # Semantic-tag-based invalid probes: {tag: [(bad_value, label), ...]}
 _SEMANTIC_PROBES: dict[str, list] = {
-    "base64_image":    [("not_base64!@#", "invalid_b64"), ("",              "empty_b64")],
-    "base64_template": [("not_base64!@#", "invalid_b64"), ("",              "empty_b64")],
+    "base64_image":    [("not_base64!@#", "invalid_b64"), ("",              "empty_b64"),
+                        (None,             "null_value")],
+    "base64_template": [("not_base64!@#", "invalid_b64"), ("",              "empty_b64"),
+                        (None,             "null_value")],
     "threshold_float": [(-0.1,            "below_range"), (1.1,             "above_range"),
-                        ("not_a_number",  "wrong_type")],
-    "numeric_id":      [(-1,              "negative_id"), (0,               "zero_id")],
-    "integer_count":   [(-1,              "negative"),    (0,               "zero")],
-    "email_string":    [("not_an_email",  "invalid_fmt"), ("@nodomain",     "malformed")],
-    "uuid_string":     [("not-a-uuid",    "invalid_fmt"), ("",              "empty")],
-    "datetime_string": [("not_a_date",    "invalid_fmt"), ("2024-13-01T00:00:00Z", "bad_month")],
-    "url_string":      [("not_a_url",     "invalid_fmt")],
-    "boolean_flag":    [("not_boolean",   "wrong_type"),  (2,               "out_of_range")],
+                        ("not_a_number",  "wrong_type"),  (0.0,             "boundary_min"),
+                        (1.0,              "boundary_max")],
+    "numeric_id":      [(-1,              "negative_id"), (0,               "zero_id"),
+                        (99999999,         "overflow")],
+    "integer_count":   [(-1,              "negative"),    (0,               "zero"),
+                        (100000,           "overflow")],
+    "email_string":    [("not_an_email",  "invalid_fmt"), ("@nodomain",     "malformed"),
+                        ("",               "empty_string")],
+    "uuid_string":     [("not-a-uuid",    "invalid_fmt"), ("",              "empty"),
+                        ("00000000-0000-0000-0000-000000000000", "all_zeros")],
+    "datetime_string": [("not_a_date",    "invalid_fmt"), ("2024-13-01T00:00:00Z", "bad_month"),
+                        ("invalid",        "malformed")],
+    "url_string":      [("not_a_url",     "invalid_fmt"), ("",              "empty_string"),
+                        ("no_scheme",      "missing_scheme")],
+    "boolean_flag":    [("not_boolean",   "wrong_type"),  (2,               "out_of_range"),
+                        ("yes",            "string_value")],
 }
 
 # Wrong-type stand-ins (e.g. send a string where an int is expected)

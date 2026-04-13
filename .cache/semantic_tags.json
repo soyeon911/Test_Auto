@@ -10,8 +10,5 @@
   "template2|string|||[]": "base64_template",
   "image1_data|string|||[]": "base64_image",
   "image2_data|string|||[]": "base64_image",
-  "threshold|number|||[]": "threshold_float",
-  "max_face|integer|||[]": "integer_count",
-  "user_id||||[]": "identifier",
-  "sub_id||||[]": "identifier"
+  "threshold|number|||[]": "threshold_float"
 }

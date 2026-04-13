@@ -115,6 +115,26 @@ def test_post__api_v2_all_in_one_semantic_channel_zero(base_url):
 
 
 
+def test_post__api_v2_all_in_one_semantic_channel_overflow(base_url):
+    """[rule:semantic_probe] 'channel' tag=integer_count probe=overflow."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 100000, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:overflow on 'channel' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:overflow on 'channel' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
+
+
+
 def test_post__api_v2_all_in_one_semantic_height_negative(base_url):
     """[rule:semantic_probe] 'height' tag=integer_count probe=negative."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': -1, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
@@ -146,6 +166,26 @@ def test_post__api_v2_all_in_one_semantic_height_zero(base_url):
     body_json = resp.json()
     assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
         f"[FAIL] semantic:zero on 'height' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
+
+
+
+def test_post__api_v2_all_in_one_semantic_height_overflow(base_url):
+    """[rule:semantic_probe] 'height' tag=integer_count probe=overflow."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 100000, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:overflow on 'height' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:overflow on 'height' — expected error response\n"
         f"  success    : {body_json.get('success')}\n"
         f"  error_code : {body_json.get('error_code')}\n"
         f"  msg        : {body_json.get('msg')}\n"
@@ -195,6 +235,26 @@ def test_post__api_v2_all_in_one_semantic_image_data_empty_b64(base_url):
 
 
 
+def test_post__api_v2_all_in_one_semantic_image_data_null_value(base_url):
+    """[rule:semantic_probe] 'image_data' tag=base64_image probe=null_value."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': None, 'width': 10}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:null_value on 'image_data' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:null_value on 'image_data' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
+
+
+
 def test_post__api_v2_all_in_one_semantic_width_negative(base_url):
     """[rule:semantic_probe] 'width' tag=integer_count probe=negative."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': -1}, timeout=10)
@@ -226,6 +286,26 @@ def test_post__api_v2_all_in_one_semantic_width_zero(base_url):
     body_json = resp.json()
     assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
         f"[FAIL] semantic:zero on 'width' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
+
+
+
+def test_post__api_v2_all_in_one_semantic_width_overflow(base_url):
+    """[rule:semantic_probe] 'width' tag=integer_count probe=overflow."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 100000}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:overflow on 'width' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:overflow on 'width' — expected error response\n"
         f"  success    : {body_json.get('success')}\n"
         f"  error_code : {body_json.get('error_code')}\n"
         f"  msg        : {body_json.get('msg')}\n"

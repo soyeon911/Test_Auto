@@ -55,6 +55,26 @@ def test_post__api_v2_match_images_semantic_image1_data_empty_b64(base_url):
 
 
 
+def test_post__api_v2_match_images_semantic_image1_data_null_value(base_url):
+    """[rule:semantic_probe] 'image1_data' tag=base64_image probe=null_value."""
+    resp = requests.post(f"{base_url}/api/v2/match-images", json={'image1_data': None, 'image2_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:null_value on 'image1_data' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:null_value on 'image1_data' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
+
+
+
 def test_post__api_v2_match_images_semantic_image2_data_invalid_b64(base_url):
     """[rule:semantic_probe] 'image2_data' tag=base64_image probe=invalid_b64."""
     resp = requests.post(f"{base_url}/api/v2/match-images", json={'image1_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'image2_data': 'not_base64!@#'}, timeout=10)
@@ -86,6 +106,26 @@ def test_post__api_v2_match_images_semantic_image2_data_empty_b64(base_url):
     body_json = resp.json()
     assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
         f"[FAIL] semantic:empty_b64 on 'image2_data' — expected error response\n"
+        f"  success    : {body_json.get('success')}\n"
+        f"  error_code : {body_json.get('error_code')}\n"
+        f"  msg        : {body_json.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
+
+
+
+def test_post__api_v2_match_images_semantic_image2_data_null_value(base_url):
+    """[rule:semantic_probe] 'image2_data' tag=base64_image probe=null_value."""
+    resp = requests.post(f"{base_url}/api/v2/match-images", json={'image1_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'image2_data': None}, timeout=10)
+    assert resp.status_code < 500, (
+        f"[FAIL] semantic:null_value on 'image2_data' — server crashed\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
+    )
+    body_json = resp.json()
+    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:null_value on 'image2_data' — expected error response\n"
         f"  success    : {body_json.get('success')}\n"
         f"  error_code : {body_json.get('error_code')}\n"
         f"  msg        : {body_json.get('msg')}\n"

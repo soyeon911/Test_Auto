@@ -26,20 +26,10 @@ except Exception:
 
 # ─── config loader ────────────────────────────────────────────────────────────
 
-def load_config(path: str = "config/config.yaml") -> dict:
-    p = Path(path)
-    if not p.exists():
-        print(f"[Main] Config not found at {p}, using defaults.")
-        return {}
-    with open(p, encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
-
-    # Environment variables override config (for GitHub Actions secrets)
-    api_key_env = config.get("agent", {}).get("api_key_env", "GEMINI_API_KEY")
-    if api_key_env in os.environ:
-        print(f"[Main] Using {api_key_env} from environment")
-
-    return config
+def load_config(config_path: str) -> dict:
+    """Load config.yaml and return as dict."""
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 # ─── smart source detector ────────────────────────────────────────────────────
