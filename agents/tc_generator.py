@@ -412,7 +412,7 @@ class TCGeneratorAgent:
         else:
             file_path.write_text(header + code, encoding="utf-8")
 
-        print(f"[TCAgent] ✓ [{layer}] {file_path}")
+        print(f"[TCAgent] [OK] [{layer}] {file_path}")
         return file_path
 
     # ── dedup persistence ─────────────────────────────────────────────────────
