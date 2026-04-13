@@ -72,7 +72,7 @@ tc_generation:
 
   # AI layer (edge-case augmentation only)
   ai_augment:
-    enabled: false     # GEMINI_API_KEY 없으면 false 로 설정
+    enabled: true      # GEMINI_API_KEY 로 AI 활성화
     max_extra_tc: 3    # max additional test functions per endpoint
 
 # ── Test execution ────────────────────────────────────────────────────────────
