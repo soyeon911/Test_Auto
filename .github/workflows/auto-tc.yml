@@ -185,6 +185,7 @@ jobs:
       BASE_URL: ${{ inputs.base_url || vars.SERVER_BASE_URL || 'http://192.168.150.162:8080' }}
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
     steps:
       - name: Checkout

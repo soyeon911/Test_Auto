@@ -72,7 +72,7 @@ tc_generation:
 
   # AI layer (edge-case augmentation only)
   ai_augment:
-    enabled: true
+    enabled: false     # GEMINI_API_KEY 없으면 false 로 설정
     max_extra_tc: 3    # max additional test functions per endpoint
 
 # ── Test execution ────────────────────────────────────────────────────────────
@@ -96,4 +96,4 @@ email:
   password_env: "SMTP_PASSWORD"
   recipients:
     - "recipient@example.com"
-  attach_report: true
+  attach_report: 
