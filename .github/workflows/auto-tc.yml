@@ -63,7 +63,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
@@ -198,7 +198,7 @@ jobs:
 
       # ── Python 환경 ────────────────────────────────────────────────────────
       - name: Python 환경 설정
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -249,7 +249,7 @@ jobs:
 
       - name: Crash 로그 업로드 (테스트 전)
         if: steps.pre_health.outputs.server_up == 'false'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: crash-logs-pre-${{ github.run_id }}
           path: ${{ env.CRASH_LOG_DIR }}/
@@ -325,16 +325,23 @@ jobs:
 
           Write-Host "[Pytest] 테스트 디렉터리: $($testDirs -join ', ')"
 
-          python -m pytest $testDirs `
-            --base-url $env:BASE_URL `
-            --html="$env:REPORT_DIR\summary.html" --self-contained-html `
-            --json-report --json-report-file="$env:REPORT_DIR\report.json" `
-            -v --tb=short 2>&1 | Tee-Object -FilePath "$env:REPORT_DIR\pytest_output.txt"
+          $pytestArgs = @(
+            "-m", "pytest"
+          ) + $testDirs + @(
+            "--base-url", $env:BASE_URL,
+            "--html=$env:REPORT_DIR\summary.html",
+            "--self-contained-html",
+            "--json-report",
+            "--json-report-file=$env:REPORT_DIR\report.json",
+            "-v",
+            "--tb=short"
+          )
 
+          & python @pytestArgs 2>&1 | Tee-Object -FilePath "$env:REPORT_DIR\pytest_output.txt"
           $code = $LASTEXITCODE
+
           Write-Host "[Pytest] 종료 코드: $code"
           "exit_code=$code" | Out-File $env:GITHUB_OUTPUT -Append
-          # 여기서는 exit 0 — 뒤에서 서버 상태 확인 후 최종 판정
           exit 0
 
       # ── 테스트 후 health check ─────────────────────────────────────────────
