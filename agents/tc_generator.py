@@ -284,6 +284,7 @@ class TCGeneratorAgent:
             max_extra=self.max_extra,
         )
 
+        wait_time = 2  # 지수 백오프 초기값 (2s, 4s, 8s)
         for attempt in range(1, 4):
             try:
                 raw  = self._llm.generate(system_prompt, user_prompt)
@@ -304,16 +305,16 @@ class TCGeneratorAgent:
                     f"\n\nThe previous output failed pytest --collect-only:\n{err[:300]}\n"
                     "Fix all issues (import errors, fixture name errors, parametrize structure errors)."
                 )
-                time.sleep(wait_time)
 
             except Exception as e:
                 print(f"[TCAgent] AI attempt {attempt} error: {e}")
 
-        # 429 에러(QuotaExhausted 등)인 경우 대기 후 재시도
-                if attempt < 3:  # 마지막 시도가 아닐 때만 대기
-                    print(f"잠시 대기 후 {wait_time}초 뒤에 다시 시도합니다...")
-                    time.sleep(wait_time)
-                    wait_time *= 2  # 지수 백오프: 대기 시간을 2배로 늘림 (2s -> 4s)
+            # 429 에러(QuotaExhausted 등)인 경우 대기 후 재시도
+            if attempt < 3:  # 마지막 시도가 아닐 때만 대기
+                print(f"잠시 대기 후 {wait_time}초 뒤에 다시 시도합니다...")
+                time.sleep(wait_time)
+                wait_time *= 2  # 지수 백오프: 대기 시간을 2배로 늘림 (2s → 4s → 8s)
+
         return ""
 
     def _validate_collect(self, code: str) -> tuple[bool, str]:
