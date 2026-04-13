@@ -33,8 +33,7 @@ on:
       - 'input/**'
       - 'QFEapi.yaml'
       - 'QFEapi.json'
-      - 'tests/generated/**'
-      - 'tests/manual/**'
+      - 'auto-tc.yml'
 
   # 수동 실행
   workflow_dispatch:
