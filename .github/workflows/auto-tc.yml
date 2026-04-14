@@ -105,7 +105,7 @@ jobs:
           }
 
           if ($version -eq "unknown") {
-            foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json")) {
+            foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json" "/docs/doc.json")) {
               try {
                 $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
                 if ($null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
