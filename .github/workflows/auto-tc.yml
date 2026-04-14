@@ -45,7 +45,7 @@ on:
 
 defaults:
   run:
-    shell: posershell
+    shell: powershell
 
 jobs:
   detect-changes:
