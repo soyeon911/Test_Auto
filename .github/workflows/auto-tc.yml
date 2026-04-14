@@ -144,6 +144,7 @@ jobs:
           }
 
           Write-Host "[Version] 최종 서버 버전: $version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: 이전 캐시와 비교
         id: compare
