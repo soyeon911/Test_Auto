@@ -1,4 +1,4 @@
-name: AutoTC Pipeline
+name: .github/workflows/auto-tc.yml
 
 on:
   schedule:
