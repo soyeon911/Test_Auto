@@ -490,6 +490,29 @@ jobs:
           "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           exit 0
 
+      - name: Excel 리포트 생성
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+
+          $swaggerFile = @("input\QFEapi.json", "input\QFEapi.yaml", "QFEapi.json", "QFEapi.yaml") |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+
+          if (-not $swaggerFile) { $swaggerFile = "" }
+
+          python scripts\generate_excel_report.py `
+            --report-dir "$env:REPORT_DIR" `
+            --base-url   "$env:BASE_URL" `
+            --swagger    "$swaggerFile" `
+            --config     "config\config.yaml"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Excel 리포트 생성 실패 (exit=$LASTEXITCODE). 파이프라인은 계속합니다."
+          }
+
       - name: 서버 health check (테스트 후)
         id: post_health
         if: always()
@@ -610,5 +633,4 @@ jobs:
             }
             catch {
               Write-Host "[Server] 종료 실패 또는 이미 종료됨: $($_.Exception.Message)"
-            }
-          }
+       

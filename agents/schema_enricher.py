@@ -25,6 +25,7 @@ KNOWN_TAGS: frozenset[str] = frozenset({
     "url_string",
     "uuid_string",
     "numeric_id",
+    "channel_count",
 })
 
 
