@@ -45,7 +45,7 @@ on:
 
 defaults:
   run:
-    shell: pwsh
+    shell: posershell
 
 jobs:
   detect-changes:
