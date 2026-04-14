@@ -18,7 +18,7 @@ on:
         default: 'false'
         type: boolean
       base_url:
-        description: '서버 Base URL (기본값: http://127.0.0.1:8080)'
+        description: '서버 Base URL (기본값: http://192.168.150.158:8080)'
         required: false
         default: ''
 
@@ -85,40 +85,34 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $baseUrl = "http://127.0.0.1:8080"
+          $baseUrl = "http://192.168.150.158:8080"
           if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
 
           $version = "unknown"
 
-          $apiEndpoints = @("/version", "/api/version")
-          foreach ($ep in $apiEndpoints) {
+          # 1. QFE 전용: GET /api/v2/info -> resp.data.version
+          try {
+            $resp = Invoke-RestMethod -Uri "$baseUrl/api/v2/info" -TimeoutSec 5 -ErrorAction Stop
+            if ($resp.data -and $null -ne $resp.data.version -and "$($resp.data.version)".Trim() -ne "") {
+              $version = [string]$resp.data.version
+              Write-Host "[Version] /api/v2/info -> $version"
+            }
+          }
+          catch {
+            Write-Host "[Version] /api/v2/info 실패: $($_.Exception.Message)"
+          }
+
+          # 2. fallback: /health -> resp.version
+          if ($version -eq "unknown") {
             try {
-              $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
+              $resp = Invoke-RestMethod -Uri "$baseUrl/health" -TimeoutSec 5 -ErrorAction Stop
               if ($null -ne $resp.version -and "$($resp.version)".Trim() -ne "") {
                 $version = [string]$resp.version
-                Write-Host "[Version] API $ep -> $version"
-                break
+                Write-Host "[Version] /health -> $version"
               }
             }
             catch {
-              Write-Host "[Version] API $ep 실패: $($_.Exception.Message)"
-            }
-          }
-
-          if ($version -eq "unknown") {
-            $swaggerEndpoints = @("/swagger.json", "/v2/api-docs", "/openapi.json")
-            foreach ($ep in $swaggerEndpoints) {
-              try {
-                $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-                if ($null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
-                  $version = [string]$resp.info.version
-                  Write-Host "[Version] Swagger $ep -> $version"
-                  break
-                }
-              }
-              catch {
-                Write-Host "[Version] Swagger $ep 실패: $($_.Exception.Message)"
-              }
+              Write-Host "[Version] /health 실패: $($_.Exception.Message)"
             }
           }
 
@@ -169,7 +163,7 @@ jobs:
     runs-on: [self-hosted, windows]
 
     env:
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.158:8080' }}
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
       SERVER_EXE_NAME: qfe-server.exe
       REPORT_DIR: reports
@@ -468,69 +462,4 @@ jobs:
           name: test-reports-${{ github.run_id }}
           path: |
             ${{ env.REPORT_DIR }}/summary.html
-            ${{ env.REPORT_DIR }}/report.json
-            ${{ env.REPORT_DIR }}/pytest_output.txt
-            ${{ env.REPORT_DIR }}/allure-results/
-            ${{ env.REPORT_DIR }}/test_report.xlsx
-          retention-days: 14
-
-      - name: 상태 캐시 업데이트
-        if: steps.pre_health.outputs.server_up == 'true'
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-
-          $cacheDir = ".cache"
-          if (-not (Test-Path $cacheDir)) {
-            New-Item -ItemType Directory -Path $cacheDir | Out-Null
-          }
-
-          $key = "${{ needs.detect-changes.outputs.swagger_hash }}::${{ needs.detect-changes.outputs.server_version }}"
-          $key | Out-File -FilePath "$cacheDir\last_run_state.txt" -NoNewline -Encoding utf8
-          Write-Host "[Cache] 저장된 상태 키: $key"
-
-      - name: 최종 결과 판정
-        if: always()
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-
-          $serverUpRaw = "${{ steps.post_health.outputs.server_up }}"
-          $exitCodeRaw = "${{ steps.pytest.outputs.exit_code }}"
-
-          Write-Host "[Result] server_up='$serverUpRaw'  pytest_exit='$exitCodeRaw'"
-
-          if ($serverUpRaw -eq "false") {
-            Write-Host "::error::API server crashed during test run. Check crash-log artifacts."
-            exit 2
-          }
-
-          if ($exitCodeRaw -ne "" -and $exitCodeRaw -ne "0") {
-            $code = 0
-            if ([int]::TryParse($exitCodeRaw, [ref]$code)) {
-              Write-Host "::error::pytest failed (exit=$code). Check uploaded test reports."
-              exit $code
-            }
-            else {
-              Write-Host "::error::pytest exit code unreadable: '$exitCodeRaw'"
-              exit 1
-            }
-          }
-
-          Write-Host "[Result] Pipeline completed successfully."
-
-      - name: API 서버 종료
-        if: always()
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-
-          if ($env:SERVER_PID) {
-            try {
-              Stop-Process -Id [int]$env:SERVER_PID -Force -ErrorAction Stop
-              Write-Host "[Server] stopped pid=$env:SERVER_PID"
-            }
-            catch {
-              Write-Host "[Server] 종료 실패 또는 이미 종료됨: $($_.Exception.Message)"
-            }
-          }
+     
