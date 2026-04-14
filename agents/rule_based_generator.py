@@ -303,6 +303,57 @@ class RuleBasedTCGenerator:
 
         return self._no_crash_assertion(label)
 
+    def _meta_attachment(
+        self,
+        rule_type: str,
+        method: str,
+        path: str,
+        target_param: str,
+        condition: str,
+        expected_policy: str = "",
+        expected_status: list[int] | None = None,
+    ) -> str:
+        """
+        Generate code that attaches TC metadata to pytest via
+        request.node.user_properties — enables rich Excel reporting.
+
+        Uses resp.request (PreparedRequest) to capture actual HTTP details
+        without requiring variable extraction before the call.
+        """
+        if expected_status:
+            exp_display = ", ".join(str(s) for s in expected_status)
+        elif expected_policy == "must_fail":
+            exp_display = "QFE error (success=false or error_code<0)"
+        elif expected_policy == "probe_only":
+            exp_display = "No crash (status < 500)"
+        else:
+            exp_display = expected_policy or ""
+
+        return textwrap.dedent(f"""\
+            try:
+                _meta_body = resp.request.body
+                if isinstance(_meta_body, bytes):
+                    _meta_body = _meta_body.decode("utf-8", errors="replace")
+                import urllib.parse as _up
+                _parsed_url = _up.urlparse(resp.request.url or "")
+                _meta_query = dict(_up.parse_qsl(_parsed_url.query))
+            except Exception:
+                _meta_body, _meta_query = None, {{}}
+            request.node.user_properties.append(("tc_meta", {{
+                "rule_type": {rule_type!r},
+                "request_method": getattr(resp.request, "method", {method.upper()!r}),
+                "request_url": getattr(resp.request, "url", ""),
+                "request_path": {path!r},
+                "request_query": _meta_query,
+                "request_body": _meta_body,
+                "target_param": {target_param!r},
+                "condition": {condition!r},
+                "expected_status_display": {exp_display!r},
+                "actual_status": resp.status_code,
+                "response_text": resp.text[:2000],
+            }}))
+        """)
+
     def _build_valid_body(self, req_body: dict | None) -> dict | None:
         if not req_body:
             return None
@@ -541,11 +592,19 @@ class RuleBasedTCGenerator:
             if self.error_mode == "qfe"
             else self._standard_success_assertion(success_statuses)
         )
+        meta = self._meta_attachment(
+            rule_type="positive",
+            method=method, path=path,
+            target_param="",
+            condition="Happy path — all required fields present with valid values",
+            expected_status=success_statuses,
+        )
 
         return (
-            f"def test_{op_id}_positive(base_url):\n"
+            f"def test_{op_id}_positive(base_url, request):\n"
             f"    \"\"\"[rule:positive] Happy-path — valid request should succeed.\"\"\"\n"
             f"    resp = {call}\n"
+            f"{textwrap.indent(meta, '    ')}"
             f"{textwrap.indent(assertion, '    ')}\n"
         )
 
@@ -574,10 +633,18 @@ class RuleBasedTCGenerator:
 
             call = _render_call(method, path, path_params, query_params, self._build_valid_body(req_body))
             assertion = self._build_policy_assertion("must_fail", target_param["name"], "missing_required")
+            meta = self._meta_attachment(
+                rule_type="missing_required",
+                method=method, path=path,
+                target_param=target_param["name"],
+                condition=f"Required query param '{target_param['name']}' omitted",
+                expected_policy="must_fail",
+            )
             blocks.append(
-                f"def {fname}(base_url):\n"
+                f"def {fname}(base_url, request):\n"
                 f"    \"\"\"[rule:missing_required] Omit required query param '{target_param['name']}'.\"\"\"\n"
                 f"    resp = {call}\n"
+                f"{textwrap.indent(meta, '    ')}"
                 f"{textwrap.indent(assertion, '    ')}\n"
             )
 
@@ -599,10 +666,18 @@ class RuleBasedTCGenerator:
                 partial_body = {k: self._good_value(k, v) for k, v in properties.items() if k != field}
                 call = _render_call(method, path, path_params, query_params, partial_body)
                 assertion = self._build_policy_assertion("must_fail", field, "missing_required")
+                meta = self._meta_attachment(
+                    rule_type="missing_required",
+                    method=method, path=path,
+                    target_param=field,
+                    condition=f"Required body field '{field}' omitted from request",
+                    expected_policy="must_fail",
+                )
                 blocks.append(
-                    f"def {fname}(base_url):\n"
+                    f"def {fname}(base_url, request):\n"
                     f"    \"\"\"[rule:missing_required] Omit required body field '{field}'.\"\"\"\n"
                     f"    resp = {call}\n"
+                    f"{textwrap.indent(meta, '    ')}"
                     f"{textwrap.indent(assertion, '    ')}\n"
                 )
 
