@@ -229,7 +229,7 @@ jobs:
 
           for ($i = 1; $i -le $maxRetries; $i++) {
             try {
-              $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop
+              $resp = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop
               if ($resp.StatusCode -lt 500) {
                 Write-Host "[Health] OK (HTTP $($resp.StatusCode))"
                 $serverUp = $true
