@@ -87,11 +87,10 @@ def detect_source_and_parse(source: str, config: dict) -> list[dict]:
 # ─── full pipeline ────────────────────────────────────────────────────────────
 
 def run_pipeline(source: str, config: dict) -> None:
-    """Parse → Generate TC → Run Tests → Excel Report → Email Report."""
+    """Parse → Generate TC → Run Tests → Email Report."""
     from agents import TCGeneratorAgent
     from runner import TestRunner
     from notifier import EmailSender
-    from reports import ExcelReportBuilder
 
     print(f"\n{'='*60}")
     print(f"[Pipeline] Source: {source}")
@@ -109,33 +108,14 @@ def run_pipeline(source: str, config: dict) -> None:
     written = agent.generate_for_endpoints(endpoints)
     print(f"[Pipeline] Generated {len(written)} TC file(s).")
 
+    
     # 3. Run tests
     runner = TestRunner(config)
     summary = runner.run()
 
-    # 4. Excel report
-    runner_cfg = config.get("runner", {})
-    report_dir = Path(runner_cfg.get("html_report_path", "./reports/summary.html")).parent
-    xlsx_path = report_dir / "test_report.xlsx"
-    json_path = report_dir / "pytest_report.json"
-    base_url = config.get("server", {}).get("base_url", "")
-    allure_dir = runner_cfg.get("allure_results_dir", "./reports/allure-results")
-    try:
-        ExcelReportBuilder(xlsx_path).build(
-            runner_summary=summary,
-            pytest_json_path=json_path,
-            source_file=source,
-            base_url=base_url,
-            endpoints=endpoints,
-            allure_results_dir=allure_dir,
-        )
-        print(f"[Pipeline] Excel report → {xlsx_path}")
-    except Exception as exc:
-        print(f"[Pipeline] Excel report generation failed: {exc}")
-
-    # 5. Email
+    # 4. Email
     sender = EmailSender(config)
-    html_report = runner_cfg.get("html_report_path", "./reports/summary.html")
+    html_report = config.get("runner", {}).get("html_report_path", "./reports/summary.html")
     sender.send_report(summary, source_label=source, html_report_path=html_report)
 
     print(f"\n[Pipeline] Done — passed={summary['passed']} failed={summary['failed']}")
