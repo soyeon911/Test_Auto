@@ -230,39 +230,6 @@ jobs:
           Write-Host "[Server] model: $env:SERVER_MODEL_PATH"
           Write-Host "[Server] db: $env:SERVER_DB_PATH"
 
-      - name: 포트 8080 점유 프로세스 정리
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-
-          $port = 8080
-          Write-Host "[Port] 포트 $port 점유 프로세스 확인 중..."
-
-          $connections = netstat -ano | Select-String ":$port\s" | Select-String "LISTENING"
-          if ($connections) {
-            foreach ($line in $connections) {
-              $parts = $line.ToString().Trim() -split '\s+'
-              $pid = $parts[-1]
-              if ($pid -match '^\d+$' -and [int]$pid -ne 0) {
-                try {
-                  $proc = Get-Process -Id [int]$pid -ErrorAction SilentlyContinue
-                  if ($proc) {
-                    Write-Host "[Port] PID $pid ($($proc.Name)) 종료 중..."
-                    Stop-Process -Id [int]$pid -Force -ErrorAction SilentlyContinue
-                    Start-Sleep -Milliseconds 500
-                  }
-                }
-                catch {
-                  Write-Host "[Port] PID $pid 종료 실패 (무시): $($_.Exception.Message)"
-                }
-              }
-            }
-            Start-Sleep -Seconds 1
-            Write-Host "[Port] 포트 $port 정리 완료"
-          }
-          else {
-            Write-Host "[Port] 포트 $port 미점유 (정상)"
-          }
 
       - name: API 서버 실행 (mock interactive)
         id: start_server
