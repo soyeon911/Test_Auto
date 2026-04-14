@@ -236,12 +236,39 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
+          $serverDir = "C:\Users\sypark5\TestAgent\qfe-api-server-no-license"
+          $serverExe = Join-Path $serverDir "qfe-server.exe"
 
-          $proc = Start-Process `
-            -FilePath $serverExe `
-            -WorkingDirectory $env:SERVER_DIR `
-            -PassThru
+          if (-not (Test-Path $serverExe)) {
+            throw "서버 실행 파일이 없습니다: $serverExe"
+          }
+
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $serverExe
+          $psi.WorkingDirectory = $serverDir
+          $psi.Arguments = "-host 0.0.0.0"
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardInput = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $psi.CreateNoWindow = $true
+
+          $proc = New-Object System.Diagnostics.Process
+          $proc.StartInfo = $psi
+          $proc.Start() | Out-Null
+
+          Start-Sleep -Milliseconds 500
+          $proc.StandardInput.WriteLine("1")
+          $proc.StandardInput.WriteLine("1")
+          $proc.StandardInput.WriteLine("1")
+          $proc.StandardInput.WriteLine("C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model")
+          $proc.StandardInput.WriteLine("C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db")
+          $proc.StandardInput.Flush()
+
+          Start-Sleep -Seconds 2
+
+          $stdout = $proc.StandardOutput.ReadToEndAsync()
+          $stderr = $proc.StandardError.ReadToEndAsync()
 
           Write-Host "[Server] started pid=$($proc.Id)"
           "SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -255,7 +282,7 @@ jobs:
 
           $healthCandidates = @(
             "$env:BASE_URL/health",
-            "$env:BASE_URL/api/health"
+            "$env:BASE_URL/api/v2/health"
           )
 
           $maxRetries = 10
@@ -329,7 +356,7 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
 
           try {
-            $resp = Invoke-RestMethod -Uri "$env:OLLAMA_BASE_URL/api/tags" -Method Get -TimeoutSec 10
+            $resp = Invoke-RestMethod -Uri "$env:OLLAMA_BASE_URL/api/v2/tags" -Method Get -TimeoutSec 10
             if (-not $resp.models) {
               Write-Error "Ollama is reachable but no models are installed."
               exit 1
@@ -423,7 +450,7 @@ jobs:
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
           $up = $false
-          foreach ($healthUrl in @("$env:BASE_URL/health", "$env:BASE_URL/api/health")) {
+          foreach ($healthUrl in @("$env:BASE_URL/health", "$env:BASE_URL/api/v2/health")) {
             try {
               $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
               if ($null -ne $resp.StatusCode -and $resp.StatusCode -lt 500) {
