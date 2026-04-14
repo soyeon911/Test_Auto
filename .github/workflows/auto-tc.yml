@@ -1,25 +1,3 @@
-# ──────────────────────────────────────────────────────────────────────────────
-# AutoTC Pipeline — GitHub Actions Workflow
-#
-# 트리거
-#   1. 매 1시간 정각 (cron)
-#   2. Swagger 파일 변경 push 시 자동 실행
-#   3. 수동 실행 (workflow_dispatch)
-#
-# 실행 조건
-#   - 서버 버전 OR Swagger 해시가 이전 실행과 달라졌을 때만 파이프라인 실행
-#   - 변경 없으면 skip (불필요한 테스트 방지)
-#
-# 환경
-#   - Windows self-hosted runner (runs-on: [self-hosted, windows])
-#   - PowerShell 7+ (pwsh) 기반 스크립트
-#
-# 서버 crash 처리
-#   - 테스트 전·후 health check
-#   - crash 시 로그 수집 후 Artifact 업로드
-#   - SCM이 서버를 재기동할 때까지 재시도 대기
-# ──────────────────────────────────────────────────────────────────────────────
-# ──────────────────────────────────────────────────────────────────────────────
 name: AutoTC Pipeline
 
 on:
@@ -29,6 +7,7 @@ on:
   push:
     paths:
       - 'QFEapi.json'
+      - '.github/workflows/auto-tc.yml'
       - 'auto-tc.yml'
 
   workflow_dispatch:
@@ -39,7 +18,7 @@ on:
         default: 'false'
         type: boolean
       base_url:
-        description: '서버 Base URL (기본값: vars.SERVER_BASE_URL)'
+        description: '서버 Base URL (기본값: http://127.0.0.1:8080)'
         required: false
         default: ''
 
@@ -63,7 +42,7 @@ jobs:
           fetch-depth: 1
 
       - name: Swagger Hash 계산
-        shell: powershell
+        id: hash
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -89,7 +68,7 @@ jobs:
             $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
             $h = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace("-", "").ToLower()
             $combined += "$($f.Name):$h;"
-            Write-Host "[Hash] $($f.Name) → $h"
+            Write-Host "[Hash] $($f.Name) -> $h"
           }
 
           $finalHash = [System.BitConverter]::ToString(
@@ -99,7 +78,6 @@ jobs:
           Write-Host "[Hash] 최종 Swagger 해시: $finalHash"
           "swagger_hash=$finalHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-
       - name: 서버 버전 조회
         id: server_version
         run: |
@@ -107,39 +85,40 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $baseUrl = "${{ vars.SERVER_BASE_URL }}"
+          $baseUrl = "http://127.0.0.1:8080"
           if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
-          if (-not $baseUrl) { $baseUrl = "http://192.168.150.158:8080" }
 
           $version = "unknown"
 
-          # 1. 기존 API 먼저 시도
           $apiEndpoints = @("/version", "/api/version")
-
           foreach ($ep in $apiEndpoints) {
             try {
               $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-              if ($resp.version) {
-                $version = $resp.version
-                Write-Host "[Version] API $ep → $version"
+              if ($null -ne $resp.version -and "$($resp.version)".Trim() -ne "") {
+                $version = [string]$resp.version
+                Write-Host "[Version] API $ep -> $version"
                 break
               }
-            } catch {}
+            }
+            catch {
+              Write-Host "[Version] API $ep 실패: $($_.Exception.Message)"
+            }
           }
 
-          # 2. 실패하면 Swagger fallback
           if ($version -eq "unknown") {
-            $swaggerEndpoints = @("/swagger.json", "/v2/api-docs")
-
+            $swaggerEndpoints = @("/swagger.json", "/v2/api-docs", "/openapi.json")
             foreach ($ep in $swaggerEndpoints) {
               try {
                 $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-                if ($resp.info.version) {
-                  $version = $resp.info.version
-                  Write-Host "[Version] Swagger $ep → $version"
+                if ($null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
+                  $version = [string]$resp.info.version
+                  Write-Host "[Version] Swagger $ep -> $version"
                   break
                 }
-              } catch {}
+              }
+              catch {
+                Write-Host "[Version] Swagger $ep 실패: $($_.Exception.Message)"
+              }
             }
           }
 
@@ -160,13 +139,13 @@ jobs:
           Write-Host "[Compare] 현재 상태 키: $currentKey"
 
           if ($forceRun) {
-            Write-Host "[Compare] 강제 실행 요청 → 실행"
+            Write-Host "[Compare] 강제 실행 요청 -> 실행"
             "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             exit 0
           }
 
           if (-not (Test-Path $cacheFile)) {
-            Write-Host "[Compare] 캐시 없음 (최초 실행) → 실행"
+            Write-Host "[Compare] 캐시 없음 (최초 실행) -> 실행"
             "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             exit 0
           }
@@ -175,11 +154,11 @@ jobs:
           Write-Host "[Compare] 캐시된 상태 키: $cachedKey"
 
           if ($cachedKey -eq $currentKey) {
-            Write-Host "[Compare] 변경 없음 → 스킵"
+            Write-Host "[Compare] 변경 없음 -> 스킵"
             "should_run=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
           else {
-            Write-Host "[Compare] 변경 감지됨 → 실행"
+            Write-Host "[Compare] 변경 감지됨 -> 실행"
             "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
 
@@ -190,7 +169,9 @@ jobs:
     runs-on: [self-hosted, windows]
 
     env:
-      BASE_URL: ${{ inputs.base_url || vars.SERVER_BASE_URL || 'http://192.168.150.158:8080' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
+      SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
+      SERVER_EXE_NAME: qfe-api-server.exe
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
       LLM_PROVIDER: ollama
@@ -216,6 +197,61 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: 서버 파일 사전 점검
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
+
+          if (-not (Test-Path $env:SERVER_DIR)) {
+            throw "서버 디렉터리가 없습니다: $env:SERVER_DIR"
+          }
+
+          if (-not (Test-Path $serverExe)) {
+            throw "서버 실행 파일이 없습니다: $serverExe"
+          }
+
+          Write-Host "[Server] dir: $env:SERVER_DIR"
+          Write-Host "[Server] exe: $serverExe"
+
+          $dlls = Get-ChildItem $env:SERVER_DIR -Filter *.dll -ErrorAction SilentlyContinue
+          Write-Host "[Server] dll count: $($dlls.Count)"
+
+      - name: 기존 서버 정리
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          Get-Process | Where-Object {
+            $_.Path -like "$env:SERVER_DIR*"
+          } | ForEach-Object {
+            try {
+              Write-Host "[Server] 기존 프로세스 종료: $($_.Name) pid=$($_.Id)"
+              Stop-Process -Id $_.Id -Force -ErrorAction Stop
+            }
+            catch {
+              Write-Host "[Server] 종료 실패: $($_.Exception.Message)"
+            }
+          }
+
+      - name: API 서버 실행
+        id: start_server
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
+          $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
+
+          $proc = Start-Process `
+            -FilePath $serverExe `
+            -WorkingDirectory $env:SERVER_DIR `
+            -PassThru
+
+          Write-Host "[Server] started pid=$($proc.Id)"
+          "SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: 서버 health check (테스트 전)
         id: pre_health
         run: |
@@ -223,39 +259,54 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $healthUrl = "$env:BASE_URL/health"
-          $maxRetries = 6
-          $retryDelay = 30
+          $healthCandidates = @(
+            "$env:BASE_URL/health",
+            "$env:BASE_URL/api/health"
+          )
+
+          $maxRetries = 10
+          $retryDelay = 5
           $serverUp = $false
 
-          for ($i = 1; $i -le $maxRetries; $i++) {
-            try {
-              $resp = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop
-              if ($resp.StatusCode -lt 500) {
-                Write-Host "[Health] OK (HTTP $($resp.StatusCode))"
-                $serverUp = $true
-                break
+          foreach ($healthUrl in $healthCandidates) {
+            Write-Host "[Health] checking URL: $healthUrl"
+
+            for ($i = 1; $i -le $maxRetries; $i++) {
+              try {
+                $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
+
+                if ($null -ne $resp -and $null -ne $resp.StatusCode) {
+                  Write-Host "[Health] 응답 코드: $($resp.StatusCode)"
+                  if ($resp.StatusCode -lt 500) {
+                    $serverUp = $true
+                    Write-Host "[Health] OK via $healthUrl"
+                    break
+                  }
+                }
+              }
+              catch {
+                Write-Host "[Health] 시도 $i/$maxRetries 실패 ($healthUrl): $($_.Exception.Message)"
+              }
+
+              if ($i -lt $maxRetries) {
+                Start-Sleep -Seconds $retryDelay
               }
             }
-            catch {
-              Write-Host "[Health] 시도 $i/$maxRetries 실패: $($_.Exception.Message)"
-            }
 
-            if ($i -lt $maxRetries) {
-              Write-Host "[Health] ${retryDelay}초 후 재시도... (SCM 재기동 대기)"
-              Start-Sleep -Seconds $retryDelay
-            }
+            if ($serverUp) { break }
           }
 
           "server_up=$($serverUp.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
           if (-not $serverUp) {
-            Write-Host "::warning::서버가 응답하지 않습니다. 로그를 수집합니다."
+            Write-Host "::warning::서버가 health check에 응답하지 않습니다. 로그를 수집합니다."
           }
 
-      - name: Crash 로그 수집
+      - name: Crash 로그 수집 (테스트 전)
         if: steps.pre_health.outputs.server_up == 'false'
-        run: scripts\collect_crash_logs.ps1 -OutputDir $env:CRASH_LOG_DIR -Label "pre_test"
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          scripts\collect_crash_logs.ps1 -OutputDir $env:CRASH_LOG_DIR -Label "pre_test"
 
       - name: Crash 로그 업로드 (테스트 전)
         if: steps.pre_health.outputs.server_up == 'false'
@@ -265,11 +316,17 @@ jobs:
           path: ${{ env.CRASH_LOG_DIR }}/
           retention-days: 14
 
+      - name: 서버 로그 출력 (테스트 전 실패 시)
+        if: steps.pre_health.outputs.server_up == 'false'
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          Get-Process | Where-Object { $_.Id -eq [int]$env:SERVER_PID } | Format-List * -Force
+
       - name: 서버 다운 시 중단
         if: steps.pre_health.outputs.server_up == 'false'
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          Write-Host "::error::서버가 다운 상태입니다. 파이프라인을 중단합니다. Crash 로그를 확인하세요."
+          Write-Host "::error::API 서버가 기동되지 않았습니다. Crash 로그를 확인하세요."
           exit 1
 
       - name: Ollama health check
@@ -371,23 +428,30 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          try {
-            $resp = Invoke-WebRequest -Uri "$env:BASE_URL/health" -TimeoutSec 5 -ErrorAction Stop
-            $up = $resp.StatusCode -lt 500
-          }
-          catch {
-            $up = $false
+          $up = $false
+          foreach ($healthUrl in @("$env:BASE_URL/health", "$env:BASE_URL/api/health")) {
+            try {
+              $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
+              if ($null -ne $resp.StatusCode -and $resp.StatusCode -lt 500) {
+                $up = $true
+                break
+              }
+            }
+            catch {
+            }
           }
 
           "server_up=$($up.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
           if (-not $up) {
-            Write-Host "::warning::테스트 실행 중 서버가 다운됐습니다. Crash 로그를 수집합니다."
+            Write-Host "::warning::테스트 실행 중 API 서버가 다운됐습니다. Crash 로그를 수집합니다."
           }
 
       - name: Crash 로그 수집 (테스트 후)
         if: always() && steps.post_health.outputs.server_up == 'false'
-        run: scripts\collect_crash_logs.ps1 -OutputDir "$env:CRASH_LOG_DIR`_post" -Label "post_test"
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          scripts\collect_crash_logs.ps1 -OutputDir "$env:CRASH_LOG_DIR`_post" -Label "post_test"
 
       - name: Crash 로그 업로드 (테스트 후)
         if: always() && steps.post_health.outputs.server_up == 'false'
@@ -437,7 +501,7 @@ jobs:
           Write-Host "[Result] server_up='$serverUpRaw'  pytest_exit='$exitCodeRaw'"
 
           if ($serverUpRaw -eq "false") {
-            Write-Host "::error::Server crashed during test run. Check crash-log artifacts."
+            Write-Host "::error::API server crashed during test run. Check crash-log artifacts."
             exit 2
           }
 
@@ -455,4 +519,18 @@ jobs:
 
           Write-Host "[Result] Pipeline completed successfully."
 
-      
+      - name: API 서버 종료
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          if ($env:SERVER_PID) {
+            try {
+              Stop-Process -Id [int]$env:SERVER_PID -Force -ErrorAction Stop
+              Write-Host "[Server] stopped pid=$env:SERVER_PID"
+            }
+            catch {
+              Write-Host "[Server] 종료 실패 또는 이미 종료됨: $($_.Exception.Message)"
+            }
+          }
