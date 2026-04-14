@@ -1,4 +1,4 @@
-from .openapi_parser import OpenAPIParser
+from .api_parser import APIParser
 from .python_parser import PythonFunctionParser
 
-__all__ = ["OpenAPIParser", "PythonFunctionParser"]
+__all__ = ["APIParser", "PythonFunctionParser"]

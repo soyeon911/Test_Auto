@@ -13,7 +13,7 @@ target:
 
 # ── Local server (for api target) ────────────────────────────────────────────
 server:
-  base_url: "http://192.168.150.162:8080"
+  base_url: "http://192.168.150.158:8080"
   health_check_path: "/health"
   swagger_paths:
     - "QFEapi.json"
@@ -57,7 +57,7 @@ watcher:
 
 agent:
   provider: ollama
-  model: llama3.2:3b
+  model: llama3.1:8b
   max_tokens: 256
   api_key_env: OLLAMA_API_KEY
 

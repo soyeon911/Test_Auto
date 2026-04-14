@@ -42,175 +42,214 @@ from typing import Any
 
 from .llm_client import BaseLLMClient, create_llm_client
 from .rule_based_generator import RuleBasedTCGenerator
-from .semantic_tagger import SemanticTagger
+from .schema_enricher import SchemaEnricher
 
 
 # ─── AI prompts ───────────────────────────────────────────────────────────────
 
 _AI_SYSTEM_API = textwrap.dedent("""
-You are a senior QA engineer specialising in API testing for a biometric face-recognition server.
+You are a QA engineer for a biometric face-recognition API.
 
-─── Server response contract ─────────────────────────────────────────────────
-This server ALWAYS returns HTTP 200, even for errors.
-Success or failure is indicated inside the JSON body:
-  • Success : {"success": true,  "data": {...}}
-  • Error   : {"success": false, "error_code": <negative int>, "msg": "..."}
-
-So your assertions must check the body, NOT the HTTP status code:
+CONTRACT:
+- HTTP status is ALWAYS 200
+- success/failure is in JSON:
+  success: {"success": true, "data": {...}}
+  error  : {"success": false, "error_code": <neg>, "msg": "..."}
+- ALWAYS assert:
   body = resp.json()
-  assert body.get("success") == False or body.get("error_code", 0) < 0, (
-      f"Expected error but got: {resp.text[:300]}"
-  )
+  assert body.get("success")==False or body.get("error_code",0)<0
 
-─── Rule-based tests already generated ──────────────────────────────────────
-The rule-based layer already covers:
-  - positive (happy-path with dummy values)
-  - missing_required (omit each required field)
-  - wrong_type (send wrong JSON type per field)
-  - boundary (integer min/max/zero edges)
-  - invalid_enum (unlisted enum values)
-  - semantic_probe (tag-specific bad values: invalid base64, out-of-range float, etc.)
+RULE_BASED_ALREADY:
+- positive
+- missing_required
+- wrong_type
+- boundary
+- invalid_enum
+- semantic_probe
+→ DO NOT DUPLICATE
 
-DO NOT duplicate any of the above patterns.
+TASK:
+Generate ONLY additional edge-case tests:
+- combinatorial negatives (multi invalid fields)
+- domain logic (duplicate enroll, unknown user_id, sequence cases)
+- semantic edges (huge/truncated/corrupt base64)
+- injection/fuzz (SQL, null byte, >10KB values)
+- optional-field combos
 
-─── Your task ────────────────────────────────────────────────────────────────
-Generate ONLY additional edge-case test functions not covered above.
-
-Focus exclusively on:
-  1. Combinatorial negatives  — multiple bad fields simultaneously
-  2. Domain / business logic  — e.g. enroll then identify, unknown user_id, duplicate enroll
-  3. Semantic edge cases      — extremely large base64, truncated base64, corrupt image header
-  4. Injection / fuzzing      — SQL injection strings, null bytes, very long values (>10 KB)
-  5. Optional-field combos    — omit optional fields in various combinations
-
-─── Output rules ─────────────────────────────────────────────────────────────
-  • Return valid Python ONLY — no markdown fences, no prose, no comments outside functions.
-  • Return at most 2 test functions. Keep the code short and syntactically minimal.
-  • Every function starts with `test_` and accepts `base_url` as the ONLY argument.
-  • HTTP calls: requests.<method>(f"{base_url}<path>", json=..., timeout=10)
-  • Assertions MUST use the body-level format above (not status code != 200).
-  • Do NOT add import statements at module level — they are already present.
-  • Do NOT repeat any function name from the already-generated tests.
-  • @pytest.mark.xfail is allowed for known-fragile edge cases.
+RULES:
+- Python only (no markdown, no prose)
+- max 2 functions
+- def test_*(base_url)
+- must include: path = "<endpoint>"
+- NEVER hardcode host
+- call: requests.<method>(f"{base_url}{path}", json=..., timeout=10)
+- JSON-serializable only (no bytes)
+- no top-level imports
+- no duplicate names
+- use body-level assertion only
+- @pytest.mark.xfail allowed
 """).strip()
 
 _AI_SYSTEM_PYTHON = textwrap.dedent("""
-You are a senior QA engineer specialising in Python unit testing.
-You will be given:
-  1. A Python function signature and docstring (JSON).
-  2. Rule-based pytest tests that have already been generated for it.
+You are a QA engineer for Python unit tests.
 
-Your task: generate ONLY additional edge-case pytest test functions
-that are NOT already covered by the rule-based tests.
+TASK:
+Generate ONLY additional edge-case pytest tests NOT covered by rule-based tests.
 
-Focus on:
-  - None / null inputs for optional args
-  - Empty containers ([], {}, "")
-  - Boundary values near documented limits
-  - Combinations of invalid arguments
-  - Side effects, mutability, exception message content
+FOCUS:
+- None / null
+- empty values ([], {}, "")
+- boundary edges
+- invalid combinations
+- side effects / mutation / exception messages
 
-Output rules:
-  - Valid Python only — no markdown fences, no prose outside code.
-  - Every function must start with `test_` and take no arguments (no fixtures).
-  - Import the module inside each test function body.
-  - Do NOT repeat any test function name from the already-generated tests.
-  - Do NOT add top-level import statements.
-  - Decorators like @pytest.mark.xfail are allowed and encouraged.
+RULES:
+- Python only (no markdown, no prose)
+- def test_*()
+- no fixtures
+- import module inside function
+- no top-level imports
+- no duplicate test names
+- @pytest.mark.xfail allowed
 """).strip()
 
 _AI_USER_TEMPLATE = textwrap.dedent("""
-=== Endpoint summary ===
+EP:
 {endpoint_summary}
 
-=== Semantic tags ===
-{semantic_tags}
-
-=== Rule-based tests already covered (DO NOT duplicate) ===
+RULE_COVERAGE:
 {rule_summary}
 
-Generate at most {max_extra} additional edge-case test functions.
-Focus on combinatorial negatives, domain-logic errors, and injection/fuzzing.
-Do NOT repeat single-field invalid cases already listed above.
-Return only valid Python pytest functions — no prose, no markdown.
-""").strip()
+Generate <= {max_extra} extra edge-case tests.
+Focus: combinatorial / domain / injection.
+Skip single-field invalids already covered.
 
+Return Python only.
+""").strip()
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
 def _build_semantic_tag_summary(endpoint: dict[str, Any]) -> str:
-    """Compact semantic-tag listing for the AI prompt."""
     lines: list[str] = []
+
+    def fmt_constraints(schema: dict) -> str:
+        cons = schema.get("x_constraints", {}) or {}
+        parts = []
+        if schema.get("semantic_tag"):
+            parts.append(f"tag={schema['semantic_tag']}")
+        if cons.get("minimum") is not None:
+            parts.append(f"min={cons['minimum']}")
+        if cons.get("maximum") is not None:
+            parts.append(f"max={cons['maximum']}")
+        if cons.get("format_hint"):
+            parts.append(f"format={cons['format_hint']}")
+        if cons.get("encoding_hint"):
+            parts.append(f"encoding={cons['encoding_hint']}")
+        return ", ".join(parts) if parts else "none"
+
     for p in endpoint.get("parameters", []):
-        tag = (p.get("schema") or {}).get("semantic_tag", "")
-        if tag:
-            lines.append(f"  {p['name']:20s}: {tag}  (param {p.get('in', '')})")
+        schema = p.get("schema") or {}
+        lines.append(f"  {p['name']:20s}: {fmt_constraints(schema)}  (param {p.get('in', '')})")
+
     rb = endpoint.get("request_body")
     if rb:
         for fname, fschema in ((rb.get("schema") or {}).get("properties", {}) or {}).items():
-            tag = fschema.get("semantic_tag", "")
-            if tag:
-                lines.append(f"  {fname:20s}: {tag}  (body)")
+            lines.append(f"  {fname:20s}: {fmt_constraints(fschema)}  (body)")
+
     return "\n".join(lines) if lines else "  (none)"
 
 
 def _build_compact_endpoint_summary(endpoint: dict[str, Any]) -> str:
     """
     Strip the endpoint dict down to only what AI needs for test generation.
-    Omits description, summary, tags, responses, examples — keeps type/enum/semantic_tag.
+    x_constraints is flattened: only type/required/semantic_tag/min/max/enum/format_hint/encoding_hint.
     """
     req_body = endpoint.get("request_body") or {}
     schema   = req_body.get("schema") or {}
 
-    compact: dict[str, Any] = {
-        "operation_id": endpoint.get("operation_id", ""),
-        "method":       endpoint.get("method", ""),
-        "path":         endpoint.get("path", ""),
-        "parameters":   [],
-        "request_body": {
-            "required": req_body.get("required", False),
-            "schema": {
-                "type":       schema.get("type", "object"),
-                "required":   schema.get("required", []),
-                "properties": {},
-            },
-        },
-    }
-
-    for p in endpoint.get("parameters", []):
-        ps = p.get("schema") or {}
-        entry: dict[str, Any] = {
-            "name":         p.get("name", ""),
-            "in":           p.get("in", ""),
-            "required":     p.get("required", False),
-            "type":         ps.get("type", "string"),
-            "semantic_tag": ps.get("semantic_tag", ""),
-        }
-        if ps.get("enum"):
-            entry["enum"] = ps["enum"]
-        compact["parameters"].append(entry)
-
-    for name, prop in (schema.get("properties") or {}).items():
-        entry = {
-            "type":         prop.get("type", "string"),
-            "required":     name in (schema.get("required") or []),
-            "semantic_tag": prop.get("semantic_tag", ""),
-        }
+    def _compact_field(prop: dict, required: bool) -> dict:
+        cons = prop.get("x_constraints") or {}
+        entry: dict[str, Any] = {"type": prop.get("type", "string")}
+        if required:
+            entry["req"] = True
+        tag = prop.get("semantic_tag", "")
+        if tag:
+            entry["tag"] = tag
+        if cons.get("minimum") is not None:
+            entry["min"] = cons["minimum"]
+        if cons.get("maximum") is not None:
+            entry["max"] = cons["maximum"]
         if prop.get("enum"):
             entry["enum"] = prop["enum"]
-        compact["request_body"]["schema"]["properties"][name] = entry
+        if cons.get("format_hint"):
+            entry["fmt"] = cons["format_hint"]
+        if cons.get("encoding_hint"):
+            entry["enc"] = cons["encoding_hint"]
+        return entry
 
-    return json.dumps(compact, indent=2, ensure_ascii=False)
+    params = {}
+    for p in endpoint.get("parameters", []):
+        ps = p.get("schema") or {}
+        entry = _compact_field(ps, bool(p.get("required")))
+        entry["in"] = p.get("in", "")
+        params[p.get("name", "")] = entry
+
+    req_list = schema.get("required") or []
+    props = {
+        name: _compact_field(prop, name in req_list)
+        for name, prop in (schema.get("properties") or {}).items()
+    }
+
+    compact: dict[str, Any] = {
+        "op":     endpoint.get("operation_id", ""),
+        "method": endpoint.get("method", "").upper(),
+        "path":   endpoint.get("path", ""),
+    }
+    if params:
+        compact["params"] = params
+    if props:
+        compact["body"] = props
+
+    return json.dumps(compact, separators=(",", ":"), ensure_ascii=False)
 
 
 def _build_rule_test_summary(rule_code: str) -> str:
-    """Return only the function names of already-generated rule tests (much smaller than full code)."""
+    """Return a coverage summary instead of the full function name list."""
     if not rule_code.strip():
         return "(none)"
     names = re.findall(r"^def\s+(test_[a-zA-Z0-9_]+)\s*\(", rule_code, re.MULTILINE)
     if not names:
-        return "(could not extract function names)"
-    return "\n".join(f"  - {n}" for n in names)
+        return "(could not extract)"
+
+    cats: dict[str, list[str]] = {}
+    for n in names:
+        if "_semantic_" in n:
+            # extract field+probe: semantic_{field}_{probe}
+            detail = n.split("_semantic_", 1)[-1]
+            cats.setdefault("semantic_probe", []).append(detail)
+        elif n.endswith("_positive"):
+            cats.setdefault("positive", []).append("")
+        elif "_missing_required_" in n:
+            cats.setdefault("missing_req", []).append("")
+        elif "_wrong_type_" in n:
+            cats.setdefault("wrong_type", []).append("")
+        elif "_boundary_" in n:
+            cats.setdefault("boundary", []).append("")
+        elif "_invalid_enum_" in n:
+            cats.setdefault("invalid_enum", []).append("")
+        else:
+            cats.setdefault("other", []).append(n.rsplit("_", 1)[-1])
+
+    lines = []
+    for cat, items in cats.items():
+        if cat == "semantic_probe":
+            probes = ", ".join(items[:6]) + ("…" if len(items) > 6 else "")
+            lines.append(f"{cat}({len(items)}): {probes}")
+        elif cat == "other":
+            lines.append(f"{cat}({len(items)}): {', '.join(items[:4])}")
+        else:
+            lines.append(f"{cat}({len(items)})")
+    return "; ".join(lines)
 
 
 def _safe_name(text: str) -> str:
@@ -218,8 +257,9 @@ def _safe_name(text: str) -> str:
 
 
 def _strip_fences(text: str) -> str:
-    text = re.sub(r"^```python\s*", "", text, flags=re.MULTILINE)
-    text = re.sub(r"^```\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r'^(import pytest\s*\n)(?:import pytest\s*\n)+', r'\1', text, flags=re.MULTILINE)
+    text = re.sub(r'^(import requests\s*\n)(?:import requests\s*\n)+', r'\1', text, flags=re.MULTILINE)
+
     return text.strip()
 
 
@@ -315,7 +355,7 @@ class TCGeneratorAgent:
         self.ai_dir   = Path(output_dirs.get("ai",   "./tests/generated/ai"))
         self.rule_dir.mkdir(parents=True, exist_ok=True)
         self.ai_dir.mkdir(parents=True, exist_ok=True)
-        self._semantic_tagger = SemanticTagger(config)
+        self._schema_enricher = SchemaEnricher(config)
 
         rb_cfg = tc_cfg.get("rule_based", {})
         ai_cfg = tc_cfg.get("ai_augment", {})
@@ -330,6 +370,23 @@ class TCGeneratorAgent:
 
         # [TODO-1] Load stored spec fingerprints from existing generated files
         self._known_fingerprints: set[str] = self._load_fingerprints()
+
+    def _load_fingerprints(self) -> set[str]:
+        """Extract spec_hash from existing generated TC files."""
+        fingerprints: set[str] = set()
+        for d in [self.rule_dir, self.ai_dir]:
+            if not d.exists():
+                continue
+            for f in d.glob("test_*.py"):
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    # Extract: # spec_hash : <hash>
+                    m = re.search(r"# spec_hash\s*:\s*([a-f0-9]+)", content)
+                    if m:
+                        fingerprints.add(m.group(1))
+                except Exception:
+                    pass  # 파일 읽기 실패 무시
+        return fingerprints
 
     def _resolve_ai_endpoint_limit(self, config: dict) -> int | None:
         """
@@ -382,7 +439,7 @@ class TCGeneratorAgent:
     # ─── internal ─────────────────────────────────────────────────────────────
 
     def _generate_one(self, endpoint: dict[str, Any]) -> list[Path]:
-        endpoint = self._semantic_tagger.tag_endpoint(endpoint)
+        endpoint = self._schema_enricher.tag_endpoint(endpoint)
         
         op_id       = _safe_name(endpoint.get("operation_id", "unknown"))
         fingerprint = _endpoint_fingerprint(endpoint)
@@ -448,12 +505,10 @@ class TCGeneratorAgent:
 
         # ── compact prompts (Ollama/local-LLM friendly) ───────────────────────
         endpoint_summary = _build_compact_endpoint_summary(endpoint)
-        semantic_tags    = _build_semantic_tag_summary(endpoint)
         rule_summary     = _build_rule_test_summary(rule_code)
 
         base_user_prompt = _AI_USER_TEMPLATE.format(
             endpoint_summary = endpoint_summary,
-            semantic_tags    = semantic_tags,
             rule_summary     = rule_summary,
             max_extra        = self.max_extra,
         )
@@ -467,15 +522,20 @@ class TCGeneratorAgent:
             try:
                 raw  = self._llm.generate(system_prompt, user_prompt)
                 code = _strip_fences(raw)
+                #code = self._postprocess_ai_code(code, endpoint)
 
                 # Step 1: syntax check
                 if not _is_valid_python(code):
                     print(f"[TCAgent] attempt {attempt}: syntax error — retrying…")
-                    # rebuild from base; do NOT accumulate
+                    print("[TCAgent] --- AI raw code start ---")
+                    print(code[:2000])
+                    print("[TCAgent] --- AI raw code end ---")
                     user_prompt = (
                         base_user_prompt
                         + "\n\nPrevious output had syntax errors. "
-                          "Return fewer functions and ensure valid Python only."
+                        "Return EXACTLY 1 short pytest function. "
+                        "No prose. No imports. No comments. "
+                        "Ensure valid Python only."
                     )
                     continue
 
@@ -486,7 +546,7 @@ class TCGeneratorAgent:
                 print(f"[TCAgent] attempt {attempt}: collect failed — retrying…\n  {err[:200]}")
                 user_prompt = (
                     base_user_prompt
-                    + f"\n\nPrevious output failed pytest --collect-only:\n{err[:200]}\n"
+                    + f"\n\nPrevious output failed pytest --collect-only:\n{err}\n"
                       "Return fewer functions and fix all issues."
                 )
 
@@ -500,7 +560,111 @@ class TCGeneratorAgent:
                 wait_time *= 2
 
         return ""
+    
+    def _postprocess_ai_code(self, code: str, endpoint: dict[str, Any]) -> str:
+        """
+        Normalize AI-generated pytest code so it matches this project's execution model.
 
+        Fixes:
+        - enforce `base_url` fixture param
+        - remove duplicate top-level imports
+        - remove hardcoded localhost/base_url assignments
+        - ensure `path = "<endpoint>"` exists inside each test
+        - normalize requests calls to f"{base_url}{path}"
+        - remove obvious non-JSON bytes literals
+        """
+        path = str(endpoint.get("path", ""))
+        method = str(endpoint.get("method", "post")).lower()
+
+        code = code.strip()
+
+        # 1) remove duplicate imports and top-level imports we already inject in saved file
+        lines = code.splitlines()
+        filtered: list[str] = []
+        seen_pytest = False
+        seen_requests = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            if stripped == "import pytest":
+                if seen_pytest:
+                    continue
+                seen_pytest = True
+                continue  # remove top-level import entirely
+            if stripped == "import requests":
+                if seen_requests:
+                    continue
+                seen_requests = True
+                continue  # remove top-level import entirely
+
+            filtered.append(line)
+
+        code = "\n".join(filtered).strip()
+
+        # 2) remove hardcoded base_url assignments
+        code = re.sub(
+            r'^\s*base_url\s*=\s*["\'][^"\']+["\']\s*$',
+            '',
+            code,
+            flags=re.MULTILINE,
+        )
+
+        # 3) ensure every test function has (base_url)
+        code = re.sub(
+            r'^def\s+(test_[a-zA-Z0-9_]+)\s*\(\s*\)\s*:',
+            r'def \1(base_url):',
+            code,
+            flags=re.MULTILINE,
+        )
+
+        # 4) if function has wrong arg list, normalize to exactly (base_url)
+        code = re.sub(
+            r'^def\s+(test_[a-zA-Z0-9_]+)\s*\([^)]*\)\s*:',
+            r'def \1(base_url):',
+            code,
+            flags=re.MULTILINE,
+        )
+
+        # 5) add path declaration if missing inside each test function
+        def _ensure_path_block(match: re.Match) -> str:
+            func_block = match.group(0)
+            if re.search(r'^\s+path\s*=', func_block, flags=re.MULTILINE):
+                return func_block
+            first_line_end = func_block.find("\n")
+            if first_line_end == -1:
+                return func_block + f'\n    path = "{path}"'
+            return func_block[:first_line_end + 1] + f'    path = "{path}"\n' + func_block[first_line_end + 1:]
+
+        code = re.sub(
+            r'^def\s+test_[a-zA-Z0-9_]+\s*\(\s*base_url\s*\)\s*:\n(?:^[ \t]+.*\n?)*',
+            _ensure_path_block,
+            code,
+            flags=re.MULTILINE,
+        )
+
+        # 6) normalize localhost calls -> base_url + path
+        code = re.sub(
+            rf'requests\.{method}\(\s*f?["\']http://localhost(?::\d+)?[^"\']*["\']',
+            f'requests.{method}(f"{{base_url}}{{path}}"',
+            code,
+        )
+
+        # 7) normalize any direct f"{base_url}/something" -> f"{base_url}{path}"
+        code = re.sub(
+            rf'requests\.{method}\(\s*f["\']\{{base_url\}}/[^"\']*["\']',
+            f'requests.{method}(f"{{base_url}}{{path}}"',
+            code,
+        )
+
+        # 8) bytes literals are not JSON-serializable; convert obvious bytes literal to plain string
+        code = re.sub(r'b"([^"]*)"', r'"\1"', code)
+        code = re.sub(r"b'([^']*)'", r'"\1"', code)
+
+        # 9) remove excessive blank lines
+        code = re.sub(r'\n{3,}', '\n\n', code).strip()
+
+        return code + "\n"
     def _validate_collect(self, code: str) -> tuple[bool, str]:
         """
         [TODO-2] Write code to a temp file and run pytest --collect-only.
@@ -564,51 +728,32 @@ class TCGeneratorAgent:
         if not code.strip():
             return None
 
-        op_id     = _safe_name(endpoint.get("operation_id", "unknown"))
-        file_path = out_dir / f"test_{op_id}.py"
+        op_id    = _safe_name(endpoint.get("operation_id", "unknown"))
+        out_path = out_dir / f"test_{op_id}.py"
 
-        header = textwrap.dedent(f"""\
-            # Auto-generated by TCGeneratorAgent [{layer}]
-            # {endpoint.get('method', '').upper()} {endpoint.get('path', '')}
-            # operation : {endpoint.get('operation_id', '')}
-            # spec_hash : {fingerprint}
-            # ───────────────────────────────────────────────────────
-            import pytest
-            import requests
+        method = endpoint.get("method", "").upper()
+        path   = endpoint.get("path", "")
+        op     = endpoint.get("operation_id", "")
+        header = (
+            f"# Auto-generated by TCGeneratorAgent [{layer}]\n"
+            f"# {method} {path}\n"
+            f"# operation : {op}\n"
+            f"# spec_hash : {fingerprint}\n"
+            f"# {'─' * 53}\n"
+            "import pytest\n"
+            "import requests\n\n"
+        )
 
-        """)
-
-        if file_path.exists():
-            existing = file_path.read_text(encoding="utf-8")
-            new_code = _ast_extract_new_functions(existing, code)   # [TODO-4]
-
-            if not new_code.strip():
-                print(f"[TCAgent] No new functions for {file_path.name} — updating spec_hash.")
-                updated = re.sub(
-                    r"# spec_hash : [a-f0-9]+",
-                    f"# spec_hash : {fingerprint}",
-                    existing,
-                )
-                file_path.write_text(updated, encoding="utf-8")
-                return file_path
-
-            with file_path.open("a", encoding="utf-8") as f:
-                f.write(f"\n\n# --- {layer} (appended) ---\n\n" + new_code)
+        if not out_path.exists():
+            out_path.write_text(header + code, encoding="utf-8")
         else:
-            file_path.write_text(header + code, encoding="utf-8")
+            existing = out_path.read_text(encoding="utf-8")
+            new_funcs = _ast_extract_new_functions(existing, code)
+            if new_funcs.strip():
+                out_path.write_text(existing.rstrip() + "\n\n" + new_funcs, encoding="utf-8")
+            else:
+                return None  # nothing new to add
 
-        print(f"[TCAgent] [OK] [{layer}] {file_path}")
-        return file_path
-
-    # ── dedup persistence ─────────────────────────────────────────────────────
-
-    def _load_fingerprints(self) -> set[str]:
-        """[TODO-1] Read stored spec_hash values from both rule and AI output dirs."""
-        fps: set[str] = set()
-        for search_dir in (self.rule_dir, self.ai_dir):
-            for f in search_dir.glob("test_*.py"):
-                for line in f.read_text(encoding="utf-8").splitlines():
-                    m = re.search(r"# spec_hash\s*:\s*([a-f0-9]{64})", line)
-                    if m:
-                        fps.add(m.group(1))
-        return fps
+        print(f"[TCAgent] [OK] [{layer}] {out_path}")
+        return out_path
+        

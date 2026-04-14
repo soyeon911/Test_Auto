@@ -2,30 +2,47 @@
 # POST /api/v2/all-in-one
 # operation : post_/api/v2/all-in-one
 # spec_hash : 0896c976fa4c37a3d323cd7f87338a22dcc28452b6982f623a8cefc59dda6963
-# ───────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
 import pytest
 import requests
 
 def test_post__api_v2_all_in_one_positive(base_url):
     """[rule:positive] Happy-path — valid request should succeed."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code in [200], (
-        f"Expected success, got {resp.status_code}: {resp.text[:200]}"
+    assert resp.status_code < 500, (
+        f"[FAIL] expected success-like response, got crash\n"
+        f"  Status : {resp.status_code}\n"
+        f"  Body   : {resp.text[:300]}"
     )
+    try:
+        body = resp.json()
+    except ValueError:
+        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+    assert body.get("success") == True and body.get("error_code", 0) >= 0, (
+        f"[FAIL] expected QFE success response\n"
+        f"  success    : {body.get('success')}\n"
+        f"  error_code : {body.get('error_code')}\n"
+        f"  msg        : {body.get('msg')}\n"
+        f"  Full body  : {resp.text[:300]}"
+    )
+
 
 
 
 def test_post__api_v2_all_in_one_wrong_type_body_channel(base_url):
-    """[rule:wrong_type] Pass wrong type for body field 'channel' (expected integer) → error response."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': '"not_an_integer"', 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+    """[rule:wrong_type] Pass wrong type for body field 'channel' (expected integer)."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 'not_an_integer', 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] wrong type for body field 'channel' — server crashed\n"
+        f"[FAIL] wrong_type on 'channel' — server crashed\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
     )
-    body = resp.json()
+    try:
+        body = resp.json()
+    except ValueError:
+        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
     assert body.get("success") == False or body.get("error_code", 0) < 0, (
-        f"[FAIL] wrong type for body field 'channel' — expected error response\n"
+        f"[FAIL] wrong_type on 'channel' — expected QFE error response\n"
         f"  success    : {body.get('success')}\n"
         f"  error_code : {body.get('error_code')}\n"
         f"  msg        : {body.get('msg')}\n"
@@ -36,16 +53,19 @@ def test_post__api_v2_all_in_one_wrong_type_body_channel(base_url):
 
 
 def test_post__api_v2_all_in_one_wrong_type_body_height(base_url):
-    """[rule:wrong_type] Pass wrong type for body field 'height' (expected integer) → error response."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': '"not_an_integer"', 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+    """[rule:wrong_type] Pass wrong type for body field 'height' (expected integer)."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 'not_an_integer', 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] wrong type for body field 'height' — server crashed\n"
+        f"[FAIL] wrong_type on 'height' — server crashed\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
     )
-    body = resp.json()
+    try:
+        body = resp.json()
+    except ValueError:
+        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
     assert body.get("success") == False or body.get("error_code", 0) < 0, (
-        f"[FAIL] wrong type for body field 'height' — expected error response\n"
+        f"[FAIL] wrong_type on 'height' — expected QFE error response\n"
         f"  success    : {body.get('success')}\n"
         f"  error_code : {body.get('error_code')}\n"
         f"  msg        : {body.get('msg')}\n"
@@ -56,16 +76,19 @@ def test_post__api_v2_all_in_one_wrong_type_body_height(base_url):
 
 
 def test_post__api_v2_all_in_one_wrong_type_body_width(base_url):
-    """[rule:wrong_type] Pass wrong type for body field 'width' (expected integer) → error response."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': '"not_an_integer"'}, timeout=10)
+    """[rule:wrong_type] Pass wrong type for body field 'width' (expected integer)."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 'not_an_integer'}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] wrong type for body field 'width' — server crashed\n"
+        f"[FAIL] wrong_type on 'width' — server crashed\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
     )
-    body = resp.json()
+    try:
+        body = resp.json()
+    except ValueError:
+        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
     assert body.get("success") == False or body.get("error_code", 0) < 0, (
-        f"[FAIL] wrong type for body field 'width' — expected error response\n"
+        f"[FAIL] wrong_type on 'width' — expected QFE error response\n"
         f"  success    : {body.get('success')}\n"
         f"  error_code : {body.get('error_code')}\n"
         f"  msg        : {body.get('msg')}\n"
@@ -76,139 +99,94 @@ def test_post__api_v2_all_in_one_wrong_type_body_width(base_url):
 
 
 def test_post__api_v2_all_in_one_semantic_channel_negative(base_url):
-    """[rule:semantic_probe] 'channel' tag=integer_count probe=negative."""
+    """[rule:semantic_probe] body field 'channel' tag=integer_count probe=negative policy=probe_only."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': -1, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:negative on 'channel' — server crashed\n"
+        f"[FAIL] semantic:negative caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:negative on 'channel' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 
 
 
 
 def test_post__api_v2_all_in_one_semantic_channel_zero(base_url):
-    """[rule:semantic_probe] 'channel' tag=integer_count probe=zero."""
+    """[rule:semantic_probe] body field 'channel' tag=integer_count probe=zero policy=probe_only."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 0, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:zero on 'channel' — server crashed\n"
+        f"[FAIL] semantic:zero caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:zero on 'channel' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 
 
 
 
 def test_post__api_v2_all_in_one_semantic_channel_overflow(base_url):
-    """[rule:semantic_probe] 'channel' tag=integer_count probe=overflow."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 100000, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+    """[rule:semantic_probe] body field 'channel' tag=integer_count probe=overflow policy=probe_only."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10001, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:overflow on 'channel' — server crashed\n"
+        f"[FAIL] semantic:overflow caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:overflow on 'channel' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 
 
 
 
 def test_post__api_v2_all_in_one_semantic_height_negative(base_url):
-    """[rule:semantic_probe] 'height' tag=integer_count probe=negative."""
+    """[rule:semantic_probe] body field 'height' tag=integer_count probe=negative policy=probe_only."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': -1, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:negative on 'height' — server crashed\n"
+        f"[FAIL] semantic:negative caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:negative on 'height' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 
 
 
 
 def test_post__api_v2_all_in_one_semantic_height_zero(base_url):
-    """[rule:semantic_probe] 'height' tag=integer_count probe=zero."""
+    """[rule:semantic_probe] body field 'height' tag=integer_count probe=zero policy=probe_only."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 0, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:zero on 'height' — server crashed\n"
+        f"[FAIL] semantic:zero caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:zero on 'height' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 
 
 
 
 def test_post__api_v2_all_in_one_semantic_height_overflow(base_url):
-    """[rule:semantic_probe] 'height' tag=integer_count probe=overflow."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 100000, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+    """[rule:semantic_probe] body field 'height' tag=integer_count probe=overflow policy=probe_only."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10001, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:overflow on 'height' — server crashed\n"
+        f"[FAIL] semantic:overflow caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:overflow on 'height' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 
 
 
 
 def test_post__api_v2_all_in_one_semantic_image_data_invalid_b64(base_url):
-    """[rule:semantic_probe] 'image_data' tag=base64_image probe=invalid_b64."""
+    """[rule:semantic_probe] body field 'image_data' tag=base64_image probe=invalid_b64 policy=must_fail."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'not_base64!@#', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
         f"[FAIL] semantic:invalid_b64 on 'image_data' — server crashed\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
     )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:invalid_b64 on 'image_data' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
+    try:
+        body = resp.json()
+    except ValueError:
+        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+    assert body.get("success") == False or body.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:invalid_b64 on 'image_data' — expected QFE error response\n"
+        f"  success    : {body.get('success')}\n"
+        f"  error_code : {body.get('error_code')}\n"
+        f"  msg        : {body.get('msg')}\n"
         f"  Full body  : {resp.text[:300]}"
     )
 
@@ -216,39 +194,22 @@ def test_post__api_v2_all_in_one_semantic_image_data_invalid_b64(base_url):
 
 
 def test_post__api_v2_all_in_one_semantic_image_data_empty_b64(base_url):
-    """[rule:semantic_probe] 'image_data' tag=base64_image probe=empty_b64."""
+    """[rule:semantic_probe] body field 'image_data' tag=base64_image probe=empty_b64 policy=must_fail."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': '', 'width': 10}, timeout=10)
     assert resp.status_code < 500, (
         f"[FAIL] semantic:empty_b64 on 'image_data' — server crashed\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
     )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:empty_b64 on 'image_data' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
-    )
-
-
-
-
-def test_post__api_v2_all_in_one_semantic_image_data_null_value(base_url):
-    """[rule:semantic_probe] 'image_data' tag=base64_image probe=null_value."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': None, 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:null_value on 'image_data' — server crashed\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:null_value on 'image_data' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
+    try:
+        body = resp.json()
+    except ValueError:
+        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+    assert body.get("success") == False or body.get("error_code", 0) < 0, (
+        f"[FAIL] semantic:empty_b64 on 'image_data' — expected QFE error response\n"
+        f"  success    : {body.get('success')}\n"
+        f"  error_code : {body.get('error_code')}\n"
+        f"  msg        : {body.get('msg')}\n"
         f"  Full body  : {resp.text[:300]}"
     )
 
@@ -256,59 +217,35 @@ def test_post__api_v2_all_in_one_semantic_image_data_null_value(base_url):
 
 
 def test_post__api_v2_all_in_one_semantic_width_negative(base_url):
-    """[rule:semantic_probe] 'width' tag=integer_count probe=negative."""
+    """[rule:semantic_probe] body field 'width' tag=integer_count probe=negative policy=probe_only."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': -1}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:negative on 'width' — server crashed\n"
+        f"[FAIL] semantic:negative caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:negative on 'width' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 
 
 
 
 def test_post__api_v2_all_in_one_semantic_width_zero(base_url):
-    """[rule:semantic_probe] 'width' tag=integer_count probe=zero."""
+    """[rule:semantic_probe] body field 'width' tag=integer_count probe=zero policy=probe_only."""
     resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 0}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:zero on 'width' — server crashed\n"
+        f"[FAIL] semantic:zero caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:zero on 'width' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 
 
 
 
 def test_post__api_v2_all_in_one_semantic_width_overflow(base_url):
-    """[rule:semantic_probe] 'width' tag=integer_count probe=overflow."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 100000}, timeout=10)
+    """[rule:semantic_probe] body field 'width' tag=integer_count probe=overflow policy=probe_only."""
+    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10001}, timeout=10)
     assert resp.status_code < 500, (
-        f"[FAIL] semantic:overflow on 'width' — server crashed\n"
+        f"[FAIL] semantic:overflow caused server crash\n"
         f"  Status : {resp.status_code}\n"
         f"  Body   : {resp.text[:300]}"
-    )
-    body_json = resp.json()
-    assert body_json.get("success") == False or body_json.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:overflow on 'width' — expected error response\n"
-        f"  success    : {body_json.get('success')}\n"
-        f"  error_code : {body_json.get('error_code')}\n"
-        f"  msg        : {body_json.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
     )
 

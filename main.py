@@ -43,7 +43,7 @@ def detect_source_and_parse(source: str, config: dict) -> list[dict]:
       1. config.target.type  (if not 'auto')
       2. file extension / URL heuristic
     """
-    from parsers import OpenAPIParser, PythonFunctionParser
+    from parsers import APIParser, PythonFunctionParser
 
     # Resolve target type
     configured = config.get("target", {}).get("type", "auto")
@@ -67,7 +67,7 @@ def detect_source_and_parse(source: str, config: dict) -> list[dict]:
 
     # Parse based on resolved type
     if target_type == "api":
-        endpoints = OpenAPIParser(source).load().parse()
+        endpoints = APIParser(source).load().parse()
     elif target_type == "python":
         endpoints = PythonFunctionParser(source).load().parse()
     elif target_type == "lib":
