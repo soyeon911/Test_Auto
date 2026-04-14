@@ -230,23 +230,6 @@ jobs:
           Write-Host "[Server] model: $env:SERVER_MODEL_PATH"
           Write-Host "[Server] db: $env:SERVER_DB_PATH"
 
-      - name: 기존 서버 정리
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-
-          Get-Process | Where-Object {
-            $_.Path -like "$env:SERVER_DIR*"
-          } | ForEach-Object {
-            try {
-              Write-Host "[Server] 기존 프로세스 종료: $($_.Name) pid=$($_.Id)"
-              Stop-Process -Id $_.Id -Force -ErrorAction Stop
-            }
-            catch {
-              Write-Host "[Server] 종료 실패: $($_.Exception.Message)"
-            }
-          }
-
       - name: API 서버 실행 (mock interactive)
         id: start_server
         run: |

@@ -740,8 +740,10 @@ class TCGeneratorAgent:
             f"# operation : {op}\n"
             f"# spec_hash : {fingerprint}\n"
             f"# {'─' * 53}\n"
+            "import json\n"
             "import pytest\n"
-            "import requests\n\n"
+            "import requests\n"
+            "from tests.helpers.diag import build_diag, attach_diag\n\n"
         )
 
         if not out_path.exists():

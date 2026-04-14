@@ -2,9 +2,57 @@
 pytest conftest.py — shared fixtures for all generated & manual tests.
 """
 
+import json
 import os
+from pathlib import Path
+
 import pytest
 import requests
+
+# ─── diag JSONL 경로 ─────────────────────────────────────────────────────────
+_DIAG_JSONL = Path("reports/test_diag.jsonl")
+
+
+def _flush_diag(item, outcome: str) -> None:
+    """test의 user_properties에서 diag를 꺼내 JSONL에 기록한다."""
+    diag = None
+    for key, value in getattr(item, "user_properties", []):
+        if key == "diag":
+            diag = value
+            break
+
+    if diag is None:
+        return
+
+    _DIAG_JSONL.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "test_id": item.nodeid,
+        "outcome": outcome,
+        "diag": diag,
+    }
+    try:
+        with _DIAG_JSONL.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # JSONL 기록 실패는 테스트 결과에 영향 없음
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+
+    if report.when != "call":
+        return
+
+    _flush_diag(item, report.outcome)
+
+
+
+def pytest_configure(config):
+    """세션 시작 시 이전 JSONL 초기화."""
+    if _DIAG_JSONL.exists():
+        _DIAG_JSONL.unlink()
 
 
 def pytest_addoption(parser):

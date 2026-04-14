@@ -3,249 +3,716 @@
 # operation : post_/api/v2/all-in-one
 # spec_hash : 0896c976fa4c37a3d323cd7f87338a22dcc28452b6982f623a8cefc59dda6963
 # ─────────────────────────────────────────────────────
+import json
 import pytest
 import requests
+from tests.helpers.diag import build_diag, attach_diag
 
-def test_post__api_v2_all_in_one_positive(base_url):
-    """[rule:positive] Happy-path — valid request should succeed."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] expected success-like response, got crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
+def test_post__api_v2_all_in_one_positive(base_url, request):
+    '[rule:positive] Happy-path — valid request should succeed.'
     try:
-        body = resp.json()
-    except ValueError:
-        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
-    assert body.get("success") == True and body.get("error_code", 0) >= 0, (
-        f"[FAIL] expected QFE success response\n"
-        f"  success    : {body.get('success')}\n"
-        f"  error_code : {body.get('error_code')}\n"
-        f"  msg        : {body.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
-    )
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='state',
+            reason_code='precondition_not_met',
+            target_field='',
+            test_condition='Happy path — all required fields present with valid values',
+            expected_http='200',
+            expected_app='success=true, error_code>=0',
+            resp=resp,
+            body=body,
+            error_detail='state.precondition_not_met',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] expected success-like response, got crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+        try:
+            body = resp.json()
+        except ValueError:
+            pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+        assert body.get("success") == True and body.get("error_code", 0) >= 0, (
+            f"[FAIL] expected QFE success response\n"
+            f"  success    : {body.get('success')}\n"
+            f"  error_code : {body.get('error_code')}\n"
+            f"  msg        : {body.get('msg')}\n"
+            f"  Full body  : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='',
+            test_condition='Happy path — all required fields present with valid values',
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
 
 
-
-def test_post__api_v2_all_in_one_wrong_type_body_channel(base_url):
-    """[rule:wrong_type] Pass wrong type for body field 'channel' (expected integer)."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 'not_an_integer', 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] wrong_type on 'channel' — server crashed\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
+def test_post__api_v2_all_in_one_wrong_type_body_channel(base_url, request):
+    "[rule:wrong_type] Pass wrong type for body field 'channel' (expected integer)."
     try:
-        body = resp.json()
-    except ValueError:
-        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
-    assert body.get("success") == False or body.get("error_code", 0) < 0, (
-        f"[FAIL] wrong_type on 'channel' — expected QFE error response\n"
-        f"  success    : {body.get('success')}\n"
-        f"  error_code : {body.get('error_code')}\n"
-        f"  msg        : {body.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
-    )
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 'not_an_integer', 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='schema',
+            reason_code='type_mismatch',
+            target_field='channel',
+            test_condition="Body field 'channel' sent with wrong type (expected integer, sent 'not_an_integer')",
+            expected_http='200',
+            expected_app='success=false, error_code<0',
+            resp=resp,
+            body=body,
+            error_detail='schema.type_mismatch.channel',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] wrong_type on 'channel' — server crashed\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+        try:
+            body = resp.json()
+        except ValueError:
+            pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+        assert body.get("success") == False or body.get("error_code", 0) < 0, (
+            f"[FAIL] wrong_type on 'channel' — expected QFE error response\n"
+            f"  success    : {body.get('success')}\n"
+            f"  error_code : {body.get('error_code')}\n"
+            f"  msg        : {body.get('msg')}\n"
+            f"  Full body  : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='channel',
+            test_condition="Body field 'channel' sent with wrong type (expected integer, sent 'not_an_integer')",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
 
 
-
-def test_post__api_v2_all_in_one_wrong_type_body_height(base_url):
-    """[rule:wrong_type] Pass wrong type for body field 'height' (expected integer)."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 'not_an_integer', 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] wrong_type on 'height' — server crashed\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
+def test_post__api_v2_all_in_one_wrong_type_body_height(base_url, request):
+    "[rule:wrong_type] Pass wrong type for body field 'height' (expected integer)."
     try:
-        body = resp.json()
-    except ValueError:
-        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
-    assert body.get("success") == False or body.get("error_code", 0) < 0, (
-        f"[FAIL] wrong_type on 'height' — expected QFE error response\n"
-        f"  success    : {body.get('success')}\n"
-        f"  error_code : {body.get('error_code')}\n"
-        f"  msg        : {body.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
-    )
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 'not_an_integer', 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='schema',
+            reason_code='type_mismatch',
+            target_field='height',
+            test_condition="Body field 'height' sent with wrong type (expected integer, sent 'not_an_integer')",
+            expected_http='200',
+            expected_app='success=false, error_code<0',
+            resp=resp,
+            body=body,
+            error_detail='schema.type_mismatch.height',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] wrong_type on 'height' — server crashed\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+        try:
+            body = resp.json()
+        except ValueError:
+            pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+        assert body.get("success") == False or body.get("error_code", 0) < 0, (
+            f"[FAIL] wrong_type on 'height' — expected QFE error response\n"
+            f"  success    : {body.get('success')}\n"
+            f"  error_code : {body.get('error_code')}\n"
+            f"  msg        : {body.get('msg')}\n"
+            f"  Full body  : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='height',
+            test_condition="Body field 'height' sent with wrong type (expected integer, sent 'not_an_integer')",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
 
 
-
-def test_post__api_v2_all_in_one_wrong_type_body_width(base_url):
-    """[rule:wrong_type] Pass wrong type for body field 'width' (expected integer)."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 'not_an_integer'}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] wrong_type on 'width' — server crashed\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
+def test_post__api_v2_all_in_one_wrong_type_body_width(base_url, request):
+    "[rule:wrong_type] Pass wrong type for body field 'width' (expected integer)."
     try:
-        body = resp.json()
-    except ValueError:
-        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
-    assert body.get("success") == False or body.get("error_code", 0) < 0, (
-        f"[FAIL] wrong_type on 'width' — expected QFE error response\n"
-        f"  success    : {body.get('success')}\n"
-        f"  error_code : {body.get('error_code')}\n"
-        f"  msg        : {body.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
-    )
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 'not_an_integer'}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='schema',
+            reason_code='type_mismatch',
+            target_field='width',
+            test_condition="Body field 'width' sent with wrong type (expected integer, sent 'not_an_integer')",
+            expected_http='200',
+            expected_app='success=false, error_code<0',
+            resp=resp,
+            body=body,
+            error_detail='schema.type_mismatch.width',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] wrong_type on 'width' — server crashed\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+        try:
+            body = resp.json()
+        except ValueError:
+            pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+        assert body.get("success") == False or body.get("error_code", 0) < 0, (
+            f"[FAIL] wrong_type on 'width' — expected QFE error response\n"
+            f"  success    : {body.get('success')}\n"
+            f"  error_code : {body.get('error_code')}\n"
+            f"  msg        : {body.get('msg')}\n"
+            f"  Full body  : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='width',
+            test_condition="Body field 'width' sent with wrong type (expected integer, sent 'not_an_integer')",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
 
 
-
-def test_post__api_v2_all_in_one_semantic_channel_negative(base_url):
-    """[rule:semantic_probe] body field 'channel' tag=integer_count probe=negative policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': -1, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:negative caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
-
-
-
-
-def test_post__api_v2_all_in_one_semantic_channel_zero(base_url):
-    """[rule:semantic_probe] body field 'channel' tag=integer_count probe=zero policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 0, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:zero caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
-
-
-
-
-def test_post__api_v2_all_in_one_semantic_channel_overflow(base_url):
-    """[rule:semantic_probe] body field 'channel' tag=integer_count probe=overflow policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10001, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:overflow caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
-
-
-
-
-def test_post__api_v2_all_in_one_semantic_height_negative(base_url):
-    """[rule:semantic_probe] body field 'height' tag=integer_count probe=negative policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': -1, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:negative caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
-
-
-
-
-def test_post__api_v2_all_in_one_semantic_height_zero(base_url):
-    """[rule:semantic_probe] body field 'height' tag=integer_count probe=zero policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 0, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:zero caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
-
-
-
-
-def test_post__api_v2_all_in_one_semantic_height_overflow(base_url):
-    """[rule:semantic_probe] body field 'height' tag=integer_count probe=overflow policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10001, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:overflow caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
-
-
-
-
-def test_post__api_v2_all_in_one_semantic_image_data_invalid_b64(base_url):
-    """[rule:semantic_probe] body field 'image_data' tag=base64_image probe=invalid_b64 policy=must_fail."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'not_base64!@#', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:invalid_b64 on 'image_data' — server crashed\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
+def test_post__api_v2_all_in_one_semantic_channel_negative(base_url, request):
+    "[rule:semantic_probe] body field 'channel' tag=integer_count probe=negative policy=probe_only."
     try:
-        body = resp.json()
-    except ValueError:
-        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
-    assert body.get("success") == False or body.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:invalid_b64 on 'image_data' — expected QFE error response\n"
-        f"  success    : {body.get('success')}\n"
-        f"  error_code : {body.get('error_code')}\n"
-        f"  msg        : {body.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
-    )
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': -1, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='channel',
+            test_condition="'channel' tag=integer_count probe=negative: value=-1",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.channel',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:negative caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='channel',
+            test_condition="'channel' tag=integer_count probe=negative: value=-1",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
 
 
-
-def test_post__api_v2_all_in_one_semantic_image_data_empty_b64(base_url):
-    """[rule:semantic_probe] body field 'image_data' tag=base64_image probe=empty_b64 policy=must_fail."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': '', 'width': 10}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:empty_b64 on 'image_data' — server crashed\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
+def test_post__api_v2_all_in_one_semantic_channel_zero(base_url, request):
+    "[rule:semantic_probe] body field 'channel' tag=integer_count probe=zero policy=probe_only."
     try:
-        body = resp.json()
-    except ValueError:
-        pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
-    assert body.get("success") == False or body.get("error_code", 0) < 0, (
-        f"[FAIL] semantic:empty_b64 on 'image_data' — expected QFE error response\n"
-        f"  success    : {body.get('success')}\n"
-        f"  error_code : {body.get('error_code')}\n"
-        f"  msg        : {body.get('msg')}\n"
-        f"  Full body  : {resp.text[:300]}"
-    )
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 0, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='channel',
+            test_condition="'channel' tag=integer_count probe=zero: value=0",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.channel',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:zero caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='channel',
+            test_condition="'channel' tag=integer_count probe=zero: value=0",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
 
 
+def test_post__api_v2_all_in_one_semantic_channel_overflow(base_url, request):
+    "[rule:semantic_probe] body field 'channel' tag=integer_count probe=overflow policy=probe_only."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10001, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='channel',
+            test_condition="'channel' tag=integer_count probe=overflow: value=10001",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.channel',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:overflow caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='channel',
+            test_condition="'channel' tag=integer_count probe=overflow: value=10001",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
-def test_post__api_v2_all_in_one_semantic_width_negative(base_url):
-    """[rule:semantic_probe] body field 'width' tag=integer_count probe=negative policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': -1}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:negative caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
+
+
+def test_post__api_v2_all_in_one_semantic_height_negative(base_url, request):
+    "[rule:semantic_probe] body field 'height' tag=integer_count probe=negative policy=probe_only."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': -1, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='height',
+            test_condition="'height' tag=integer_count probe=negative: value=-1",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.height',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:negative caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='height',
+            test_condition="'height' tag=integer_count probe=negative: value=-1",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
 
 
+def test_post__api_v2_all_in_one_semantic_height_zero(base_url, request):
+    "[rule:semantic_probe] body field 'height' tag=integer_count probe=zero policy=probe_only."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 0, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='height',
+            test_condition="'height' tag=integer_count probe=zero: value=0",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.height',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:zero caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='height',
+            test_condition="'height' tag=integer_count probe=zero: value=0",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
-def test_post__api_v2_all_in_one_semantic_width_zero(base_url):
-    """[rule:semantic_probe] body field 'width' tag=integer_count probe=zero policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 0}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:zero caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
+
+
+def test_post__api_v2_all_in_one_semantic_height_overflow(base_url, request):
+    "[rule:semantic_probe] body field 'height' tag=integer_count probe=overflow policy=probe_only."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10001, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='height',
+            test_condition="'height' tag=integer_count probe=overflow: value=10001",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.height',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:overflow caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='height',
+            test_condition="'height' tag=integer_count probe=overflow: value=10001",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
 
 
+def test_post__api_v2_all_in_one_semantic_image_data_invalid_b64(base_url, request):
+    "[rule:semantic_probe] body field 'image_data' tag=base64_image probe=invalid_b64 policy=must_fail."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'not_base64!@#', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='invalid_base64',
+            target_field='image_data',
+            test_condition="'image_data' tag=base64_image probe=invalid_b64: value='not_base64!@#'",
+            expected_http='200',
+            expected_app='success=false, error_code<0',
+            resp=resp,
+            body=body,
+            error_detail='domain.invalid_base64.image_data',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:invalid_b64 on 'image_data' — server crashed\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+        try:
+            body = resp.json()
+        except ValueError:
+            pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+        assert body.get("success") == False or body.get("error_code", 0) < 0, (
+            f"[FAIL] semantic:invalid_b64 on 'image_data' — expected QFE error response\n"
+            f"  success    : {body.get('success')}\n"
+            f"  error_code : {body.get('error_code')}\n"
+            f"  msg        : {body.get('msg')}\n"
+            f"  Full body  : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='image_data',
+            test_condition="'image_data' tag=base64_image probe=invalid_b64: value='not_base64!@#'",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
 
-def test_post__api_v2_all_in_one_semantic_width_overflow(base_url):
-    """[rule:semantic_probe] body field 'width' tag=integer_count probe=overflow policy=probe_only."""
-    resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10001}, timeout=10)
-    assert resp.status_code < 500, (
-        f"[FAIL] semantic:overflow caused server crash\n"
-        f"  Status : {resp.status_code}\n"
-        f"  Body   : {resp.text[:300]}"
-    )
 
+
+def test_post__api_v2_all_in_one_semantic_image_data_empty_b64(base_url, request):
+    "[rule:semantic_probe] body field 'image_data' tag=base64_image probe=empty_b64 policy=must_fail."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': '', 'width': 10}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='invalid_base64',
+            target_field='image_data',
+            test_condition="'image_data' tag=base64_image probe=empty_b64: value=''",
+            expected_http='200',
+            expected_app='success=false, error_code<0',
+            resp=resp,
+            body=body,
+            error_detail='domain.invalid_base64.image_data',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:empty_b64 on 'image_data' — server crashed\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+        try:
+            body = resp.json()
+        except ValueError:
+            pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+        assert body.get("success") == False or body.get("error_code", 0) < 0, (
+            f"[FAIL] semantic:empty_b64 on 'image_data' — expected QFE error response\n"
+            f"  success    : {body.get('success')}\n"
+            f"  error_code : {body.get('error_code')}\n"
+            f"  msg        : {body.get('msg')}\n"
+            f"  Full body  : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='image_data',
+            test_condition="'image_data' tag=base64_image probe=empty_b64: value=''",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
+
+
+
+def test_post__api_v2_all_in_one_semantic_width_negative(base_url, request):
+    "[rule:semantic_probe] body field 'width' tag=integer_count probe=negative policy=probe_only."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': -1}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='width',
+            test_condition="'width' tag=integer_count probe=negative: value=-1",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.width',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:negative caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='width',
+            test_condition="'width' tag=integer_count probe=negative: value=-1",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
+
+
+
+def test_post__api_v2_all_in_one_semantic_width_zero(base_url, request):
+    "[rule:semantic_probe] body field 'width' tag=integer_count probe=zero policy=probe_only."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 0}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='width',
+            test_condition="'width' tag=integer_count probe=zero: value=0",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.width',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:zero caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='width',
+            test_condition="'width' tag=integer_count probe=zero: value=0",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
+
+
+
+def test_post__api_v2_all_in_one_semantic_width_overflow(base_url, request):
+    "[rule:semantic_probe] body field 'width' tag=integer_count probe=overflow policy=probe_only."
+    try:
+        resp = requests.post(f"{base_url}/api/v2/all-in-one", json={'channel': 10, 'height': 10, 'image_data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'width': 10001}, timeout=10)
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        diag = build_diag(
+            axis='domain',
+            reason_code='range_violation',
+            target_field='width',
+            test_condition="'width' tag=integer_count probe=overflow: value=10001",
+            expected_http='200',
+            expected_app='no crash (status < 500)',
+            resp=resp,
+            body=body,
+            error_detail='domain.range_violation.width',
+        )
+        attach_diag(request, diag)
+        assert resp.status_code < 500, (
+            f"[FAIL] semantic:overflow caused server crash\n"
+            f"  Status : {resp.status_code}\n"
+            f"  Body   : {resp.text[:300]}"
+        )
+    except requests.exceptions.RequestException as _exc:
+        diag = build_diag(
+            axis='runtime',
+            reason_code='connection_refused',
+            target_field='width',
+            test_condition="'width' tag=integer_count probe=overflow: value=10001",
+            expected_http='200',
+            expected_app='server unreachable',
+            exc=_exc,
+            server_crash=True,
+            error_detail='runtime.connection_refused',
+        )
+        attach_diag(request, diag)
+        raise
