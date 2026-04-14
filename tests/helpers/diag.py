@@ -44,6 +44,57 @@ from typing import Any
 
 # ─── 진단 레코드 생성 ──────────────────────────────────────────────────────────
 
+def _extract_request_info(resp) -> tuple[Any, dict, dict]:
+    """
+    resp.request (PreparedRequest) 에서 실제로 전송된 request 데이터를 추출한다.
+
+    반환:
+        (request_body, request_query, request_headers)
+        - request_body : dict (JSON 파싱 성공 시) 또는 str / None
+        - request_query: {param: value} — URL 쿼리스트링 파싱 결과
+        - request_headers: 주요 헤더만 (Content-Type 등)
+    """
+    import urllib.parse as _up
+
+    req = getattr(resp, "request", None)
+    if req is None:
+        return None, {}, {}
+
+    # ── request body ──────────────────────────────────────────────
+    req_body: Any = None
+    try:
+        raw_body = getattr(req, "body", None)
+        if isinstance(raw_body, bytes):
+            raw_body = raw_body.decode("utf-8", errors="replace")
+        if raw_body:
+            try:
+                req_body = json.loads(raw_body)
+            except Exception:
+                req_body = raw_body  # JSON 파싱 실패 시 문자열 그대로
+    except Exception:
+        pass
+
+    # ── query params ──────────────────────────────────────────────
+    req_query: dict = {}
+    try:
+        url = getattr(req, "url", "") or ""
+        parsed = _up.urlparse(url)
+        req_query = dict(_up.parse_qsl(parsed.query))
+    except Exception:
+        pass
+
+    # ── headers (Content-Type 등 주요 항목만) ─────────────────────
+    req_headers: dict = {}
+    try:
+        raw_headers = dict(getattr(req, "headers", {}) or {})
+        _keep = {"content-type", "accept", "authorization", "x-api-key"}
+        req_headers = {k: v for k, v in raw_headers.items() if k.lower() in _keep}
+    except Exception:
+        pass
+
+    return req_body, req_query, req_headers
+
+
 def build_diag(
     axis: str,
     reason_code: str,
@@ -63,7 +114,7 @@ def build_diag(
     if body is None:
         body = {}
 
-    # response 스니펫 (500자 이내)
+    # ── response 스니펫 (500자 이내) ──────────────────────────────
     snippet: str | None = None
     if body:
         try:
@@ -76,6 +127,9 @@ def build_diag(
         except Exception:
             pass
 
+    # ── request 데이터 추출 (resp.request / PreparedRequest) ──────
+    req_body, req_query, req_headers = _extract_request_info(resp)
+
     return {
         "axis":               axis,
         "reason_code":        reason_code,
@@ -86,6 +140,12 @@ def build_diag(
         "expected_app":       expected_app,
         "actual_status":      getattr(resp, "status_code", None),
 
+        # ── request ───────────────────────────────────────────────
+        "request_body":       req_body,
+        "request_query":      req_query,
+        "request_headers":    req_headers,
+
+        # ── response ──────────────────────────────────────────────
         "response_snippet":   snippet,
         "response_success":   body.get("success")    if isinstance(body, dict) else None,
         "response_error_code":body.get("error_code") if isinstance(body, dict) else None,

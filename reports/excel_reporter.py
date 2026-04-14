@@ -402,6 +402,17 @@ class ExcelReportBuilder:
         if diag.get("actual_status") is not None:
             item["actual_status"] = str(diag["actual_status"])
 
+        # ── request 데이터 (build_diag가 resp.request 에서 추출) ──
+        req_body = diag.get("request_body")
+        if req_body is not None:
+            item["request_body"] = req_body
+        req_query = diag.get("request_query")
+        if req_query is not None:
+            item["request_query"] = req_query
+        req_headers = diag.get("request_headers")
+        if req_headers is not None:
+            item["request_headers"] = req_headers
+
         # response snippet
         item["response_text"]      = diag.get("response_snippet", item.get("response_text", ""))
 
@@ -434,7 +445,13 @@ class ExcelReportBuilder:
                 "nodeid": t.get("nodeid", ""),
                 "outcome": t.get("outcome", "unknown"),
                 "duration": call.get("duration", t.get("duration", 0)),
-                "longrepr": str(t.get("longrepr") or ""),
+                # pytest-json-report: longrepr은 call 단계에 있음
+                # t["call"]["longrepr"] 우선, fallback으로 t["longrepr"] 확인
+                "longrepr": str(
+                    call.get("longrepr")
+                    or t.get("longrepr")
+                    or ""
+                ),
                 "target_type": self._detect_target_type_from_meta(meta),
                 "rule_type": meta.get("rule_type", ""),
                 "target_param": meta.get("target_param", ""),
