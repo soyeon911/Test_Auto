@@ -106,7 +106,7 @@ jobs:
         run: |
           $baseUrl = "${{ vars.SERVER_BASE_URL }}"
           if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
-          if (-not $baseUrl) { $baseUrl = "http://192.168.150.162:8080" }
+          if (-not $baseUrl) { $baseUrl = "http://192.168.150.158:8080" }
 
           $version = "unknown"
           $endpoints = @("/health", "/version", "/api/version", "/api/v1/version", "/api/v2/version")
@@ -183,7 +183,7 @@ jobs:
     runs-on: [self-hosted, windows]
 
     env:
-      BASE_URL: ${{ inputs.base_url || vars.SERVER_BASE_URL || 'http://192.168.150.162:8080' }}
+      BASE_URL: ${{ inputs.base_url || vars.SERVER_BASE_URL || 'http://192.168.150.158:8080' }}
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
       #GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -293,6 +293,10 @@ jobs:
       - name: TC 생성 (generate)
         shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+          
           $swaggerFile = @("input\QFEapi.json","input\QFEapi.yaml","QFEapi.json","QFEapi.yaml") |
             Where-Object { Test-Path $_ } | Select-Object -First 1
 
