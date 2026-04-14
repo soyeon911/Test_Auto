@@ -90,29 +90,33 @@ jobs:
 
           $version = "unknown"
 
-          # 1. QFE 전용: GET /api/v2/info -> resp.data.version
-          try {
-            $resp = Invoke-RestMethod -Uri "$baseUrl/api/v2/info" -TimeoutSec 5 -ErrorAction Stop
-            if ($resp.data -and $null -ne $resp.data.version -and "$($resp.data.version)".Trim() -ne "") {
-              $version = [string]$resp.data.version
-              Write-Host "[Version] /api/v2/info -> $version"
-            }
-          }
-          catch {
-            Write-Host "[Version] /api/v2/info 실패: $($_.Exception.Message)"
-          }
-
-          # 2. fallback: /health -> resp.version
-          if ($version -eq "unknown") {
+          foreach ($ep in @("/version", "/api/version")) {
             try {
-              $resp = Invoke-RestMethod -Uri "$baseUrl/health" -TimeoutSec 5 -ErrorAction Stop
+              $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
               if ($null -ne $resp.version -and "$($resp.version)".Trim() -ne "") {
                 $version = [string]$resp.version
-                Write-Host "[Version] /health -> $version"
+                Write-Host "[Version] API $ep -> $version"
+                break
               }
             }
             catch {
-              Write-Host "[Version] /health 실패: $($_.Exception.Message)"
+              Write-Host "[Version] API $ep 실패: $($_.Exception.Message)"
+            }
+          }
+
+          if ($version -eq "unknown") {
+            foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json")) {
+              try {
+                $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
+                if ($null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
+                  $version = [string]$resp.info.version
+                  Write-Host "[Version] Swagger $ep -> $version"
+                  break
+                }
+              }
+              catch {
+                Write-Host "[Version] Swagger $ep 실패: $($_.Exception.Message)"
+              }
             }
           }
 
@@ -166,8 +170,14 @@ jobs:
       BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.158:8080' }}
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
       SERVER_EXE_NAME: qfe-server.exe
+      SERVER_LICENSE_KEY: 1
+      SERVER_MODE_CHOICE: 1
+      SERVER_INSTANCE_COUNT: 1
+      SERVER_MODEL_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model
+      SERVER_DB_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
+      SERVER_LOG_DIR: server_logs
       LLM_PROVIDER: ollama
       LLM_MODEL: llama3.1:8b
       OLLAMA_BASE_URL: http://localhost:11434
@@ -187,7 +197,6 @@ jobs:
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
-
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -206,11 +215,20 @@ jobs:
             throw "서버 실행 파일이 없습니다: $serverExe"
           }
 
+          if (-not (Test-Path $env:SERVER_MODEL_PATH)) {
+            throw "모델 경로가 없습니다: $env:SERVER_MODEL_PATH"
+          }
+
+          if (-not (Test-Path $env:SERVER_DB_PATH)) {
+            throw "DB 파일이 없습니다: $env:SERVER_DB_PATH"
+          }
+
+          New-Item -ItemType Directory -Path $env:SERVER_LOG_DIR -Force | Out-Null
+
           Write-Host "[Server] dir: $env:SERVER_DIR"
           Write-Host "[Server] exe: $serverExe"
-
-          $dlls = Get-ChildItem $env:SERVER_DIR -Filter *.dll -ErrorAction SilentlyContinue
-          Write-Host "[Server] dll count: $($dlls.Count)"
+          Write-Host "[Server] model: $env:SERVER_MODEL_PATH"
+          Write-Host "[Server] db: $env:SERVER_DB_PATH"
 
       - name: 기존 서버 정리
         run: |
@@ -229,23 +247,22 @@ jobs:
             }
           }
 
-      - name: API 서버 실행
+      - name: API 서버 실행 (mock interactive)
         id: start_server
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $serverDir = "C:\Users\sypark5\TestAgent\qfe-api-server-no-license"
-          $serverExe = Join-Path $serverDir "qfe-server.exe"
+          $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
+          $stdoutLog = Join-Path $env:SERVER_LOG_DIR "server_stdout.log"
+          $stderrLog = Join-Path $env:SERVER_LOG_DIR "server_stderr.log"
 
-          if (-not (Test-Path $serverExe)) {
-            throw "서버 실행 파일이 없습니다: $serverExe"
-          }
+          Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
 
           $psi = New-Object System.Diagnostics.ProcessStartInfo
           $psi.FileName = $serverExe
-          $psi.WorkingDirectory = $serverDir
+          $psi.WorkingDirectory = $env:SERVER_DIR
           $psi.Arguments = "-host 0.0.0.0"
           $psi.UseShellExecute = $false
           $psi.RedirectStandardInput = $true
@@ -258,20 +275,37 @@ jobs:
           $proc.Start() | Out-Null
 
           Start-Sleep -Milliseconds 500
-          $proc.StandardInput.WriteLine("1")
-          $proc.StandardInput.WriteLine("1")
-          $proc.StandardInput.WriteLine("1")
-          $proc.StandardInput.WriteLine("C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model")
-          $proc.StandardInput.WriteLine("C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db")
+
+          $proc.StandardInput.WriteLine($env:SERVER_LICENSE_KEY)
+          $proc.StandardInput.WriteLine($env:SERVER_MODE_CHOICE)
+          $proc.StandardInput.WriteLine($env:SERVER_INSTANCE_COUNT)
+          $proc.StandardInput.WriteLine($env:SERVER_MODEL_PATH)
+          $proc.StandardInput.WriteLine($env:SERVER_DB_PATH)
           $proc.StandardInput.Flush()
+          $proc.StandardInput.Close()
+
+          "SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SERVER_STDOUT_LOG=$stdoutLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SERVER_STDERR_LOG=$stderrLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
           Start-Sleep -Seconds 2
 
-          $stdout = $proc.StandardOutput.ReadToEndAsync()
-          $stderr = $proc.StandardError.ReadToEndAsync()
+          if ($proc.HasExited) {
+            $outText = $proc.StandardOutput.ReadToEnd()
+            $errText = $proc.StandardError.ReadToEnd()
+
+            $outText | Out-File -FilePath $stdoutLog -Encoding utf8
+            $errText | Out-File -FilePath $stderrLog -Encoding utf8
+
+            Write-Host "[Server] stdout:"
+            Get-Content $stdoutLog -ErrorAction SilentlyContinue
+            Write-Host "[Server] stderr:"
+            Get-Content $stderrLog -ErrorAction SilentlyContinue
+
+            throw "서버가 초기화 중 종료되었습니다. exit=$($proc.ExitCode)"
+          }
 
           Write-Host "[Server] started pid=$($proc.Id)"
-          "SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: 서버 health check (테스트 전)
         id: pre_health
@@ -282,11 +316,11 @@ jobs:
 
           $healthCandidates = @(
             "$env:BASE_URL/health",
-            "$env:BASE_URL/api/v2/health"
+            "$env:BASE_URL/api/health"
           )
 
-          $maxRetries = 10
-          $retryDelay = 5
+          $maxRetries = 20
+          $retryDelay = 3
           $serverUp = $false
 
           foreach ($healthUrl in $healthCandidates) {
@@ -295,7 +329,6 @@ jobs:
             for ($i = 1; $i -le $maxRetries; $i++) {
               try {
                 $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
-
                 if ($null -ne $resp -and $null -ne $resp.StatusCode) {
                   Write-Host "[Health] 응답 코드: $($resp.StatusCode)"
                   if ($resp.StatusCode -lt 500) {
@@ -323,6 +356,21 @@ jobs:
             Write-Host "::warning::서버가 health check에 응답하지 않습니다. 로그를 수집합니다."
           }
 
+      - name: 서버 시작 로그 출력 (실패 시)
+        if: steps.pre_health.outputs.server_up == 'false'
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+          if (Test-Path $env:SERVER_STDOUT_LOG) {
+            Write-Host "[Server stdout]"
+            Get-Content $env:SERVER_STDOUT_LOG -ErrorAction SilentlyContinue
+          }
+
+          if (Test-Path $env:SERVER_STDERR_LOG) {
+            Write-Host "[Server stderr]"
+            Get-Content $env:SERVER_STDERR_LOG -ErrorAction SilentlyContinue
+          }
+
       - name: Crash 로그 수집 (테스트 전)
         if: steps.pre_health.outputs.server_up == 'false'
         run: |
@@ -337,17 +385,19 @@ jobs:
           path: ${{ env.CRASH_LOG_DIR }}/
           retention-days: 14
 
-      - name: 서버 로그 출력 (테스트 전 실패 시)
+      - name: 서버 로그 업로드 (테스트 전 실패 시)
         if: steps.pre_health.outputs.server_up == 'false'
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          Get-Process | Where-Object { $_.Id -eq [int]$env:SERVER_PID } | Format-List * -Force
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs-pre-${{ github.run_id }}
+          path: ${{ env.SERVER_LOG_DIR }}/
+          retention-days: 14
 
       - name: 서버 다운 시 중단
         if: steps.pre_health.outputs.server_up == 'false'
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          Write-Host "::error::API 서버가 기동되지 않았습니다. Crash 로그를 확인하세요."
+          Write-Host "::error::API 서버가 기동되지 않았습니다. server_logs와 crash_logs를 확인하세요."
           exit 1
 
       - name: Ollama health check
@@ -356,7 +406,7 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
 
           try {
-            $resp = Invoke-RestMethod -Uri "$env:OLLAMA_BASE_URL/api/v2/tags" -Method Get -TimeoutSec 10
+            $resp = Invoke-RestMethod -Uri "$env:OLLAMA_BASE_URL/api/tags" -Method Get -TimeoutSec 10
             if (-not $resp.models) {
               Write-Error "Ollama is reachable but no models are installed."
               exit 1
@@ -378,7 +428,6 @@ jobs:
       - name: 기존 생성 TC 삭제
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
           if (Test-Path "tests\generated\rule") { Remove-Item "tests\generated\rule\*" -Recurse -Force }
           if (Test-Path "tests\generated\ai") { Remove-Item "tests\generated\ai\*" -Recurse -Force }
 
@@ -450,7 +499,7 @@ jobs:
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
           $up = $false
-          foreach ($healthUrl in @("$env:BASE_URL/health", "$env:BASE_URL/api/v2/health")) {
+          foreach ($healthUrl in @("$env:BASE_URL/health", "$env:BASE_URL/api/health")) {
             try {
               $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
               if ($null -ne $resp.StatusCode -and $resp.StatusCode -lt 500) {
@@ -482,6 +531,14 @@ jobs:
           path: ${{ env.CRASH_LOG_DIR }}_post/
           retention-days: 14
 
+      - name: 서버 로그 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs-${{ github.run_id }}
+          path: ${{ env.SERVER_LOG_DIR }}/
+          retention-days: 14
+
       - name: 테스트 레포트 업로드
         if: always()
         uses: actions/upload-artifact@v4
@@ -489,4 +546,69 @@ jobs:
           name: test-reports-${{ github.run_id }}
           path: |
             ${{ env.REPORT_DIR }}/summary.html
-     
+            ${{ env.REPORT_DIR }}/report.json
+            ${{ env.REPORT_DIR }}/pytest_output.txt
+            ${{ env.REPORT_DIR }}/allure-results/
+            ${{ env.REPORT_DIR }}/test_report.xlsx
+          retention-days: 14
+
+      - name: 상태 캐시 업데이트
+        if: steps.pre_health.outputs.server_up == 'true'
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $cacheDir = ".cache"
+          if (-not (Test-Path $cacheDir)) {
+            New-Item -ItemType Directory -Path $cacheDir | Out-Null
+          }
+
+          $key = "${{ needs.detect-changes.outputs.swagger_hash }}::${{ needs.detect-changes.outputs.server_version }}"
+          $key | Out-File -FilePath "$cacheDir\last_run_state.txt" -NoNewline -Encoding utf8
+          Write-Host "[Cache] 저장된 상태 키: $key"
+
+      - name: 최종 결과 판정
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $serverUpRaw = "${{ steps.post_health.outputs.server_up }}"
+          $exitCodeRaw = "${{ steps.pytest.outputs.exit_code }}"
+
+          Write-Host "[Result] server_up='$serverUpRaw'  pytest_exit='$exitCodeRaw'"
+
+          if ($serverUpRaw -eq "false") {
+            Write-Host "::error::API server crashed during test run. Check crash-log artifacts."
+            exit 2
+          }
+
+          if ($exitCodeRaw -ne "" -and $exitCodeRaw -ne "0") {
+            $code = 0
+            if ([int]::TryParse($exitCodeRaw, [ref]$code)) {
+              Write-Host "::error::pytest failed (exit=$code). Check uploaded test reports."
+              exit $code
+            }
+            else {
+              Write-Host "::error::pytest exit code unreadable: '$exitCodeRaw'"
+              exit 1
+            }
+          }
+
+          Write-Host "[Result] Pipeline completed successfully."
+
+      - name: API 서버 종료
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          if ($env:SERVER_PID) {
+            try {
+              Stop-Process -Id [int]$env:SERVER_PID -Force -ErrorAction Stop
+              Write-Host "[Server] stopped pid=$env:SERVER_PID"
+            }
+            catch {
+              Write-Host "[Server] 종료 실패 또는 이미 종료됨: $($_.Exception.Message)"
+            }
+          }
