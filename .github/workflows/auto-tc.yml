@@ -18,7 +18,7 @@ on:
         default: 'false'
         type: boolean
       base_url:
-        description: '서버 Base URL (기본값: http://192.168.150.158:8080)'
+        description: '서버 Base URL (기본값: http://192.168.150.131:8080)'
         required: false
         default: ''
 
@@ -85,7 +85,7 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $baseUrl = "http://192.168.150.158:8080"
+          $baseUrl = "http://192.168.150.131:8080"
           if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
 
           $version = "unknown"
@@ -167,7 +167,7 @@ jobs:
     runs-on: [self-hosted, windows]
 
     env:
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.158:8080' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.131:8080' }}
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
       SERVER_EXE_NAME: qfe-server.exe
       SERVER_LICENSE_KEY: 1
