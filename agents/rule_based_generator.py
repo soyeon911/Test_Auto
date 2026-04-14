@@ -1,7 +1,7 @@
 """
 Rule-Based TC Generator — deterministic, zero-AI layer.
 
-For each OpenAPI endpoint it generates pytest functions covering:
+For each API endpoint it generates pytest functions covering:
 
   positive         — one valid happy-path request
   missing_required — omit each required field/param
@@ -340,6 +340,13 @@ class RuleBasedTCGenerator:
         expected_http: str,
         expected_app: str,
         error_detail: str,
+        request_method: str,
+        request_path: str,
+        request_query: dict | None,
+        request_headers: dict | None,
+        request_body: dict | None,
+        expected_status_display: str,
+        rule_type: str,
     ) -> str:
         """
         Generate a complete test function with:
@@ -350,10 +357,31 @@ class RuleBasedTCGenerator:
         """
         # Indent assertion 8 spaces (inside outer try block)
         indented_assert = textwrap.indent(assertion_str.rstrip("\n"), "        ")
+        meta_block = (
+            f"    request_query = {request_query!r}\n"
+            f"    request_headers = {request_headers!r}\n"
+            f"    request_body = {request_body!r}\n"
+            f"    request_path = {request_path!r}\n"
+            f"    request_method = {request_method.upper()!r}\n"
+            f"    request_url = f\"{{base_url}}{request_path}\"\n"
+            f"    request.node.user_properties.append((\"tc_meta\", {{\n"
+            f"        \"rule_type\": {rule_type!r},\n"
+            f"        \"target_param\": {target_field!r},\n"
+            f"        \"condition\": {test_condition!r},\n"
+            f"        \"request_method\": request_method,\n"
+            f"        \"request_path\": request_path,\n"
+            f"        \"request_url\": request_url,\n"
+            f"        \"request_query\": request_query,\n"
+            f"        \"request_headers\": request_headers,\n"
+            f"        \"request_body\": request_body,\n"
+            f"        \"expected_status_display\": {expected_status_display!r},\n"
+            f"    }}))\n"
+        )
 
         return (
             f"def {fname}(base_url, request):\n"
             f"    {docstring!r}\n"
+            f"{meta_block}"
             f"    try:\n"
             f"        resp = {call_str}\n"
             f"        body = {{}}\n"
@@ -622,6 +650,7 @@ class RuleBasedTCGenerator:
         }
         body = self._build_valid_body(req_body)
 
+        resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
         assertion = (
             self._qfe_success_assertion()
@@ -642,6 +671,13 @@ class RuleBasedTCGenerator:
             expected_http="200",
             expected_app=exp_app,
             error_detail="state.precondition_not_met",
+            request_method=method,
+            request_path=resolved_path,
+            request_query=query_params,
+            request_headers=None,
+            request_body=body,
+            expected_status_display=f"200 / {exp_app}",
+            rule_type="positive",
         )
 
     def _missing_required(
@@ -667,7 +703,9 @@ class RuleBasedTCGenerator:
                 if p["in"] == "query" and p.get("required") and p["name"] != target_param["name"]
             }
 
-            call = _render_call(method, path, path_params, query_params, self._build_valid_body(req_body))
+            resolved_path = _build_url(path, path_params)
+            body = self._build_valid_body(req_body)
+            call = _render_call(method, path, path_params, query_params, body)
             assertion = self._build_policy_assertion("must_fail", target_param["name"], "missing_required")
             blocks.append(self._api_test_block(
                 fname=fname,
@@ -681,6 +719,13 @@ class RuleBasedTCGenerator:
                 expected_http="200",
                 expected_app="success=false, error_code<0",
                 error_detail=f"schema.missing_required.{target_param['name']}",
+                request_method=method,
+                request_path=resolved_path,
+                request_query=query_params,
+                request_headers=None,
+                request_body=body,
+                expected_status_display="200 / success=false, error_code<0",
+                rule_type="missing_required",
             ))
 
         if req_body:
@@ -699,6 +744,7 @@ class RuleBasedTCGenerator:
             for field in required_fields:
                 fname = f"test_{op_id}_missing_body_{_safe_name(field)}"
                 partial_body = {k: self._good_value(k, v) for k, v in properties.items() if k != field}
+                resolved_path = _build_url(path, path_params)
                 call = _render_call(method, path, path_params, query_params, partial_body)
                 assertion = self._build_policy_assertion("must_fail", field, "missing_required")
                 blocks.append(self._api_test_block(
@@ -713,6 +759,13 @@ class RuleBasedTCGenerator:
                     expected_http="200",
                     expected_app="success=false, error_code<0",
                     error_detail=f"schema.missing_required.{field}",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=query_params,
+                    request_headers=None,
+                    request_body=partial_body,
+                    expected_status_display="200 / success=false, error_code<0",
+                    rule_type="missing_required",
                 ))
 
         return blocks
@@ -742,12 +795,18 @@ class RuleBasedTCGenerator:
                 continue
 
             fname = f"test_{op_id}_wrong_type_{_safe_name(p['name'])}"
+            req_query = query_params
+            req_body_payload = self._build_valid_body(req_body)
+
             if p["in"] == "path":
                 bad_path_params = {**path_params, p["name"]: wrong}
-                call = _render_call(method, path, bad_path_params, query_params, self._build_valid_body(req_body))
+                resolved_path = _build_url(path, bad_path_params)
+                call = _render_call(method, path, bad_path_params, query_params, req_body_payload)
             elif p["in"] == "query":
                 query_with_bad = {**query_params, p["name"]: wrong}
-                call = _render_call(method, path, path_params, query_with_bad, self._build_valid_body(req_body))
+                resolved_path = _build_url(path, path_params)
+                req_query = query_with_bad
+                call = _render_call(method, path, path_params, query_with_bad, req_body_payload)
             else:
                 continue
 
@@ -764,6 +823,13 @@ class RuleBasedTCGenerator:
                 expected_http="200",
                 expected_app="success=false, error_code<0",
                 error_detail=f"schema.type_mismatch.{p['name']}",
+                request_method=method,
+                request_path=resolved_path,
+                request_query=req_query,
+                request_headers=None,
+                request_body=req_body_payload,
+                expected_status_display="200 / success=false, error_code<0",
+                rule_type="wrong_type",
             ))
 
         if req_body:
@@ -778,6 +844,7 @@ class RuleBasedTCGenerator:
                 fname = f"test_{op_id}_wrong_type_body_{_safe_name(field)}"
                 valid_body = self._build_valid_body(req_body) or {}
                 bad_body = {**valid_body, field: wrong}
+                resolved_path = _build_url(path, path_params)
                 call = _render_call(method, path, path_params, query_params, bad_body)
                 assertion = self._build_policy_assertion("must_fail", field, "wrong_type")
                 blocks.append(self._api_test_block(
@@ -792,6 +859,13 @@ class RuleBasedTCGenerator:
                     expected_http="200",
                     expected_app="success=false, error_code<0",
                     error_detail=f"schema.type_mismatch.{field}",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=query_params,
+                    request_headers=None,
+                    request_body=bad_body,
+                    expected_status_display="200 / success=false, error_code<0",
+                    rule_type="wrong_type",
                 ))
 
         return blocks
@@ -817,7 +891,6 @@ class RuleBasedTCGenerator:
         }
         base_body = self._build_valid_body(req_body) or {}
 
-        # query/path params
         for p in params:
             schema = p.get("schema", {})
             ptype = schema.get("type", "string")
@@ -830,21 +903,28 @@ class RuleBasedTCGenerator:
                 policy = case["policy"]
                 fname = f"test_{op_id}_boundary_{_safe_name(p['name'])}_{_safe_name(str(label))}"
 
+                req_query = base_query_params
+                req_body_payload = base_body if base_body else None
+
                 if p["in"] == "path":
                     bad_path = {**base_path_params, p["name"]: probe}
-                    call = _render_call(method, path, bad_path, base_query_params, base_body if base_body else None)
+                    resolved_path = _build_url(path, bad_path)
+                    call = _render_call(method, path, bad_path, base_query_params, req_body_payload)
                 elif p["in"] == "query":
                     bad_query = {**base_query_params, p["name"]: probe}
-                    call = _render_call(method, path, base_path_params, bad_query, base_body if base_body else None)
+                    resolved_path = _build_url(path, base_path_params)
+                    req_query = bad_query
+                    call = _render_call(method, path, base_path_params, bad_query, req_body_payload)
                 else:
                     continue
 
                 assertion = self._build_policy_assertion(policy, p["name"], f"boundary:{label}", success_statuses)
                 exp_app = {
-                    "must_pass":  "success=true, error_code>=0",
-                    "must_fail":  "success=false, error_code<0",
+                    "must_pass": "success=true, error_code>=0",
+                    "must_fail": "success=false, error_code<0",
                     "probe_only": "no crash (status < 500)",
                 }.get(policy, "no crash (status < 500)")
+
                 blocks.append(self._api_test_block(
                     fname=fname,
                     docstring=f"[rule:boundary] '{p['name']}' = {probe} ({label}, policy={policy}).",
@@ -857,9 +937,15 @@ class RuleBasedTCGenerator:
                     expected_http="200",
                     expected_app=exp_app,
                     error_detail=f"domain.range_violation.{p['name']}.{label}",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=req_query,
+                    request_headers=None,
+                    request_body=req_body_payload,
+                    expected_status_display=f"200 / {exp_app}",
+                    rule_type="boundary",
                 ))
 
-        # body fields
         schema = (req_body or {}).get("schema") or {}
         properties = schema.get("properties", {})
         for field, field_schema in properties.items():
@@ -873,13 +959,15 @@ class RuleBasedTCGenerator:
                 policy = case["policy"]
                 fname = f"test_{op_id}_boundary_body_{_safe_name(field)}_{_safe_name(str(label))}"
                 bad_body = {**base_body, field: probe}
+                resolved_path = _build_url(path, base_path_params)
                 call = _render_call(method, path, base_path_params, base_query_params, bad_body)
                 assertion = self._build_policy_assertion(policy, field, f"boundary:{label}", success_statuses)
                 exp_app = {
-                    "must_pass":  "success=true, error_code>=0",
-                    "must_fail":  "success=false, error_code<0",
+                    "must_pass": "success=true, error_code>=0",
+                    "must_fail": "success=false, error_code<0",
                     "probe_only": "no crash (status < 500)",
                 }.get(policy, "no crash (status < 500)")
+
                 blocks.append(self._api_test_block(
                     fname=fname,
                     docstring=f"[rule:boundary] body field '{field}' = {probe} ({label}, policy={policy}).",
@@ -892,6 +980,13 @@ class RuleBasedTCGenerator:
                     expected_http="200",
                     expected_app=exp_app,
                     error_detail=f"domain.range_violation.{field}.{label}",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=base_query_params,
+                    request_headers=None,
+                    request_body=bad_body,
+                    expected_status_display=f"200 / {exp_app}",
+                    rule_type="boundary",
                 ))
 
         return blocks
@@ -921,13 +1016,18 @@ class RuleBasedTCGenerator:
 
             fname = f"test_{op_id}_invalid_enum_{_safe_name(p['name'])}"
             invalid_val = "__INVALID_ENUM_VALUE__"
+            req_query = query_params
+            req_body_payload = self._build_valid_body(req_body)
 
             if p["in"] == "path":
                 bad_path = {**path_params, p["name"]: invalid_val}
-                call = _render_call(method, path, bad_path, query_params, self._build_valid_body(req_body))
+                resolved_path = _build_url(path, bad_path)
+                call = _render_call(method, path, bad_path, query_params, req_body_payload)
             elif p["in"] == "query":
                 bad_query = {**query_params, p["name"]: invalid_val}
-                call = _render_call(method, path, path_params, bad_query, self._build_valid_body(req_body))
+                resolved_path = _build_url(path, path_params)
+                req_query = bad_query
+                call = _render_call(method, path, path_params, bad_query, req_body_payload)
             else:
                 continue
 
@@ -944,6 +1044,13 @@ class RuleBasedTCGenerator:
                 expected_http="200",
                 expected_app="success=false, error_code<0",
                 error_detail=f"domain.enum_violation.{p['name']}",
+                request_method=method,
+                request_path=resolved_path,
+                request_query=req_query,
+                request_headers=None,
+                request_body=req_body_payload,
+                expected_status_display="200 / success=false, error_code<0",
+                rule_type="invalid_enum",
             ))
 
         if req_body:
@@ -957,6 +1064,7 @@ class RuleBasedTCGenerator:
                 fname = f"test_{op_id}_invalid_enum_body_{_safe_name(field)}"
                 valid_body = self._build_valid_body(req_body) or {}
                 bad_body = {**valid_body, field: "__INVALID_ENUM_VALUE__"}
+                resolved_path = _build_url(path, path_params)
                 call = _render_call(method, path, path_params, query_params, bad_body)
                 assertion = self._build_policy_assertion("must_fail", field, "invalid_enum")
                 blocks.append(self._api_test_block(
@@ -971,6 +1079,13 @@ class RuleBasedTCGenerator:
                     expected_http="200",
                     expected_app="success=false, error_code<0",
                     error_detail=f"domain.enum_violation.{field}",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=query_params,
+                    request_headers=None,
+                    request_body=bad_body,
+                    expected_status_display="200 / success=false, error_code<0",
+                    rule_type="invalid_enum",
                 ))
 
         return blocks
@@ -1008,12 +1123,18 @@ class RuleBasedTCGenerator:
                 policy = probe["policy"]
                 fname = f"test_{op_id}_semantic_{_safe_name(p['name'])}_{probe_label}"
 
+                req_query = base_query_params
+                req_body_payload = base_body if base_body else None
+
                 if p["in"] == "path":
                     bad_path = {**base_path_params, p["name"]: probe_val}
-                    call = _render_call(method, path, bad_path, base_query_params, base_body if base_body else None)
+                    resolved_path = _build_url(path, bad_path)
+                    call = _render_call(method, path, bad_path, base_query_params, req_body_payload)
                 elif p["in"] == "query":
                     bad_query = {**base_query_params, p["name"]: probe_val}
-                    call = _render_call(method, path, base_path_params, bad_query, base_body if base_body else None)
+                    resolved_path = _build_url(path, base_path_params)
+                    req_query = bad_query
+                    call = _render_call(method, path, base_path_params, bad_query, req_body_payload)
                 else:
                     continue
 
@@ -1022,6 +1143,7 @@ class RuleBasedTCGenerator:
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
                 exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
+
                 blocks.append(self._api_test_block(
                     fname=fname,
                     docstring=f"[rule:semantic_probe] param '{p['name']}' tag={tag} probe={probe_label} policy={policy}.",
@@ -1034,6 +1156,13 @@ class RuleBasedTCGenerator:
                     expected_http="200",
                     expected_app=exp_app,
                     error_detail=f"{_s_axis}.{_s_rc}.{p['name']}",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=req_query,
+                    request_headers=None,
+                    request_body=req_body_payload,
+                    expected_status_display=f"200 / {exp_app}",
+                    rule_type="semantic_probe",
                 ))
 
         schema = (req_body or {}).get("schema") or {}
@@ -1051,12 +1180,14 @@ class RuleBasedTCGenerator:
                 policy = probe["policy"]
                 fname = f"test_{op_id}_semantic_{_safe_name(field)}_{probe_label}"
                 bad_body = {**base_body, field: probe_val}
+                resolved_path = _build_url(path, base_path_params)
                 call = _render_call(method, path, base_path_params, base_query_params, bad_body)
                 assertion = self._build_policy_assertion(policy, field, f"semantic:{probe_label}")
                 _s_axis, _s_rc = _SEMANTIC_PROBE_DIAG.get(
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
                 exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
+
                 blocks.append(self._api_test_block(
                     fname=fname,
                     docstring=f"[rule:semantic_probe] body field '{field}' tag={tag} probe={probe_label} policy={policy}.",
@@ -1069,6 +1200,13 @@ class RuleBasedTCGenerator:
                     expected_http="200",
                     expected_app=exp_app,
                     error_detail=f"{_s_axis}.{_s_rc}.{field}",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=base_query_params,
+                    request_headers=None,
+                    request_body=bad_body,
+                    expected_status_display=f"200 / {exp_app}",
+                    rule_type="semantic_probe",
                 ))
 
         return blocks
