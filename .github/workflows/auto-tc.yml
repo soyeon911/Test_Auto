@@ -62,8 +62,8 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Swagger 해시 계산
-        id: hash
+      - name: Swagger Hash 계산
+        shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -98,6 +98,7 @@ jobs:
 
           Write-Host "[Hash] 최종 Swagger 해시: $finalHash"
           "swagger_hash=$finalHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
 
       - name: 서버 버전 조회
         id: server_version
