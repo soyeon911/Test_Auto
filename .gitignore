@@ -25,23 +25,7 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# ─────────────────────────────────────────────
-# Test outputs / reports
-# ─────────────────────────────────────────────
-# reports/ 디렉터리 자체는 추적 (Python 소스 파일 포함)
-# 실행 중 생성되는 결과물만 무시
-reports/*.html
-reports/*.xlsx
-reports/*.json
-reports/test_diag.jsonl
-reports/allure-results/
-allure-results/
-allure-report/
-*.json-report
 
-# ─────────────────────────────────────────────
-# Generated test files
-# ─────────────────────────────────────────────
 
 
 
