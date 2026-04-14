@@ -12,30 +12,25 @@
 #
 # 환경
 #   - Windows self-hosted runner (runs-on: [self-hosted, windows])
-#   - PowerShell 5.1+ 기반 스크립트
+#   - PowerShell 7+ (pwsh) 기반 스크립트
 #
 # 서버 crash 처리
 #   - 테스트 전·후 health check
 #   - crash 시 로그 수집 후 Artifact 업로드
 #   - SCM이 서버를 재기동할 때까지 재시도 대기
 # ──────────────────────────────────────────────────────────────────────────────
-# -*- coding: utf-8 -*-
+# ──────────────────────────────────────────────────────────────────────────────
 name: AutoTC Pipeline
 
 on:
-  # 1. 1시간 주기 실행
   schedule:
     - cron: '0 * * * *'
 
-  # 2. Swagger 파일 변경 시 자동 트리거
   push:
     paths:
-      - 'input/**'
-      - 'QFEapi.yaml'
       - 'QFEapi.json'
       - 'auto-tc.yml'
 
-  # 수동 실행
   workflow_dispatch:
     inputs:
       force_run:
@@ -48,9 +43,10 @@ on:
         required: false
         default: ''
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Job 1 — 변경 감지 (swagger hash + server version 비교)
-# ──────────────────────────────────────────────────────────────────────────────
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   detect-changes:
     name: 변경 감지 (Swagger Hash + Server Version)
@@ -66,11 +62,13 @@ jobs:
         with:
           fetch-depth: 1
 
-      # ── Swagger 파일 해시 계산 ──────────────────────────────────────────────
       - name: Swagger 해시 계산
         id: hash
-        shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
           $swaggerFiles = @()
           if (Test-Path "input") {
             $swaggerFiles += Get-ChildItem -Path "input" -Include "*.yaml","*.yml","*.json" -Recurse
@@ -84,26 +82,30 @@ jobs:
             exit 1
           }
 
-          $hasher   = [System.Security.Cryptography.SHA256]::Create()
+          $hasher = [System.Security.Cryptography.SHA256]::Create()
           $combined = ""
-          foreach ($f in ($swaggerFiles | Sort-Object FullName)) {
+
+          foreach ($f in ($swaggerFiles | Sort-Object FullName -Unique)) {
             $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
-            $h     = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace("-","").ToLower()
+            $h = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace("-", "").ToLower()
             $combined += "$($f.Name):$h;"
             Write-Host "[Hash] $($f.Name) → $h"
           }
+
           $finalHash = [System.BitConverter]::ToString(
             $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($combined))
-          ).Replace("-","").ToLower()
+          ).Replace("-", "").ToLower()
 
           Write-Host "[Hash] 최종 Swagger 해시: $finalHash"
-          "swagger_hash=$finalHash" | Out-File $env:GITHUB_OUTPUT -Append
+          "swagger_hash=$finalHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      # ── 서버 버전/commit 조회 ───────────────────────────────────────────────
       - name: 서버 버전 조회
         id: server_version
-        shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
           $baseUrl = "${{ vars.SERVER_BASE_URL }}"
           if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
           if (-not $baseUrl) { $baseUrl = "http://192.168.150.158:8080" }
@@ -114,68 +116,70 @@ jobs:
           foreach ($ep in $endpoints) {
             try {
               $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-              # version / commit / build_hash 필드를 순서대로 탐색
+
               $candidate = $null
-              if ($resp.version) { $candidate = $resp.version }
-              elseif ($resp.commit) { $candidate = $resp.commit }
-              elseif ($resp.build_hash) { $candidate = $resp.build_hash }
-              elseif ($resp.hash) { $candidate = $resp.hash }
+              if ($null -ne $resp.version) { $candidate = $resp.version }
+              elseif ($null -ne $resp.commit) { $candidate = $resp.commit }
+              elseif ($null -ne $resp.build_hash) { $candidate = $resp.build_hash }
+              elseif ($null -ne $resp.hash) { $candidate = $resp.hash }
+
               if ($candidate) {
-                $version = $candidate
+                $version = [string]$candidate
                 Write-Host "[Version] $ep → $version"
                 break
               }
-              # 응답 자체가 문자열인 경우
+
               if ($resp -is [string] -and $resp.Length -lt 100) {
                 $version = $resp.Trim()
                 Write-Host "[Version] $ep → $version"
                 break
               }
-            } catch {
-              Write-Host "[Version] $ep 접근 실패: $_"
+            }
+            catch {
+              Write-Host "[Version] $ep 접근 실패: $($_.Exception.Message)"
             }
           }
 
           Write-Host "[Version] 최종 서버 버전: $version"
-          "version=$version" | Out-File $env:GITHUB_OUTPUT -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      # ── 이전 실행 캐시와 비교 ──────────────────────────────────────────────
       - name: 이전 캐시와 비교
         id: compare
-        shell: powershell
         run: |
-          $forceRun    = "${{ inputs.force_run }}" -eq "true"
-          $cacheFile   = ".cache\last_run_state.txt"
-          $currentKey  = "${{ steps.hash.outputs.swagger_hash }}::${{ steps.server_version.outputs.version }}"
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
+          $forceRun = "${{ inputs.force_run }}" -eq "true"
+          $cacheFile = ".cache\last_run_state.txt"
+          $currentKey = "${{ steps.hash.outputs.swagger_hash }}::${{ steps.server_version.outputs.version }}"
 
           Write-Host "[Compare] 현재 상태 키: $currentKey"
 
           if ($forceRun) {
             Write-Host "[Compare] 강제 실행 요청 → 실행"
-            "should_run=true" | Out-File $env:GITHUB_OUTPUT -Append
+            "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             exit 0
           }
 
           if (-not (Test-Path $cacheFile)) {
             Write-Host "[Compare] 캐시 없음 (최초 실행) → 실행"
-            "should_run=true" | Out-File $env:GITHUB_OUTPUT -Append
+            "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             exit 0
           }
 
-          $cachedKey = (Get-Content $cacheFile -Raw).Trim()
+          $cachedKey = (Get-Content $cacheFile -Raw -Encoding utf8).Trim()
           Write-Host "[Compare] 캐시된 상태 키: $cachedKey"
 
           if ($cachedKey -eq $currentKey) {
             Write-Host "[Compare] 변경 없음 → 스킵"
-            "should_run=false" | Out-File $env:GITHUB_OUTPUT -Append
-          } else {
+            "should_run=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          else {
             Write-Host "[Compare] 변경 감지됨 → 실행"
-            "should_run=true"  | Out-File $env:GITHUB_OUTPUT -Append
+            "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Job 2 — 테스트 파이프라인 실행
-# ──────────────────────────────────────────────────────────────────────────────
   run-pipeline:
     name: AutoTC 파이프라인 실행
     needs: detect-changes
@@ -186,16 +190,15 @@ jobs:
       BASE_URL: ${{ inputs.base_url || vars.SERVER_BASE_URL || 'http://192.168.150.158:8080' }}
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
-      #GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       LLM_PROVIDER: ollama
       LLM_MODEL: llama3.1:8b
       OLLAMA_BASE_URL: http://localhost:11434
+      PYTHONIOENCODING: utf-8
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      # ── Python 환경 ────────────────────────────────────────────────────────
       - name: Python 환경 설정
         uses: actions/setup-python@v6
         with:
@@ -203,52 +206,57 @@ jobs:
           cache: 'pip'
 
       - name: 의존성 설치
-        shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 사전 health check (재시도 포함) ───────────────────────────────────
       - name: 서버 health check (테스트 전)
         id: pre_health
-        shell: powershell
         run: |
-          $healthUrl  = "$env:BASE_URL/health"
-          $maxRetries = 6      # SCM 재기동 대기 최대 3분 (30초 × 6)
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
+          $healthUrl = "$env:BASE_URL/health"
+          $maxRetries = 6
           $retryDelay = 30
-          $serverUp   = $false
+          $serverUp = $false
 
           for ($i = 1; $i -le $maxRetries; $i++) {
             try {
-              $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+              $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop
               if ($resp.StatusCode -lt 500) {
                 Write-Host "[Health] OK (HTTP $($resp.StatusCode))"
                 $serverUp = $true
                 break
               }
-            } catch {
-              Write-Host "[Health] 시도 $i/$maxRetries 실패: $_"
             }
+            catch {
+              Write-Host "[Health] 시도 $i/$maxRetries 실패: $($_.Exception.Message)"
+            }
+
             if ($i -lt $maxRetries) {
               Write-Host "[Health] ${retryDelay}초 후 재시도... (SCM 재기동 대기)"
               Start-Sleep -Seconds $retryDelay
             }
           }
 
-          "server_up=$($serverUp.ToString().ToLower())" | Out-File $env:GITHUB_OUTPUT -Append
+          "server_up=$($serverUp.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
           if (-not $serverUp) {
             Write-Host "::warning::서버가 응답하지 않습니다. 로그를 수집합니다."
           }
 
-      # ── crash 로그 수집 (서버 다운 시) ────────────────────────────────────
       - name: Crash 로그 수집
         if: steps.pre_health.outputs.server_up == 'false'
-        shell: powershell
         run: scripts\collect_crash_logs.ps1 -OutputDir $env:CRASH_LOG_DIR -Label "pre_test"
 
       - name: Crash 로그 업로드 (테스트 전)
         if: steps.pre_health.outputs.server_up == 'false'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: crash-logs-pre-${{ github.run_id }}
           path: ${{ env.CRASH_LOG_DIR }}/
@@ -256,19 +264,23 @@ jobs:
 
       - name: 서버 다운 시 중단
         if: steps.pre_health.outputs.server_up == 'false'
-        shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           Write-Host "::error::서버가 다운 상태입니다. 파이프라인을 중단합니다. Crash 로그를 확인하세요."
           exit 1
+
       - name: Ollama health check
-        shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
           try {
             $resp = Invoke-RestMethod -Uri "$env:OLLAMA_BASE_URL/api/tags" -Method Get -TimeoutSec 10
             if (-not $resp.models) {
               Write-Error "Ollama is reachable but no models are installed."
               exit 1
             }
+
             $models = @($resp.models | ForEach-Object { $_.name })
             Write-Host "[Ollama] Installed models: $($models -join ', ')"
 
@@ -276,29 +288,28 @@ jobs:
               Write-Error "Required model '$env:LLM_MODEL' is not installed in Ollama."
               exit 1
             }
-          } catch {
-            Write-Error "Ollama health check failed: $_"
+          }
+          catch {
+            Write-Error "Ollama health check failed: $($_.Exception.Message)"
             exit 1
           }
 
-      # ── 기존 TC 삭제 ─────────────────────────────────────────────────
       - name: 기존 생성 TC 삭제
-        shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
           if (Test-Path "tests\generated\rule") { Remove-Item "tests\generated\rule\*" -Recurse -Force }
-          if (Test-Path "tests\generated\ai")   { Remove-Item "tests\generated\ai\*" -Recurse -Force }
-      
-      
-      # ── TC 생성 ─────────────────────────────────────────────────
+          if (Test-Path "tests\generated\ai") { Remove-Item "tests\generated\ai\*" -Recurse -Force }
+
       - name: TC 생성 (generate)
-        shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $env:PYTHONIOENCODING = "utf-8"
-          
-          $swaggerFile = @("input\QFEapi.json","input\QFEapi.yaml","QFEapi.json","QFEapi.yaml") |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          $swaggerFile = @("input\QFEapi.json", "input\QFEapi.yaml", "QFEapi.json", "QFEapi.yaml") |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
 
           if (-not $swaggerFile) {
             Write-Error "Swagger 파일을 찾을 수 없습니다."
@@ -308,21 +319,23 @@ jobs:
           Write-Host "[Generate] 사용 파일: $swaggerFile"
           python main.py generate $swaggerFile
 
-      # ── 테스트 실행 ────────────────────────────────────────────────────────
       - name: 테스트 실행
         id: pytest
-        shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
           New-Item -ItemType Directory -Path $env:REPORT_DIR -Force | Out-Null
 
           $testDirs = @()
-          foreach ($d in @("tests\generated\rule","tests\generated\ai","tests\manual")) {
+          foreach ($d in @("tests\generated\rule", "tests\generated\ai", "tests\manual")) {
             if (Test-Path $d) { $testDirs += $d }
           }
 
           if ($testDirs.Count -eq 0) {
             Write-Host "::warning::실행할 테스트 디렉터리가 없습니다."
-            "exit_code=0" | Out-File $env:GITHUB_OUTPUT -Append
+            "exit_code=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             exit 0
           }
 
@@ -344,29 +357,33 @@ jobs:
           $code = $LASTEXITCODE
 
           Write-Host "[Pytest] 종료 코드: $code"
-          "exit_code=$code" | Out-File $env:GITHUB_OUTPUT -Append
+          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           exit 0
 
-      # ── 테스트 후 health check ─────────────────────────────────────────────
       - name: 서버 health check (테스트 후)
         id: post_health
         if: always()
-        shell: powershell
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
           try {
-            $resp = Invoke-WebRequest -Uri "$env:BASE_URL/health" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
-            $up   = $resp.StatusCode -lt 500
-          } catch {
+            $resp = Invoke-WebRequest -Uri "$env:BASE_URL/health" -TimeoutSec 5 -ErrorAction Stop
+            $up = $resp.StatusCode -lt 500
+          }
+          catch {
             $up = $false
           }
-          "server_up=$($up.ToString().ToLower())" | Out-File $env:GITHUB_OUTPUT -Append
+
+          "server_up=$($up.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
           if (-not $up) {
             Write-Host "::warning::테스트 실행 중 서버가 다운됐습니다. Crash 로그를 수집합니다."
           }
 
       - name: Crash 로그 수집 (테스트 후)
         if: always() && steps.post_health.outputs.server_up == 'false'
-        shell: powershell
         run: scripts\collect_crash_logs.ps1 -OutputDir "$env:CRASH_LOG_DIR`_post" -Label "post_test"
 
       - name: Crash 로그 업로드 (테스트 후)
@@ -377,7 +394,6 @@ jobs:
           path: ${{ env.CRASH_LOG_DIR }}_post/
           retention-days: 14
 
-      # ── 레포트 업로드 ──────────────────────────────────────────────────────
       - name: 테스트 레포트 업로드
         if: always()
         uses: actions/upload-artifact@v4
@@ -391,46 +407,49 @@ jobs:
             ${{ env.REPORT_DIR }}/test_report.xlsx
           retention-days: 14
 
-      # ── 캐시 업데이트 (성공/실패 무관, 서버 다운이 아닐 때만) ──────────────
       - name: 상태 캐시 업데이트
         if: steps.pre_health.outputs.server_up == 'true'
-        shell: powershell
-        run: |
-          $cacheDir = ".cache"
-          if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir | Out-Null }
-          $key = "${{ needs.detect-changes.outputs.swagger_hash }}::${{ needs.detect-changes.outputs.server_version }}"
-          $key | Out-File "$cacheDir\last_run_state.txt" -NoNewline -Encoding utf8
-          Write-Host "[Cache] 저장된 상태 키: $key"
-
-      # ── 최종 결과 판정 ─────────────────────────────────────────────────────
-      - name: 최종 결과 판정
-        if: always()
-        shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
- 
-          # 이전 step 결과 읽기
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $cacheDir = ".cache"
+          if (-not (Test-Path $cacheDir)) {
+            New-Item -ItemType Directory -Path $cacheDir | Out-Null
+          }
+
+          $key = "${{ needs.detect-changes.outputs.swagger_hash }}::${{ needs.detect-changes.outputs.server_version }}"
+          $key | Out-File -FilePath "$cacheDir\last_run_state.txt" -NoNewline -Encoding utf8
+          Write-Host "[Cache] 저장된 상태 키: $key"
+
+      - name: 최종 결과 판정
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
           $serverUpRaw = "${{ steps.post_health.outputs.server_up }}"
           $exitCodeRaw = "${{ steps.pytest.outputs.exit_code }}"
- 
+
           Write-Host "[Result] server_up='$serverUpRaw'  pytest_exit='$exitCodeRaw'"
- 
-          # 1. 서버 크래시 여부
+
           if ($serverUpRaw -eq "false") {
             Write-Host "::error::Server crashed during test run. Check crash-log artifacts."
             exit 2
           }
- 
-          # 2. pytest 결과 — 빈 문자열(step skip) 은 통과로 처리
+
           if ($exitCodeRaw -ne "" -and $exitCodeRaw -ne "0") {
             $code = 0
             if ([int]::TryParse($exitCodeRaw, [ref]$code)) {
               Write-Host "::error::pytest failed (exit=$code). Check uploaded test reports."
               exit $code
-            } else {
+            }
+            else {
               Write-Host "::error::pytest exit code unreadable: '$exitCodeRaw'"
               exit 1
             }
           }
- 
+
           Write-Host "[Result] Pipeline completed successfully."
+
+      
