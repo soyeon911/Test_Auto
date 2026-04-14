@@ -112,37 +112,38 @@ jobs:
           if (-not $baseUrl) { $baseUrl = "http://192.168.150.158:8080" }
 
           $version = "unknown"
-          $endpoints = @("/health", "/version", "/api/version", "/api/v1/version", "/api/v2/version")
 
-          foreach ($ep in $endpoints) {
+          # 1. 기존 API 먼저 시도
+          $apiEndpoints = @("/version", "/api/version")
+
+          foreach ($ep in $apiEndpoints) {
             try {
               $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-
-              $candidate = $null
-              if ($null -ne $resp.version) { $candidate = $resp.version }
-              elseif ($null -ne $resp.commit) { $candidate = $resp.commit }
-              elseif ($null -ne $resp.build_hash) { $candidate = $resp.build_hash }
-              elseif ($null -ne $resp.hash) { $candidate = $resp.hash }
-
-              if ($candidate) {
-                $version = [string]$candidate
-                Write-Host "[Version] $ep → $version"
+              if ($resp.version) {
+                $version = $resp.version
+                Write-Host "[Version] API $ep → $version"
                 break
               }
+            } catch {}
+          }
 
-              if ($resp -is [string] -and $resp.Length -lt 100) {
-                $version = $resp.Trim()
-                Write-Host "[Version] $ep → $version"
-                break
-              }
-            }
-            catch {
-              Write-Host "[Version] $ep 접근 실패: $($_.Exception.Message)"
+          # 2. 실패하면 Swagger fallback
+          if ($version -eq "unknown") {
+            $swaggerEndpoints = @("/swagger.json", "/v2/api-docs")
+
+            foreach ($ep in $swaggerEndpoints) {
+              try {
+                $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
+                if ($resp.info.version) {
+                  $version = $resp.info.version
+                  Write-Host "[Version] Swagger $ep → $version"
+                  break
+                }
+              } catch {}
             }
           }
 
           Write-Host "[Version] 최종 서버 버전: $version"
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: 이전 캐시와 비교
         id: compare
