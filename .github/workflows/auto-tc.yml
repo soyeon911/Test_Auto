@@ -171,7 +171,7 @@ jobs:
     env:
       BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
-      SERVER_EXE_NAME: qfe-api-server.exe
+      SERVER_EXE_NAME: qfe-server.exe
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
       LLM_PROVIDER: ollama
