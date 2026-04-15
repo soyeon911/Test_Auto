@@ -130,7 +130,6 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "swagger_source=$swaggerSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-
       - name: 이전 캐시와 비교
         id: compare
         run: |
@@ -401,7 +400,6 @@ jobs:
 
           Write-Host "[Swagger] downloaded: $swaggerUrl -> $swaggerPath"
           "DOWNLOADED_SWAGGER=$swaggerPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
 
       - name: Crash 로그 수집 (테스트 전)
         if: steps.pre_health.outputs.server_up == 'false'
