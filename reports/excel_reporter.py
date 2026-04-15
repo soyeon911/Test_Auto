@@ -253,7 +253,8 @@ class ExcelReportBuilder:
             response_or_result = self._pick_response_or_result(item)
 
             expected_display = item.get("expected_status_display") or self._build_expected_display(item, info)
-            rule_type = item.get("rule_type") or info["rule_type"]
+            # rule_type = item.get("rule_type") or info["rule_type"]
+            rule_type = item.get("rule_type", "") 
             # axis가 있으면 rule_type에 "(axis)" 형태로 병기
             axis = item.get("axis", "")
             if axis and rule_type and axis not in rule_type:
@@ -761,14 +762,14 @@ class ExcelReportBuilder:
             result["test_data"] = f"{param} = wrong type"
             result["expected_status"] = "400 / 422"
 
-        elif m2 := re.search(r"_boundary_body_(.+?)_(\d+)$", fn):
+        elif m2 := re.search(r"_boundary_body_(.+?)_(.+)$", fn):
             field, probe = m2.group(1), m2.group(2)
             result["rule_type"] = "boundary"
             result["condition"] = f"Body field boundary probe: {field}"
             result["test_data"] = f"body.{field} = probe[{probe}]"
             result["expected_status"] = "< 500"
 
-        elif m2 := re.search(r"_boundary_(.+?)_(\d+)$", fn):
+        elif m2 := re.search(r"_boundary_(.+?)_(.+)$", fn):
             param, probe = m2.group(1), m2.group(2)
             result["rule_type"] = "boundary"
             result["condition"] = f"Param boundary probe: {param}"
@@ -788,6 +789,12 @@ class ExcelReportBuilder:
             result["condition"] = f"Param value outside allowed enum: {param}"
             result["test_data"] = f"{param} = '__INVALID_ENUM_VALUE__'"
             result["expected_status"] = "400 / 422"
+
+        elif "_semantic_" in fn:
+            result["rule_type"] = "semantic_probe"
+            result["condition"] = "Semantic probe test"
+            result["test_data"] = "Tag-based invalid input"
+            result["expected_status"] = "< 500"
 
         return result
 
