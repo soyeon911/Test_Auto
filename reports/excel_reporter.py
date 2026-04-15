@@ -170,7 +170,16 @@ class ExcelReportBuilder:
 
             line_count = max(len(req_params), len(opt_params), len(body_fields), 1)
             ws.row_dimensions[r].height = max(18, 15 * line_count)
+    
+    def _extract_expected_success(self, expected_display: str) -> str:
+        text = str(expected_display).lower()
 
+        if "success=true" in text:
+            return "true"
+        if "success=false" in text:
+            return "false"
+
+        return ""
     # ─── Sheet 3: TC Table ────────────────────────────────────────────────────
 
     def _build_tc_table(self, ws, tests: list[dict[str, Any]], base_url: str) -> None:
@@ -307,10 +316,16 @@ class ExcelReportBuilder:
                 cell = ws.cell(row=r, column=col, value=val)
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
 
-            if rs_display == "true":
-                bg = _GREEN_BG
-            elif rs_display == "false":
-                bg = _RED_BG
+            expected_success = self._extract_expected_success(expected_display)
+
+            if expected_success and rs_display:
+                if expected_success == rs_display:
+                    bg = _GREEN_BG   # ✔️ 기대와 실제 일치
+                else:
+                    bg = _RED_BG     # ❌ mismatch
+            elif rs_display:
+                # expected 없으면 기존 방식 fallback
+                bg = _GREEN_BG if rs_display == "true" else _RED_BG
             else:
                 bg = _YELLOW_BG
 
@@ -796,7 +811,7 @@ class ExcelReportBuilder:
             result["condition"] = f"Semantic probe: {field} ({probe})"
             result["test_data"] = f"{field} = {probe}"
             result["expected_status"] = "< 500"
-            
+
         return result
 
     def _read_file_header(self, file_path: str, cache: dict) -> tuple[str, str]:
