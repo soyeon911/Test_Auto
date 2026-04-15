@@ -70,7 +70,7 @@ if ($ShowRecentCrashes -and (Test-Path $LogDir)) {
 
 # ── 5. 서버 Health Check ─────────────────────────────────────────────────────
 Write-Host "`n[ Health Check ]"
-$baseUrl = "http://localhost:8080"
+$baseUrl = "http://192.168.150.166:8080"
 try {
     $cfgPath = Join-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)) "config\config.yaml"
     if (Test-Path $cfgPath) {
