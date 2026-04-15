@@ -220,8 +220,13 @@ class RuleBasedTCGenerator:
         minimum = cons.get("minimum")
         maximum = cons.get("maximum")
         policy = self._probe_policy(schema).get("range_policy", "none")
+        
+        #swagger의 example를 경계값으로 추출
+        example = cons.get("example")
+        if example is None:
+            example = schema.get("example")
 
-        if minimum is None and maximum is None:
+        if minimum is None and maximum is None and not isinstance(example, (int, float)):
             return []
 
         cases: list[dict[str, Any]] = []
@@ -248,6 +253,26 @@ class RuleBasedTCGenerator:
             )
             cases.append({"value": maximum - 1, "label": "below_max", "policy": "must_pass"})
 
+        if isinstance(example, (int, float)):
+            step = 1 if isinstance(example, int) else 0.1
+
+            # example 자체는 정상값 anchor
+            cases.append({"value": example, "label": "example", "policy": "must_pass"})
+
+            lower_example = example - step
+            upper_example = example + step
+
+            # range가 있으면 안쪽에 있을 때만 must_pass, 아니면 probe_only
+            if minimum is None or lower_example >= minimum:
+                cases.append({"value": lower_example, "label": "below_example", "policy": "must_pass"})
+            else:
+                cases.append({"value": lower_example, "label": "below_example", "policy": "probe_only"})
+
+            if maximum is None or upper_example <= maximum:
+                cases.append({"value": upper_example, "label": "above_example", "policy": "must_pass"})
+            else:
+                cases.append({"value": upper_example, "label": "above_example", "policy": "probe_only"})
+        
         dedup: dict[tuple[Any, str], dict[str, Any]] = {}
         for c in cases:
             dedup[(c["value"], c["label"])] = c
@@ -516,7 +541,7 @@ class RuleBasedTCGenerator:
 
         return "\n\n\n".join(b for b in blocks if b)
 
-    # ──────────────────────────────────────────────────────────────
+    # r
     # Python target generation
     # ──────────────────────────────────────────────────────────────
 
