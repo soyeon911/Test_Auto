@@ -123,12 +123,12 @@ _SEMANTIC_PROBE_DIAG: dict[tuple[str, str], tuple[str, str]] = {
     # ("integer_count",   "negative"):     ("domain", "range_violation"),
     # ("integer_count",   "zero"):         ("domain", "range_violation"),
     # ("integer_count",   "overflow"):     ("domain", "range_violation"),
-    ("email_string",      "invalid_fmt"):  ("schema", "query_param_invalid"),
-    ("email_string",      "malformed"):    ("schema", "query_param_invalid"),
-    ("uuid_string",       "invalid_fmt"):  ("schema", "query_param_invalid"),
-    ("uuid_string",       "empty"):        ("schema", "query_param_invalid"),
-    ("datetime_string",   "invalid_fmt"):  ("schema", "query_param_invalid"),
-    ("url_string",        "invalid_fmt"):  ("schema", "query_param_invalid"),
+    # ("email_string",      "invalid_fmt"):  ("schema", "query_param_invalid"),
+    # ("email_string",      "malformed"):    ("schema", "query_param_invalid"),
+    # ("uuid_string",       "invalid_fmt"):  ("schema", "query_param_invalid"),
+    # ("uuid_string",       "empty"):        ("schema", "query_param_invalid"),
+    # ("datetime_string",   "invalid_fmt"):  ("schema", "query_param_invalid"),
+    # ("url_string",        "invalid_fmt"):  ("schema", "query_param_invalid"),
     ("boolean_flag",      "wrong_type"):   ("schema", "type_mismatch"),
 }
 
@@ -348,7 +348,7 @@ class RuleBasedTCGenerator:
                 f"  Body   : {{resp.text[:300]}}"
             )
         """)
-
+    '''
     def _resolve_probe_policy(self, schema: dict, tag: str, probe_label: str, static_policy: str) -> str:
         """
         _SEMANTIC_PROBES의 static policy를 x_probe_policy로 보정한다.
@@ -385,7 +385,7 @@ class RuleBasedTCGenerator:
         success_statuses: list[int] | None = None,
     ) -> str:
         return f"{self._expected_http_str(policy, success_statuses)} / {exp_app}"
-
+    '''
     def _build_policy_assertion(
         self,
         policy: str,
@@ -751,7 +751,8 @@ class RuleBasedTCGenerator:
             reason_code="precondition_not_met",
             target_field="",
             test_condition="Happy path — all required fields present with valid values",
-            expected_http=self._expected_http_str("must_pass", success_statuses),
+            expected_http="200",
+            # expected_http=self._expected_http_str("must_pass", success_statuses),
             expected_app=exp_app,
             error_detail="state.precondition_not_met",
             request_method=method,
@@ -759,7 +760,8 @@ class RuleBasedTCGenerator:
             request_query=query_params,
             request_headers=None,
             request_body=body,
-            expected_status_display=self._expected_status_display_str("must_pass", exp_app, success_statuses),
+            expected_status_display=f"200 / {exp_app}",
+            # expected_status_display=self._expected_status_display_str("must_pass", exp_app, success_statuses),
             rule_type="positive",
         )
 
@@ -790,7 +792,7 @@ class RuleBasedTCGenerator:
             body = self._build_valid_body(req_body)
             call = _render_call(method, path, path_params, query_params, body)
             assertion = self._build_policy_assertion("must_fail", target_param["name"], "missing_required")
-            _exp_app_mr = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
+            #_exp_app_mr = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
             blocks.append(self._api_test_block(
                 fname=fname,
                 docstring=f"[rule:missing_required] Omit required query param '{target_param['name']}'.",
@@ -800,15 +802,18 @@ class RuleBasedTCGenerator:
                 reason_code="missing_required",
                 target_field=target_param["name"],
                 test_condition=f"Required query param '{target_param['name']}' omitted from request",
-                expected_http=self._expected_http_str("must_fail"),
-                expected_app=_exp_app_mr,
+                expected_http="200",
+                expected_app="success=false, error_code<0",
+                # expected_http=self._expected_http_str("must_fail"),
+                # expected_app=_exp_app_mr,
                 error_detail=f"schema.missing_required.{target_param['name']}",
                 request_method=method,
                 request_path=resolved_path,
                 request_query=query_params,
                 request_headers=None,
                 request_body=body,
-                expected_status_display=self._expected_status_display_str("must_fail", _exp_app_mr),
+                expected_status_display="200 / success=false, error_code<0",
+                # expected_status_display=self._expected_status_display_str("must_fail", _exp_app_mr),
                 rule_type="missing_required",
             ))
 
@@ -831,7 +836,7 @@ class RuleBasedTCGenerator:
                 resolved_path = _build_url(path, path_params)
                 call = _render_call(method, path, path_params, query_params, partial_body)
                 assertion = self._build_policy_assertion("must_fail", field, "missing_required")
-                _exp_app_mrbody = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
+                # _exp_app_mrbody = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
                 blocks.append(self._api_test_block(
                     fname=fname,
                     docstring=f"[rule:missing_required] Omit required body field '{field}'.",
@@ -841,15 +846,18 @@ class RuleBasedTCGenerator:
                     reason_code="missing_required",
                     target_field=field,
                     test_condition=f"Required body field '{field}' omitted from request",
-                    expected_http=self._expected_http_str("must_fail"),
-                    expected_app=_exp_app_mrbody,
+                    expected_http="200",
+                    expected_app="success=false, error_code<0",
+                    # expected_http=self._expected_http_str("must_fail"),
+                    # expected_app=_exp_app_mrbody,
                     error_detail=f"schema.missing_required.{field}",
                     request_method=method,
                     request_path=resolved_path,
                     request_query=query_params,
                     request_headers=None,
                     request_body=partial_body,
-                    expected_status_display=self._expected_status_display_str("must_fail", _exp_app_mrbody),
+                    expected_status_display="200 / success=false, error_code<0",
+                    # expected_status_display=self._expected_status_display_str("must_fail", _exp_app_mrbody),
                     rule_type="missing_required",
                 ))
 
@@ -896,7 +904,7 @@ class RuleBasedTCGenerator:
                 continue
 
             assertion = self._build_policy_assertion("must_fail", p["name"], "wrong_type")
-            _exp_app_wt = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
+            # _exp_app_wt = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
             blocks.append(self._api_test_block(
                 fname=fname,
                 docstring=f"[rule:wrong_type] Pass wrong type for '{p['name']}' (expected {ptype}).",
@@ -906,15 +914,18 @@ class RuleBasedTCGenerator:
                 reason_code="type_mismatch",
                 target_field=p["name"],
                 test_condition=f"'{p['name']}' sent with wrong type (expected {ptype}, sent {_WRONG.get(ptype)!r})",
-                expected_http=self._expected_http_str("must_fail"),
-                expected_app=_exp_app_wt,
+                expected_http="200",
+                expected_app="success=false, error_code<0",
+                # expected_http=self._expected_http_str("must_fail"),
+                # expected_app=_exp_app_wt,
                 error_detail=f"schema.type_mismatch.{p['name']}",
                 request_method=method,
                 request_path=resolved_path,
                 request_query=req_query,
                 request_headers=None,
                 request_body=req_body_payload,
-                expected_status_display=self._expected_status_display_str("must_fail", _exp_app_wt),
+                expected_status_display="200 / success=false, error_code<0",
+                # expected_status_display=self._expected_status_display_str("must_fail", _exp_app_wt),
                 rule_type="wrong_type",
             ))
 
@@ -933,7 +944,7 @@ class RuleBasedTCGenerator:
                 resolved_path = _build_url(path, path_params)
                 call = _render_call(method, path, path_params, query_params, bad_body)
                 assertion = self._build_policy_assertion("must_fail", field, "wrong_type")
-                _exp_app_wtbody = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
+                # _exp_app_wtbody = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
                 blocks.append(self._api_test_block(
                     fname=fname,
                     docstring=f"[rule:wrong_type] Pass wrong type for body field '{field}' (expected {ftype}).",
@@ -943,15 +954,18 @@ class RuleBasedTCGenerator:
                     reason_code="type_mismatch",
                     target_field=field,
                     test_condition=f"Body field '{field}' sent with wrong type (expected {ftype}, sent {wrong!r})",
-                    expected_http=self._expected_http_str("must_fail"),
-                    expected_app=_exp_app_wtbody,
+                    expected_http="200",
+                    expected_app="success=false, error_code<0",
+                    # expected_http=self._expected_http_str("must_fail"),
+                    # expected_app=_exp_app_wtbody,
                     error_detail=f"schema.type_mismatch.{field}",
                     request_method=method,
                     request_path=resolved_path,
                     request_query=query_params,
                     request_headers=None,
                     request_body=bad_body,
-                    expected_status_display=self._expected_status_display_str("must_fail", _exp_app_wtbody),
+                    expected_status_display="200 / success=false, error_code<0",
+                    # expected_status_display=self._expected_status_display_str("must_fail", _exp_app_wtbody),
                     rule_type="wrong_type",
                 ))
 
@@ -1006,6 +1020,12 @@ class RuleBasedTCGenerator:
                     continue
 
                 assertion = self._build_policy_assertion(policy, p["name"], f"boundary:{label}", success_statuses)
+                exp_app = {
+                    "must_pass": "success=true, error_code>=0",
+                    "must_fail": "success=false, error_code<0",
+                    "probe_only": "no crash (status < 500)",
+                }.get(policy, "no crash (status < 500)")
+                '''
                 if self.error_mode == "qfe":
                     exp_app = {
                         "must_pass": "success=true, error_code>=0",
@@ -1018,6 +1038,7 @@ class RuleBasedTCGenerator:
                         "must_fail": "400 / 422",
                         "probe_only": "no crash (status < 500)",
                     }.get(policy, "no crash (status < 500)")
+                '''
 
                 blocks.append(self._api_test_block(
                     fname=fname,
@@ -1028,7 +1049,8 @@ class RuleBasedTCGenerator:
                     reason_code="range_violation",
                     target_field=p["name"],
                     test_condition=f"'{p['name']}' = {probe} (boundary: {label})",
-                    expected_http=self._expected_http_str(policy, success_statuses),
+                    expected_http="200",
+                    # expected_http=self._expected_http_str(policy, success_statuses),
                     expected_app=exp_app,
                     error_detail=f"domain.range_violation.{p['name']}.{label}",
                     request_method=method,
@@ -1036,7 +1058,8 @@ class RuleBasedTCGenerator:
                     request_query=req_query,
                     request_headers=None,
                     request_body=req_body_payload,
-                    expected_status_display=self._expected_status_display_str(policy, exp_app, success_statuses),
+                    expected_status_display=f"200 / {exp_app}",
+                    # expected_status_display=self._expected_status_display_str(policy, exp_app, success_statuses),
                     rule_type="boundary",
                 ))
 
@@ -1056,6 +1079,12 @@ class RuleBasedTCGenerator:
                 resolved_path = _build_url(path, base_path_params)
                 call = _render_call(method, path, base_path_params, base_query_params, bad_body)
                 assertion = self._build_policy_assertion(policy, field, f"boundary:{label}", success_statuses)
+                exp_app = {
+                    "must_pass": "success=true, error_code>=0",
+                    "must_fail": "success=false, error_code<0",
+                    "probe_only": "no crash (status < 500)",
+                }.get(policy, "no crash (status < 500)")
+                '''
                 if self.error_mode == "qfe":
                     exp_app = {
                         "must_pass": "success=true, error_code>=0",
@@ -1068,7 +1097,7 @@ class RuleBasedTCGenerator:
                         "must_fail": "400 / 422",
                         "probe_only": "no crash (status < 500)",
                     }.get(policy, "no crash (status < 500)")
-
+                '''
                 blocks.append(self._api_test_block(
                     fname=fname,
                     docstring=f"[rule:boundary] body field '{field}' = {probe} ({label}, policy={policy}).",
@@ -1078,7 +1107,8 @@ class RuleBasedTCGenerator:
                     reason_code="range_violation",
                     target_field=field,
                     test_condition=f"Body field '{field}' = {probe} (boundary: {label})",
-                    expected_http=self._expected_http_str(policy, success_statuses),
+                    expected_http="200",
+                    # expected_http=self._expected_http_str(policy, success_statuses),
                     expected_app=exp_app,
                     error_detail=f"domain.range_violation.{field}.{label}",
                     request_method=method,
@@ -1086,7 +1116,8 @@ class RuleBasedTCGenerator:
                     request_query=base_query_params,
                     request_headers=None,
                     request_body=bad_body,
-                    expected_status_display=self._expected_status_display_str(policy, exp_app, success_statuses),
+                    expected_status_display=f"200 / {exp_app}",
+                    # expected_status_display=self._expected_status_display_str(policy, exp_app, success_statuses),
                     rule_type="boundary",
                 ))
 
@@ -1133,7 +1164,7 @@ class RuleBasedTCGenerator:
                 continue
 
             assertion = self._build_policy_assertion("must_fail", p["name"], "invalid_enum")
-            _exp_app_ie = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
+            # _exp_app_ie = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
             blocks.append(self._api_test_block(
                 fname=fname,
                 docstring=f"[rule:invalid_enum] '{p['name']}' outside allowed enum {enum_vals}.",
@@ -1143,15 +1174,18 @@ class RuleBasedTCGenerator:
                 reason_code="enum_violation",
                 target_field=p["name"],
                 test_condition=f"'{p['name']}' = '__INVALID_ENUM_VALUE__' (allowed: {enum_vals})",
-                expected_http=self._expected_http_str("must_fail"),
-                expected_app=_exp_app_ie,
+                expected_http="200",
+                expected_app="success=false, error_code<0",
+                # expected_http=self._expected_http_str("must_fail"),
+                # expected_app=_exp_app_ie,
                 error_detail=f"domain.enum_violation.{p['name']}",
                 request_method=method,
                 request_path=resolved_path,
                 request_query=req_query,
                 request_headers=None,
                 request_body=req_body_payload,
-                expected_status_display=self._expected_status_display_str("must_fail", _exp_app_ie),
+                expected_status_display="200 / success=false, error_code<0",
+                # expected_status_display=self._expected_status_display_str("must_fail", _exp_app_ie),
                 rule_type="invalid_enum",
             ))
 
@@ -1169,7 +1203,7 @@ class RuleBasedTCGenerator:
                 resolved_path = _build_url(path, path_params)
                 call = _render_call(method, path, path_params, query_params, bad_body)
                 assertion = self._build_policy_assertion("must_fail", field, "invalid_enum")
-                _exp_app_iebody = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
+                # _exp_app_iebody = "success=false, error_code<0" if self.error_mode == "qfe" else "400 / 422"
                 blocks.append(self._api_test_block(
                     fname=fname,
                     docstring=f"[rule:invalid_enum] body field '{field}' outside allowed enum {enum_vals}.",
@@ -1179,15 +1213,18 @@ class RuleBasedTCGenerator:
                     reason_code="enum_violation",
                     target_field=field,
                     test_condition=f"Body field '{field}' = '__INVALID_ENUM_VALUE__' (allowed: {enum_vals})",
-                    expected_http=self._expected_http_str("must_fail"),
-                    expected_app=_exp_app_iebody,
+                    expected_http="200",
+                    expected_app="success=false, error_code<0",
+                    # expected_http=self._expected_http_str("must_fail"),
+                    # expected_app=_exp_app_iebody,
                     error_detail=f"domain.enum_violation.{field}",
                     request_method=method,
                     request_path=resolved_path,
                     request_query=query_params,
                     request_headers=None,
                     request_body=bad_body,
-                    expected_status_display=self._expected_status_display_str("must_fail", _exp_app_iebody),
+                    expected_status_display="200 / success=false, error_code<0",
+                    # expected_status_display=self._expected_status_display_str("must_fail", _exp_app_iebody),
                     rule_type="invalid_enum",
                 ))
 
@@ -1223,8 +1260,9 @@ class RuleBasedTCGenerator:
             for probe in probes:
                 probe_val = probe["value"]
                 probe_label = probe["label"]
+                policy = probe["policy"]
                 # threshold_numeric의 boundary probe는 x_probe_policy.semantic_policy로 보정
-                policy = self._resolve_probe_policy(schema, tag, probe_label, probe["policy"])
+                # policy = self._resolve_probe_policy(schema, tag, probe_label, probe["policy"])
                 fname = f"test_{op_id}_semantic_{_safe_name(p['name'])}_{probe_label}"
 
                 req_query = base_query_params
@@ -1246,10 +1284,13 @@ class RuleBasedTCGenerator:
                 _s_axis, _s_rc = _SEMANTIC_PROBE_DIAG.get(
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
+                exp_app = "success=false, error_code<0" 
+                '''
                 if self.error_mode == "qfe":
                     exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
                 else:
                     exp_app = "400 / 422" if policy == "must_fail" else "no crash (status < 500)"
+                '''
 
                 blocks.append(self._api_test_block(
                     fname=fname,
@@ -1260,7 +1301,8 @@ class RuleBasedTCGenerator:
                     reason_code=_s_rc,
                     target_field=p["name"],
                     test_condition=f"'{p['name']}' tag={tag} probe={probe_label}: value={probe_val!r}",
-                    expected_http=self._expected_http_str(policy),
+                    expected_http="200",
+                    # expected_http=self._expected_http_str(policy),
                     expected_app=exp_app,
                     error_detail=f"{_s_axis}.{_s_rc}.{p['name']}",
                     request_method=method,
@@ -1268,7 +1310,8 @@ class RuleBasedTCGenerator:
                     request_query=req_query,
                     request_headers=None,
                     request_body=req_body_payload,
-                    expected_status_display=self._expected_status_display_str(policy, exp_app),
+                    expected_status_display=f"200 / {exp_app}",
+                    # expected_status_display=self._expected_status_display_str(policy, exp_app),
                     rule_type="semantic_probe",
                 ))
 
@@ -1284,8 +1327,9 @@ class RuleBasedTCGenerator:
             for probe in probes:
                 probe_val = probe["value"]
                 probe_label = probe["label"]
+                policy = probe["policy"]
                 # threshold_numeric의 boundary probe는 x_probe_policy.semantic_policy로 보정
-                policy = self._resolve_probe_policy(field_schema, tag, probe_label, probe["policy"])
+                # policy = self._resolve_probe_policy(field_schema, tag, probe_label, probe["policy"])
                 fname = f"test_{op_id}_semantic_{_safe_name(field)}_{probe_label}"
                 bad_body = {**base_body, field: probe_val}
                 resolved_path = _build_url(path, base_path_params)
@@ -1294,10 +1338,13 @@ class RuleBasedTCGenerator:
                 _s_axis, _s_rc = _SEMANTIC_PROBE_DIAG.get(
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
+                exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
+                '''
                 if self.error_mode == "qfe":
                     exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
                 else:
                     exp_app = "400 / 422" if policy == "must_fail" else "no crash (status < 500)"
+                '''
 
                 blocks.append(self._api_test_block(
                     fname=fname,
@@ -1308,7 +1355,8 @@ class RuleBasedTCGenerator:
                     reason_code=_s_rc,
                     target_field=field,
                     test_condition=f"'{field}' tag={tag} probe={probe_label}: value={probe_val!r}",
-                    expected_http=self._expected_http_str(policy),
+                    expected_http="200",
+                    # expected_http=self._expected_http_str(policy),
                     expected_app=exp_app,
                     error_detail=f"{_s_axis}.{_s_rc}.{field}",
                     request_method=method,
@@ -1316,7 +1364,8 @@ class RuleBasedTCGenerator:
                     request_query=base_query_params,
                     request_headers=None,
                     request_body=bad_body,
-                    expected_status_display=self._expected_status_display_str(policy, exp_app),
+                    expected_status_display=f"200 / {exp_app}",0
+                    # expected_status_display=self._expected_status_display_str(policy, exp_app),
                     rule_type="semantic_probe",
                 ))
 
