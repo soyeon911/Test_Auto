@@ -112,6 +112,7 @@ jobs:
                 $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
                 if ($null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
                   $version = [string]$resp.info.version
+                  $swaggerSource = "$baseUrl$ep"
                   Write-Host "[Version] Swagger $ep -> $version"
                   break
                 }
