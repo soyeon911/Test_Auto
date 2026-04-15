@@ -253,8 +253,8 @@ class ExcelReportBuilder:
             response_or_result = self._pick_response_or_result(item)
 
             expected_display = item.get("expected_status_display") or self._build_expected_display(item, info)
-            # rule_type = item.get("rule_type") or info["rule_type"]
-            rule_type = item.get("rule_type", "") 
+            rule_type = item.get("rule_type") or info["rule_type"]
+            # rule_type = item.get("rule_type", "")     fallback 제거 시 아예 못 읽어옴
             # axis가 있으면 rule_type에 "(axis)" 형태로 병기
             axis = item.get("axis", "")
             if axis and rule_type and axis not in rule_type:
@@ -765,15 +765,15 @@ class ExcelReportBuilder:
         elif m2 := re.search(r"_boundary_body_(.+?)_(.+)$", fn):
             field, probe = m2.group(1), m2.group(2)
             result["rule_type"] = "boundary"
-            result["condition"] = f"Body field boundary probe: {field}"
-            result["test_data"] = f"body.{field} = probe[{probe}]"
+            result["condition"] = f"Body field boundary probe: {field} ({probe})"
+            result["test_data"] = f"body.{field} = {probe}"
             result["expected_status"] = "< 500"
 
         elif m2 := re.search(r"_boundary_(.+?)_(.+)$", fn):
             param, probe = m2.group(1), m2.group(2)
             result["rule_type"] = "boundary"
-            result["condition"] = f"Param boundary probe: {param}"
-            result["test_data"] = f"{param} = probe[{probe}]"
+            result["condition"] = f"Param boundary probe: {param} ({probe})"
+            result["test_data"] = f"{param} = {probe}"
             result["expected_status"] = "< 500"
 
         elif m2 := re.search(r"_invalid_enum_body_(.+)$", fn):
@@ -790,12 +790,13 @@ class ExcelReportBuilder:
             result["test_data"] = f"{param} = '__INVALID_ENUM_VALUE__'"
             result["expected_status"] = "400 / 422"
 
-        elif "_semantic_" in fn:
+        elif m2 := re.search(r"_semantic_(.+?)_(.+)$", fn):
+            field, probe = m2.group(1), m2.group(2)
             result["rule_type"] = "semantic_probe"
-            result["condition"] = "Semantic probe test"
-            result["test_data"] = "Tag-based invalid input"
+            result["condition"] = f"Semantic probe: {field} ({probe})"
+            result["test_data"] = f"{field} = {probe}"
             result["expected_status"] = "< 500"
-
+            
         return result
 
     def _read_file_header(self, file_path: str, cache: dict) -> tuple[str, str]:

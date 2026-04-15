@@ -51,7 +51,7 @@ _GOOD_BY_TAG: dict[str, Any] = {
     "config_json": "{}",
     "path_user_id": 1,
     # "integer_count": 10,
-    "integer_count": 10,
+    "integer_count": 1,
     "channel_count": 3,
     "boolean_flag": True,
     "datetime_string": "2024-01-01T00:00:00Z",
@@ -72,7 +72,7 @@ _SEMANTIC_PROBES: dict[str, list[dict[str, Any]]] = {
         {"value": "not_base64!@#", "label": "invalid_b64", "policy": "must_fail"},
         {"value": "", "label": "empty_b64", "policy": "must_fail"},
     ],
-    "threshold_float": [
+    "threshold_numeric": [
         {"value": -0.1, "label": "below_range", "policy": "probe_only"},
         {"value": 1.1, "label": "above_range", "policy": "probe_only"},
         {"value": "not_a_number", "label": "wrong_type", "policy": "must_fail"},
