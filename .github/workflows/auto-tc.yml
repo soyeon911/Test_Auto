@@ -91,7 +91,7 @@ jobs:
 
           $version = "unknown"
           $swaggerSource = ""
-          
+
           foreach ($ep in @("/version", "/api/version")) {
             try {
               $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
@@ -183,7 +183,7 @@ jobs:
       CRASH_LOG_DIR: crash_logs
       SERVER_LOG_DIR: server_logs
       # 서버 stderr 로그 파일 경로 (conftest crash guard / build_diag 가 읽음)
-      SWAGGER_SOURCE: ${{ steps.detect-changes.outputs.swagger_source }}
+      SWAGGER_SOURCE: ${{ needs.detect-changes.outputs.swagger_source }}
       SERVER_LOG_FILE: server_logs/server_stderr.log
       LLM_PROVIDER: ollama
       LLM_MODEL: llama3.1:8b
