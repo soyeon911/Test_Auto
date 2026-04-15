@@ -4,7 +4,7 @@ generate_excel_report.py — CI용 Excel 리포트 생성 스크립트
 Usage:
     python scripts/generate_excel_report.py \
         --report-dir reports \
-        --base-url   http://192.168.150.158:8080 \
+        --base-url   http://192.168.150.131:8080 \
         --swagger    input/QFEapi.json \
         --config     config/config.yaml
 
@@ -120,6 +120,9 @@ def main() -> int:
     endpoints   = _parse_endpoints(args.swagger, config)
     allure_dir  = report_dir / "allure-results"
 
+    swagger_source = os.getenv("SWAGGER_SOURCE", "").strip()
+    display_source = swagger_source or args.swagger
+
     print(f"[Excel] passed={summary['passed']}  failed={summary['failed']}  total={summary['total']}")
     print(f"[Excel] json_report={json_report}")
     print(f"[Excel] endpoints={len(endpoints)}")
@@ -129,7 +132,7 @@ def main() -> int:
         out = ExcelReportBuilder(xlsx_path).build(
             runner_summary=summary,
             pytest_json_path=json_report,
-            source_file=args.swagger,
+            source_file=display_source,
             base_url=args.base_url,
             endpoints=endpoints,
             allure_results_dir=allure_dir if allure_dir.exists() else None,

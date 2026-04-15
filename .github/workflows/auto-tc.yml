@@ -121,7 +121,9 @@ jobs:
           }
 
           Write-Host "[Version] 최종 서버 버전: $version"
+          Write-Host "[Version] Swagger Source: $swaggerSource"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "swagger_source=$swaggerSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: 이전 캐시와 비교
         id: compare
@@ -179,6 +181,7 @@ jobs:
       CRASH_LOG_DIR: crash_logs
       SERVER_LOG_DIR: server_logs
       # 서버 stderr 로그 파일 경로 (conftest crash guard / build_diag 가 읽음)
+      SWAGGER_SOURCE: ${{ steps.server_version.outputs.swagger_source }}
       SERVER_LOG_FILE: server_logs/server_stderr.log
       LLM_PROVIDER: ollama
       LLM_MODEL: llama3.1:8b
