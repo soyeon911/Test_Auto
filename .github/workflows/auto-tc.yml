@@ -106,20 +106,22 @@ jobs:
             }
           }
 
-          if ($version -eq "unknown") {
-            foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json", "/docs/doc.json")) {
-              try {
-                $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-                if ($null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
-                  $version = [string]$resp.info.version
-                  $swaggerSource = "$baseUrl$ep"
-                  Write-Host "[Version] Swagger $ep -> $version"
-                  break
-                }
+          foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json", "/docs/doc.json")) {
+            try {
+              $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
+              if (-not $swaggerSource) {
+                $swaggerSource = "$baseUrl$ep"
               }
-              catch {
-                Write-Host "[Version] Swagger $ep 실패: $($_.Exception.Message)"
+
+              if ($version -eq "unknown" -and $null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
+                $version = [string]$resp.info.version
+                Write-Host "[Version] Swagger $ep -> $version"
               }
+
+              if ($swaggerSource) { break }
+            }
+            catch {
+              Write-Host "[Version] Swagger $ep 실패: $($_.Exception.Message)"
             }
           }
 
@@ -127,6 +129,7 @@ jobs:
           Write-Host "[Version] Swagger Source: $swaggerSource"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "swagger_source=$swaggerSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
 
       - name: 이전 캐시와 비교
         id: compare
@@ -363,6 +366,43 @@ jobs:
             Get-Content $env:SERVER_STDERR_LOG -ErrorAction SilentlyContinue
           }
 
+      - name: 서버 Swagger 다운로드
+        id: fetch_swagger
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
+          $swaggerUrl = "$env:SWAGGER_SOURCE".Trim()
+          if (-not $swaggerUrl) {
+            throw "SWAGGER_SOURCE 가 비어 있습니다. detect-changes 단계에서 Swagger URL을 찾지 못했습니다."
+          }
+
+          $downloadDir = "input"
+          New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+
+          $swaggerPath = Join-Path $downloadDir "server_swagger.json"
+
+          Invoke-WebRequest -Uri $swaggerUrl -OutFile $swaggerPath -TimeoutSec 20 -UseBasicParsing
+
+          if (-not (Test-Path $swaggerPath)) {
+            throw "Swagger 다운로드 실패: $swaggerPath"
+          }
+
+          try {
+            $raw = Get-Content $swaggerPath -Raw -Encoding utf8 | ConvertFrom-Json
+            if ($null -eq $raw.paths) {
+              throw "다운로드한 파일에 paths 가 없습니다."
+            }
+          }
+          catch {
+            throw "다운로드한 Swagger 검증 실패: $($_.Exception.Message)"
+          }
+
+          Write-Host "[Swagger] downloaded: $swaggerUrl -> $swaggerPath"
+          "DOWNLOADED_SWAGGER=$swaggerPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+
       - name: Crash 로그 수집 (테스트 전)
         if: steps.pre_health.outputs.server_up == 'false'
         run: |
@@ -429,17 +469,13 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $env:PYTHONIOENCODING = "utf-8"
 
-          $swaggerFile = @("input\QFEapi.json", "input\QFEapi.yaml", "QFEapi.json", "QFEapi.yaml") |
-            Where-Object { Test-Path $_ } |
-            Select-Object -First 1
-
-          if (-not $swaggerFile) {
-            Write-Error "Swagger 파일을 찾을 수 없습니다."
+          if (-not $env:DOWNLOADED_SWAGGER -or -not (Test-Path $env:DOWNLOADED_SWAGGER)) {
+            Write-Error "다운로드된 Swagger 파일이 없습니다: $env:DOWNLOADED_SWAGGER"
             exit 1
           }
 
-          Write-Host "[Generate] 사용 파일: $swaggerFile"
-          python main.py generate $swaggerFile
+          Write-Host "[Generate] 사용 파일: $env:DOWNLOADED_SWAGGER"
+          python main.py generate "$env:DOWNLOADED_SWAGGER"
 
       - name: 테스트 실행
         id: pytest
@@ -489,12 +525,10 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $env:PYTHONIOENCODING = "utf-8"
 
-          # 프로젝트 루트(체크아웃 디렉터리)를 PYTHONPATH 에 명시
           $projectRoot = (Get-Location).Path
           $env:PYTHONPATH = $projectRoot
           Write-Host "[Excel] PYTHONPATH=$projectRoot"
 
-          # openpyxl 설치 여부 확인
           $openpyxlCheck = python -c "import openpyxl; print('openpyxl', openpyxl.__version__)" 2>&1
           Write-Host "[Excel] $openpyxlCheck"
           if ($LASTEXITCODE -ne 0) {
@@ -502,10 +536,7 @@ jobs:
             pip install "openpyxl>=3.1" --quiet
           }
 
-          $swaggerFile = @("input\QFEapi.json", "input\QFEapi.yaml", "QFEapi.json", "QFEapi.yaml") |
-            Where-Object { Test-Path $_ } |
-            Select-Object -First 1
-
+          $swaggerFile = $env:DOWNLOADED_SWAGGER
           if (-not $swaggerFile) { $swaggerFile = "" }
 
           python scripts\generate_excel_report.py `
