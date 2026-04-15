@@ -38,8 +38,26 @@ reason_code 값 (axis별):
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+
+# ─── 서버 로그 tail 헬퍼 ────────────────────────────────────────────────────────
+
+def _read_server_log_tail(n_lines: int = 60) -> str:
+    """
+    SERVER_LOG_FILE 환경변수가 설정된 경우 서버 로그 마지막 N줄을 반환한다.
+    설정 안 됐거나 파일이 없으면 빈 문자열 반환.
+    """
+    log_path = os.environ.get("SERVER_LOG_FILE", "")
+    if not log_path:
+        return ""
+    try:
+        lines = Path(log_path).read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(lines[-n_lines:])
+    except Exception:
+        return ""
 
 
 # ─── 진단 레코드 생성 ──────────────────────────────────────────────────────────
@@ -129,6 +147,11 @@ def build_diag(
 
     # ── request 데이터 추출 (resp.request / PreparedRequest) ──────
     req_body, req_query, req_headers = _extract_request_info(resp)
+
+    # ── server crash 시 log tail 자동 수집 ────────────────────────
+    # exc가 있거나 server_crash=True인데 server_log_tail이 전달 안 됐을 때
+    if server_log_tail is None and (exc is not None or server_crash):
+        server_log_tail = _read_server_log_tail()
 
     return {
         "axis":               axis,

@@ -13,7 +13,7 @@ target:
 
 # ── Local server (for api target) ────────────────────────────────────────────
 server:
-  base_url: "http://192.168.150.158:8080"
+  base_url: "http://192.168.150.131:8080"
   health_check_path: "/health"
   swagger_paths:
     - "QFEapi.json"
@@ -64,6 +64,8 @@ agent:
 # ── Test generation ───────────────────────────────────────────────────────────
 tc_generation:
   dedup_check: true   # skip if endpoint spec fingerprint unchanged
+  semantic_tagging:
+    reset_cache: true
 
   # Output directories — separated by origin (feedback: overwrite/review/failure 분석 편의)
   output_dirs:

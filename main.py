@@ -6,6 +6,16 @@ Modes:
   run     <file>    — one-shot: parse given file, generate TCs, run tests, email
   parse   <file>    — parse only, print endpoint summary
   generate <file>   — parse + generate TCs, no test run
+
+환경변수 (서버 관리):
+  SERVER_LOG_FILE       서버 stderr 로그 파일 경로 (config.server.log_file 로도 지정 가능)
+  SERVER_DIR            서버 실행 파일 디렉터리
+  SERVER_EXE_NAME       서버 실행 파일 이름 (기본: qfe-server.exe)
+  SERVER_LICENSE_KEY    라이선스 키 stdin 응답 (기본: 1)
+  SERVER_MODE_CHOICE    처리 모드 stdin 응답 (기본: 1 = CPU)
+  SERVER_INSTANCE_COUNT 인스턴스 수 stdin 응답 (기본: 1)
+  SERVER_MODEL_PATH     모델 경로 stdin 응답
+  SERVER_DB_PATH        DB 경로 stdin 응답
 """
 
 from __future__ import annotations
@@ -84,6 +94,75 @@ def detect_source_and_parse(source: str, config: dict) -> list[dict]:
     return endpoints
 
 
+# ─── server management helpers ────────────────────────────────────────────────
+
+def _setup_server_log_env(config: dict) -> str:
+    """
+    SERVER_LOG_FILE 환경변수를 설정하고 로그 디렉터리를 생성한다.
+
+    우선순위:
+      1. 이미 환경변수로 설정된 값
+      2. config.server.log_file 값
+      3. 기본값: server_logs/server_stderr.log
+    반환: 실제 사용되는 로그 파일 경로 (빈 문자열이면 설정 안 됨)
+    """
+    existing = os.environ.get("SERVER_LOG_FILE", "")
+    if existing:
+        return existing
+
+    cfg_log = config.get("server", {}).get("log_file", "")
+    log_path = cfg_log or "server_logs/server_stderr.log"
+
+    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+    os.environ["SERVER_LOG_FILE"] = log_path
+    print(f"[Pipeline] SERVER_LOG_FILE → {log_path}")
+    return log_path
+
+
+def _check_server_after_run(base_url: str, config: dict) -> bool:
+    """
+    테스트 완료 후 서버 상태를 확인한다.
+    서버가 다운됐으면 자동 재기동을 시도한다.
+
+    반환: 최종적으로 서버가 살아있으면 True
+    """
+    try:
+        from tests.helpers.server_manager import is_alive, restart_server
+    except ImportError:
+        return True  # 헬퍼 없으면 판단 불가 → 무시
+
+    if is_alive(base_url, timeout=3):
+        return True
+
+    print("\n[Pipeline] ⚠ 테스트 완료 후 서버 다운 감지 → 자동 재기동 시도...")
+    ok = restart_server(base_url)
+    if ok:
+        print("[Pipeline] ✓ 서버 재기동 성공 — 다음 파이프라인 실행 준비 완료")
+    else:
+        print("[Pipeline] ✗ 서버 재기동 실패 — 수동 확인 필요")
+        _print_log_tail(config)
+    return ok
+
+
+def _print_log_tail(config: dict, n: int = 40) -> None:
+    """SERVER_LOG_FILE 마지막 N줄을 출력한다 (디버깅용)."""
+    log_path = os.environ.get("SERVER_LOG_FILE", "")
+    if not log_path:
+        log_path = config.get("server", {}).get("log_file", "")
+    if not log_path:
+        return
+    p = Path(log_path)
+    if not p.exists():
+        print(f"[Pipeline] 서버 로그 파일 없음: {log_path}")
+        return
+    try:
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail = "\n".join(lines[-n:])
+        print(f"[Pipeline] 서버 로그 마지막 {n}줄:\n{tail}")
+    except Exception as exc:
+        print(f"[Pipeline] 서버 로그 읽기 실패: {exc}")
+
+
 # ─── full pipeline ────────────────────────────────────────────────────────────
 
 def run_pipeline(source: str, config: dict) -> None:
@@ -95,6 +174,9 @@ def run_pipeline(source: str, config: dict) -> None:
     print(f"\n{'='*60}")
     print(f"[Pipeline] Source: {source}")
     print(f"{'='*60}")
+
+    # ── 서버 로그 환경변수 설정 (crash 감지 + log tail 수집용) ──────────────
+    _setup_server_log_env(config)
 
     # 1. Parse
     endpoints = detect_source_and_parse(source, config)
@@ -108,12 +190,19 @@ def run_pipeline(source: str, config: dict) -> None:
     written = agent.generate_for_endpoints(endpoints)
     print(f"[Pipeline] Generated {len(written)} TC file(s).")
 
-    
     # 3. Run tests
     runner = TestRunner(config)
     summary = runner.run()
 
-    # 4. Email
+    # 4. 테스트 완료 후 서버 상태 점검 + 자동 재기동
+    base_url = config.get("server", {}).get("base_url", "")
+    if base_url:
+        server_ok = _check_server_after_run(base_url, config)
+        summary["server_alive_after_run"] = server_ok
+    else:
+        print("[Pipeline] server.base_url 미설정 — 서버 상태 점검 건너뜀")
+
+    # 5. Email
     sender = EmailSender(config)
     html_report = config.get("runner", {}).get("html_report_path", "./reports/summary.html")
     sender.send_report(summary, source_label=source, html_report_path=html_report)

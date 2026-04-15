@@ -20,6 +20,15 @@ import re
 import textwrap
 from typing import Any
 
+# 0415 수정사항
+"""
+현재 semantic tag 기본값을 range/type모다 먼저 써서 TC 생성 -> matching-threshold를 깨뜨림
+수정 로직
+1. explicit/inferred range가 있으면 그 값을 먼저 사용
+2. integer면 int, number면 float
+3. 그 다음에만 tag fallback
+"""
+
 
 # ─── type helpers ─────────────────────────────────────────────────────────────
 
@@ -37,10 +46,13 @@ _GOOD_BY_TAG: dict[str, Any] = {
     "identifier": "item_001",
     "base64_image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
     "base64_template": "AAEC",
-    "threshold_float": 0.7,
+    # "threshold_float": 0.7,
+    "threshold_numeric": 1,
     "config_json": "{}",
     "path_user_id": 1,
+    # "integer_count": 10,
     "integer_count": 10,
+    "channel_count": 3,
     "boolean_flag": True,
     "datetime_string": "2024-01-01T00:00:00Z",
     "email_string": "test@example.com",
@@ -429,14 +441,8 @@ class RuleBasedTCGenerator:
         return body or None
 
     def _good_value(self, name: str, schema: dict) -> Any:
-        tag = schema.get("semantic_tag", "")
         cons = self._schema_constraints(schema)
-
-        if tag:
-            val = _GOOD_BY_TAG.get(tag)
-            if val is not None:
-                return val
-
+        tag = schema.get("semantic_tag", "")
         ftype = schema.get("type", "string")
 
         if ftype == "integer":
@@ -446,6 +452,9 @@ class RuleBasedTCGenerator:
                 return int((minimum + maximum) / 2)
             if minimum is not None:
                 return int(minimum)
+            tag_val = _GOOD_BY_TAG.get(tag)
+            if tag_val is not None:
+                return int(tag_val) if isinstance(tag_val, (int, float)) else 1
             return 1
 
         if ftype == "number":
@@ -455,7 +464,15 @@ class RuleBasedTCGenerator:
                 return (minimum + maximum) / 2.0
             if minimum is not None:
                 return float(minimum)
-            return 0.7 if tag == "threshold_float" else 1.5
+            tag_val = _GOOD_BY_TAG.get(tag)
+            if tag_val is not None:
+                return float(tag_val) if isinstance(tag_val, (int, float)) else 1.0
+            return 1.5
+
+        if tag:
+            val = _GOOD_BY_TAG.get(tag)
+            if val is not None:
+                return val
 
         if ftype == "object":
             props = schema.get("properties", {})

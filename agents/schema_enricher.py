@@ -12,11 +12,12 @@ KNOWN_TAGS: frozenset[str] = frozenset({
     "identifier",
     "base64_image",
     "base64_template",
-    "threshold_float",
+    "threshold_numeric",
     "enum_mode",
     "config_json",
     "path_user_id",
     "integer_count",
+    "channel_count",
     "boolean_flag",
     "datetime_string",
     "email_string",
@@ -25,7 +26,6 @@ KNOWN_TAGS: frozenset[str] = frozenset({
     "url_string",
     "uuid_string",
     "numeric_id",
-    "channel_count",
 })
 
 
@@ -50,36 +50,40 @@ class SchemaEnricher:
         )
         self._load_file_cache()
 
+        # 캐시 강제 초기화
+        if config.get("tc_generation", {}).get("semantic_tagging", {}).get("reset_cache"):
+            self._mem = {}
+            if self._cache_path.exists():
+                try:
+                    self._cache_path.unlink()
+                except Exception:
+                    pass
+
     def _load_file_cache(self) -> None:
-        """Load semantic tagging cache from disk (JSON)."""
+        """Load full enrich cache from disk (JSON)."""
         if not self._cache_path.exists():
             return
         try:
             with open(self._cache_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                for k, v in data.items():
-                    if isinstance(v, str):  # 간단한 태그 형태
-                        self._mem[k] = {"semantic_tag": v}
-                    else:  # enriched dict 형태
-                        self._mem[k] = v
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        if isinstance(v, dict):
+                            self._mem[k] = v
         except Exception:
-            pass  # 캐시 로드 실패 무시
+            pass
+    
+    # 저장 시 semantic tag만 남기고 다시 읽을 때 x_constraints, x_probe_policy가 사라질 수 있는 문제점
+    # 한 번 캐시된 field는 다음 실행부터 semantic_tag만 남은 반쪽 데이터로 재사용될 수 있으며 이럴 경우 boundary/policy 생성이 흔들림
 
     def _save_file_cache(self) -> None:
-        """Save semantic tagging cache to disk (JSON)."""
+        """Save full enrich cache to disk (JSON)."""
         self._cache_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            # 간단한 형식으로 저장: {key: semantic_tag}
-            simple_cache = {}
-            for k, v in self._mem.items():
-                if isinstance(v, dict) and "semantic_tag" in v:
-                    simple_cache[k] = v["semantic_tag"]
-                else:
-                    simple_cache[k] = str(v)
             with open(self._cache_path, 'w', encoding='utf-8') as f:
-                json.dump(simple_cache, f, indent=2, ensure_ascii=False)
+                json.dump(self._mem, f, indent=2, ensure_ascii=False)
         except Exception:
-            pass  # 캐시 저장 실패 무시
+            pass
 
     # ──────────────────────────────────────────────────────────────
     # public
@@ -201,6 +205,10 @@ class SchemaEnricher:
         tag = self._heuristic(name, schema, field_location, field_description)
         return tag, ["field_name", "description", "example", "format", "type"]
 
+    # threshold, score, confidence가 있으면 integer도 threshold_float으로 강제
+    # channel은 따로 안 잡고 integer_count로 보내버리는 문제
+
+    # channel은 channel_count / threshold는 threshold_numeric으로 분류 -> 일반 number는 무조건 threshold가 아님
     def _heuristic(
         self,
         name: str,
@@ -215,26 +223,19 @@ class SchemaEnricher:
         example = str(schema.get("example", "")).lower()
         n = name.lower()
 
-        # enum always wins
         if enum_vals:
             return "enum_mode"
 
-        # path id only for true user_id-like fields
-        if field_location == "path" and n in {"user_id", "{user_id}"}:
-            return "path_user_id"
+        if field_location == "path" and re.search(r"(^|_)(user|face|group|template|device|person|subject)_?id$", n):
+            return "path_user_id" if n in {"user_id", "{user_id}"} else ("numeric_id" if ftype == "integer" else "identifier")
 
         blob = f"{example} {desc} {n}"
 
-        # base64 / binary-like detection
         if any(x in blob for x in ("base64", "encoded", "binary", "bytes", "blob")):
             if any(x in blob for x in ("template", "feature", "vector", "embedding", "face data", "face_data")):
                 return "base64_template"
             if any(x in blob for x in ("image", "img", "photo", "jpeg", "jpg", "png", "raw image", "picture")):
                 return "base64_image"
-
-        # semantic numeric threshold / score
-        if any(x in blob for x in ("threshold", "score", "confidence", "ratio", "similarity")) and ftype in {"number", "integer"}:
-            return "threshold_float"
 
         if any(x in blob for x in ("email", "e-mail")):
             return "email_string"
@@ -263,13 +264,23 @@ class SchemaEnricher:
         if n.endswith("_id") or n == "id":
             return "numeric_id" if ftype == "integer" else "identifier"
 
+        # channel은 integer_count와 분리
+        if ftype == "integer" and "channel" in n:
+            return "channel_count"
+
+        # threshold/score/confidence 등은 숫자 의미 필드로만 분류
+        if any(x in blob for x in ("threshold", "score", "confidence", "ratio", "similarity")) and ftype in {"number", "integer"}:
+            return "threshold_numeric"
+
         if ftype == "integer":
-            if any(x in n for x in ("width", "height", "channel", "count", "limit", "size", "page", "max", "min", "total", "sub_id")):
+            if any(x in n for x in ("width", "height", "count", "limit", "size", "page", "max", "min", "total", "sub_id")):
                 return "integer_count"
             return "numeric_id"
 
+        # 일반 number를 threshold로 몰지 않는다
         if ftype == "number":
-            return "threshold_float"
+            return "plain_string"  # 아래에서 별도 처리하지 않으면 fallback
+            # 더 안전하게는 "numeric_id" 같은 태그를 새로 만드는 것도 가능
 
         if ftype == "boolean":
             return "boolean_flag"
@@ -358,10 +369,9 @@ class SchemaEnricher:
 
         if semantic_tag in {"base64_image", "base64_template", "email_string", "uuid_string", "datetime_string", "url_string"}:
             semantic_policy = "must_fail"
-        elif semantic_tag == "threshold_float":
-            # range is especially meaningful here
+        elif semantic_tag == "threshold_numeric":
             semantic_policy = "must_fail" if (has_explicit_range or has_inferred_range) else "probe_only"
-        elif semantic_tag in {"integer_count", "numeric_id"}:
+        elif semantic_tag in {"integer_count", "channel_count", "numeric_id"}:
             semantic_policy = "probe_only"
         else:
             semantic_policy = "probe_only"
