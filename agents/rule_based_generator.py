@@ -51,7 +51,7 @@ _GOOD_BY_TAG: dict[str, Any] = {
     "config_json": "{}",
     "path_user_id": 1,
     # "integer_count": 10,
-    "integer_count": 1,
+    # "integer_count": 1,
     "channel_count": 3,
     "boolean_flag": True,
     "datetime_string": "2024-01-01T00:00:00Z",
@@ -81,11 +81,13 @@ _SEMANTIC_PROBES: dict[str, list[dict[str, Any]]] = {
         {"value": -1, "label": "negative_id", "policy": "probe_only"},
         {"value": 0, "label": "zero_id", "policy": "probe_only"},
     ],
+    '''
     "integer_count": [
         {"value": -1, "label": "negative", "policy": "probe_only"},
         {"value": 0, "label": "zero", "policy": "probe_only"},
         {"value": 10001, "label": "overflow", "policy": "probe_only"},
     ],
+    '''
     "email_string": [
         {"value": "not_an_email", "label": "invalid_fmt", "policy": "must_fail"},
         {"value": "@nodomain", "label": "malformed", "policy": "must_fail"},

@@ -16,7 +16,7 @@ KNOWN_TAGS: frozenset[str] = frozenset({
     "enum_mode",
     "config_json",
     "path_user_id",
-    "integer_count",
+    # "integer_count",
     "channel_count",
     "boolean_flag",
     "datetime_string",
@@ -271,12 +271,12 @@ class SchemaEnricher:
         # threshold/score/confidence 등은 숫자 의미 필드로만 분류
         if any(x in blob for x in ("threshold", "score", "confidence", "ratio", "similarity")) and ftype in {"number", "integer"}:
             return "threshold_numeric"
-
+        '''
         if ftype == "integer":
             if any(x in n for x in ("width", "height", "count", "limit", "size", "page", "max", "min", "total", "sub_id")):
                 return "integer_count"
             return "numeric_id"
-
+        '''
         # 일반 number를 threshold로 몰지 않는다
         if ftype == "number":
             return "plain_string"  # 아래에서 별도 처리하지 않으면 fallback
