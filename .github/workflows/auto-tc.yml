@@ -1,4 +1,4 @@
-name: .github/workflows/auto-tc.yml
+name: new workflow autotc
 
 on:
   schedule:
