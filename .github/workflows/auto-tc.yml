@@ -79,6 +79,136 @@ jobs:
           Write-Host "[Hash] 최종 Swagger 해시: $finalHash"
           "swagger_hash=$finalHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+
+      - name: API 서버 실행 (job1: detect)
+        id: start_server_detect
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
+          $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
+          $stdoutLog = Join-Path $env:SERVER_LOG_DIR "detect_server_stdout.log"
+          $stderrLog = Join-Path $env:SERVER_LOG_DIR "detect_server_stderr.log"
+          $serverPort = 8080
+
+          Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+
+          function Get-PortPids {
+            param([int]$Port)
+
+            $lines = netstat -ano -p tcp | Select-String ":$Port\s"
+            $pids = @()
+
+            foreach ($line in $lines) {
+              $text = $line.ToString().Trim()
+              if ($text -match "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$") {
+                $pids += [int]$matches[1]
+              }
+            }
+
+            return $pids | Sort-Object -Unique
+          }
+
+          function Stop-PortListeners {
+            param([int]$Port)
+
+            $pids = Get-PortPids -Port $Port
+            if (-not $pids -or $pids.Count -eq 0) {
+              Write-Host "[Detect Server] no existing listener on port $Port"
+              return
+            }
+
+            Write-Host "[Detect Server] found listener(s) on port $Port : $($pids -join ', ')"
+
+            foreach ($pid in $pids) {
+              try {
+                $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction Stop
+                Write-Host "[Detect Server] stopping PID=$pid Name=$($procInfo.Name)"
+                Stop-Process -Id $pid -Force -ErrorAction Stop
+              }
+              catch {
+                Write-Warning "[Detect Server] failed to stop PID=$pid : $($_.Exception.Message)"
+              }
+            }
+
+            Start-Sleep -Seconds 2
+
+            $remaining = Get-PortPids -Port $Port
+            if ($remaining -and $remaining.Count -gt 0) {
+              throw "Port $Port is still in use after cleanup. Remaining PID(s): $($remaining -join ', ')"
+            }
+          }
+
+          Stop-PortListeners -Port $serverPort
+
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $serverExe
+          $psi.WorkingDirectory = $env:SERVER_DIR
+          $psi.Arguments = "-host 0.0.0.0"
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardInput = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $psi.CreateNoWindow = $true
+
+          $proc = New-Object System.Diagnostics.Process
+          $proc.StartInfo = $psi
+          $proc.Start() | Out-Null
+
+          Start-Sleep -Milliseconds 500
+
+          $proc.StandardInput.WriteLine($env:SERVER_LICENSE_KEY)
+          $proc.StandardInput.WriteLine($env:SERVER_MODE_CHOICE)
+          $proc.StandardInput.WriteLine($env:SERVER_INSTANCE_COUNT)
+          $proc.StandardInput.WriteLine($env:SERVER_MODEL_PATH)
+          $proc.StandardInput.WriteLine($env:SERVER_DB_PATH)
+          $proc.StandardInput.Flush()
+          $proc.StandardInput.Close()
+
+          "DETECT_SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "DETECT_SERVER_STDOUT_LOG=$stdoutLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "DETECT_SERVER_STDERR_LOG=$stderrLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          $healthUrl = "$($env:BASE_URL)$($env:HEALTH_CHECK_PATH)"
+          $ready = $false
+
+          for ($i = 0; $i -lt 20; $i++) {
+            Start-Sleep -Seconds 1
+
+            if ($proc.HasExited) {
+              break
+            }
+
+            try {
+              $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+              if ($resp.StatusCode -eq 200) {
+                $ready = $true
+                break
+              }
+            }
+            catch {}
+          }
+
+          if ($proc.HasExited -or -not $ready) {
+            $outText = $proc.StandardOutput.ReadToEnd()
+            $errText = $proc.StandardError.ReadToEnd()
+
+            $outText | Out-File -FilePath $stdoutLog -Encoding utf8
+            $errText | Out-File -FilePath $stderrLog -Encoding utf8
+
+            Write-Host "[Detect Server] stdout:"
+            Get-Content $stdoutLog -ErrorAction SilentlyContinue
+            Write-Host "[Detect Server] stderr:"
+            Get-Content $stderrLog -ErrorAction SilentlyContinue
+
+            throw "detect-changes용 서버가 정상 기동하지 않았습니다. exit=$($proc.ExitCode)"
+          }
+
+          Write-Host "[Detect Server] started pid=$($proc.Id)"
+    
+
       - name: 서버 버전 조회
         id: server_version
         run: |
@@ -167,6 +297,22 @@ jobs:
             "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
 
+      - name: API 서버 종료 (job1: detect)
+        if: always()
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+          if ($env:DETECT_SERVER_PID) {
+            try {
+              Stop-Process -Id ([int]$env:DETECT_SERVER_PID) -Force -ErrorAction Stop
+              Write-Host "[Detect Server] stopped PID=$env:DETECT_SERVER_PID"
+            }
+            catch {
+              Write-Warning "[Detect Server] failed to stop PID=$env:DETECT_SERVER_PID : $($_.Exception.Message)"
+            }
+          }
+
   run-pipeline:
     name: AutoTC 파이프라인 실행
     needs: detect-changes
@@ -240,9 +386,9 @@ jobs:
           Write-Host "[Server] model: $env:SERVER_MODEL_PATH"
           Write-Host "[Server] db: $env:SERVER_DB_PATH"
 
-
-      - name: API 서버 실행 (mock interactive)
-        id: start_server
+      - name: API 서버 실행 (job2: test)
+        id: start_server_test
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -251,8 +397,57 @@ jobs:
           $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
           $stdoutLog = Join-Path $env:SERVER_LOG_DIR "server_stdout.log"
           $stderrLog = Join-Path $env:SERVER_LOG_DIR "server_stderr.log"
+          $serverPort = 8080
 
           Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+
+          function Get-PortPids {
+            param([int]$Port)
+
+            $lines = netstat -ano -p tcp | Select-String ":$Port\s"
+            $pids = @()
+
+            foreach ($line in $lines) {
+              $text = $line.ToString().Trim()
+              if ($text -match "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$") {
+                $pids += [int]$matches[1]
+              }
+            }
+
+            return $pids | Sort-Object -Unique
+          }
+
+          function Stop-PortListeners {
+            param([int]$Port)
+
+            $pids = Get-PortPids -Port $Port
+            if (-not $pids -or $pids.Count -eq 0) {
+              Write-Host "[Test Server] no existing listener on port $Port"
+              return
+            }
+
+            Write-Host "[Test Server] found listener(s) on port $Port : $($pids -join ', ')"
+
+            foreach ($pid in $pids) {
+              try {
+                $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction Stop
+                Write-Host "[Test Server] stopping PID=$pid Name=$($procInfo.Name)"
+                Stop-Process -Id $pid -Force -ErrorAction Stop
+              }
+              catch {
+                Write-Warning "[Test Server] failed to stop PID=$pid : $($_.Exception.Message)"
+              }
+            }
+
+            Start-Sleep -Seconds 2
+
+            $remaining = Get-PortPids -Port $Port
+            if ($remaining -and $remaining.Count -gt 0) {
+              throw "Port $Port is still in use after cleanup. Remaining PID(s): $($remaining -join ', ')"
+            }
+          }
+
+          Stop-PortListeners -Port $serverPort
 
           $psi = New-Object System.Diagnostics.ProcessStartInfo
           $psi.FileName = $serverExe
@@ -282,24 +477,42 @@ jobs:
           "SERVER_STDOUT_LOG=$stdoutLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "SERVER_STDERR_LOG=$stderrLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          Start-Sleep -Seconds 2
+          $healthUrl = "$($env:BASE_URL)$($env:HEALTH_CHECK_PATH)"
+          $ready = $false
 
-          if ($proc.HasExited) {
+          for ($i = 0; $i -lt 20; $i++) {
+            Start-Sleep -Seconds 1
+
+            if ($proc.HasExited) {
+              break
+            }
+
+            try {
+              $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+              if ($resp.StatusCode -eq 200) {
+                $ready = $true
+                break
+              }
+            }
+            catch {}
+          }
+
+          if ($proc.HasExited -or -not $ready) {
             $outText = $proc.StandardOutput.ReadToEnd()
             $errText = $proc.StandardError.ReadToEnd()
 
             $outText | Out-File -FilePath $stdoutLog -Encoding utf8
             $errText | Out-File -FilePath $stderrLog -Encoding utf8
 
-            Write-Host "[Server] stdout:"
+            Write-Host "[Test Server] stdout:"
             Get-Content $stdoutLog -ErrorAction SilentlyContinue
-            Write-Host "[Server] stderr:"
+            Write-Host "[Test Server] stderr:"
             Get-Content $stderrLog -ErrorAction SilentlyContinue
 
-            throw "서버가 초기화 중 종료되었습니다. exit=$($proc.ExitCode)"
+            throw "테스트용 서버가 정상 기동하지 않았습니다. exit=$($proc.ExitCode)"
           }
 
-          Write-Host "[Server] started pid=$($proc.Id)"
+          Write-Host "[Test Server] started pid=$($proc.Id)"
 
       - name: 서버 health check (테스트 전)
         id: pre_health
@@ -655,18 +868,18 @@ jobs:
 
           Write-Host "[Result] Pipeline completed successfully."
 
-      - name: API 서버 종료
+      - name: API 서버 종료 (job2: test)
         if: always()
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
 
           if ($env:SERVER_PID) {
             try {
-              Stop-Process -Id [int]$env:SERVER_PID -Force -ErrorAction Stop
-              Write-Host "[Server] stopped pid=$env:SERVER_PID"
+              Stop-Process -Id ([int]$env:SERVER_PID) -Force -ErrorAction Stop
+              Write-Host "[Test Server] stopped PID=$env:SERVER_PID"
             }
             catch {
-              Write-Host "[Server] 종료 실패 또는 이미 종료됨: $($_.Exception.Message)"
+              Write-Warning "[Test Server] failed to stop PID=$env:SERVER_PID : $($_.Exception.Message)"
             }
           }
