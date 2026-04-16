@@ -219,8 +219,8 @@ class ExcelReportBuilder:
         col_widths = [
             5, 28, 12, 24, 34,   # 1-5
             18, 14, 22,          # 6-8
-            20, 38, 28, 28, 38,  # 9-13
-            28, 30, 42,          # 14-16
+            20, 38, 28, 28, 70,  # 9-13
+            28, 40, 60,          # 14-16
             18, 42, 12, 42,      # 17-20
             12, 12, 42, 55,      # 21-24
         ]
@@ -324,16 +324,27 @@ class ExcelReportBuilder:
             for col in range(1, len(headers) + 1):
                 ws.cell(row=r, column=col).fill = PatternFill(fill_type="solid", fgColor=bg)
 
-            has_long_text = any(
-                isinstance(v, str) and len(v) > 80
+            max_len = max(
+                len(str(v)) if v else 0
                 for v in [
                     request_body_or_args,
                     response_msg,
                     item.get("exception_message", ""),
-                    longrepr,
+                    longrepr
                 ]
             )
-            ws.row_dimensions[r].height = 72 if has_long_text else 24
+
+            # 길이에 따라 높이 증가
+            if max_len > 300:
+                height = 120
+            elif max_len > 150:
+                height = 80
+            elif max_len > 80:
+                height = 50
+            else:
+                height = 24
+
+            ws.row_dimensions[r].height = height
 
     # ─── test result loaders ──────────────────────────────────────────────────
 
