@@ -220,7 +220,7 @@ class ExcelReportBuilder:
             5, 28, 12, 24, 34,   # 1-5
             18, 14, 22,          # 6-8
             20, 38, 28, 28, 70,  # 9-13
-            28, 40, 60,          # 14-16
+            28, 28, 38,          # 14-16
             18, 42, 12, 42,      # 17-20
             12, 12, 42, 55,      # 21-24
         ]
@@ -325,8 +325,26 @@ class ExcelReportBuilder:
                 ws.cell(row=r, column=col).fill = PatternFill(fill_type="solid", fgColor=bg)
 
             
-
-            ws.row_dimensions[r].height = 30
+            max_len = max(
+                len(str(v)) if v else 0
+                for v in [
+                    request_query,
+                    request_body_or_args,
+                    response_msg,
+                    item.get("exception_message", ""),
+                    longrepr
+                ]
+            )
+            # 길이에 따라 높이 증가
+            if max_len > 300:
+                height = 120
+            elif max_len > 150:
+                height = 80
+            elif max_len > 80:
+                height = 50
+            else:
+                height = 38
+            ws.row_dimensions[r].height = height
 
     # ─── test result loaders ──────────────────────────────────────────────────
 
