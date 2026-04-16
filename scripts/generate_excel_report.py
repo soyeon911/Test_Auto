@@ -43,6 +43,12 @@ except ImportError as _e:
     print(f"[Excel] reports/ 디렉터리 내용: {list(Path(_CWD_ROOT, 'reports').iterdir()) if Path(_CWD_ROOT, 'reports').exists() else '없음'}", flush=True)
     raise
 
+try:
+    from reports.excel_reporter2 import ExcelReportBuilder2
+except ImportError as _e:
+    print(f"[Excel] excel_reporter2 ImportError: {_e} — 기존 리포트만 생성합니다.", flush=True)
+    ExcelReportBuilder2 = None  # type: ignore[assignment, misc]
+
 
 def _load_runner_summary(report_dir: Path) -> dict:
     """report.json / pytest_report.json 에서 pass/fail 집계를 읽는다."""
@@ -114,11 +120,12 @@ def main() -> int:
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    xlsx_path   = report_dir / "test_report.xlsx"
-    json_report = _find_json_report(report_dir)
-    summary     = _load_runner_summary(report_dir)
-    endpoints   = _parse_endpoints(args.swagger, config)
-    allure_dir  = report_dir / "allure-results"
+    xlsx_path    = report_dir / "test_report.xlsx"
+    xlsx_path2   = report_dir / "test_report2.xlsx"
+    json_report  = _find_json_report(report_dir)
+    summary      = _load_runner_summary(report_dir)
+    endpoints    = _parse_endpoints(args.swagger, config)
+    allure_dir   = report_dir / "allure-results"
 
     swagger_source = os.getenv("SWAGGER_SOURCE", "").strip()
     display_source = swagger_source or args.swagger
@@ -127,7 +134,11 @@ def main() -> int:
     print(f"[Excel] json_report={json_report}")
     print(f"[Excel] endpoints={len(endpoints)}")
     print(f"[Excel] output={xlsx_path}")
+    print(f"[Excel] output2={xlsx_path2}")
 
+    rc = 0
+
+    # ── 리포트 1: test_report.xlsx (excel_reporter.py) ────────────────────────
     try:
         out = ExcelReportBuilder(xlsx_path).build(
             runner_summary=summary,
@@ -137,11 +148,30 @@ def main() -> int:
             endpoints=endpoints,
             allure_results_dir=allure_dir if allure_dir.exists() else None,
         )
-        print(f"[Excel] 완료: {out}")
-        return 0
+        print(f"[Excel] 리포트1 완료: {out}")
     except Exception as e:
-        print(f"[Excel] 생성 실패: {e}")
-        return 1
+        print(f"[Excel] 리포트1 생성 실패: {e}")
+        rc = 1
+
+    # ── 리포트 2: test_report2.xlsx (excel_reporter2.py) ─────────────────────
+    if ExcelReportBuilder2 is not None:
+        try:
+            out2 = ExcelReportBuilder2(xlsx_path2).build(
+                runner_summary=summary,
+                pytest_json_path=json_report,
+                source_file=display_source,
+                base_url=args.base_url,
+                endpoints=endpoints,
+                allure_results_dir=allure_dir if allure_dir.exists() else None,
+            )
+            print(f"[Excel] 리포트2 완료: {out2}")
+        except Exception as e:
+            print(f"[Excel] 리포트2 생성 실패: {e}")
+            rc = 1
+    else:
+        print("[Excel] excel_reporter2 없음 — 리포트2 건너뜀")
+
+    return rc
 
 
 if __name__ == "__main__":
