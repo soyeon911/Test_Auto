@@ -170,6 +170,7 @@ class ExcelReportBuilder:
 
             line_count = max(len(req_params), len(opt_params), len(body_fields), 1)
             ws.row_dimensions[r].height = max(18, 15 * line_count)
+            ws.freeze_panes = "A3"
     
     def _extract_expected_success(self, expected_display: str) -> str:
         text = str(expected_display).lower()
