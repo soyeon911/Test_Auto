@@ -28,8 +28,21 @@ defaults:
 
 jobs:
   detect-changes:
+    detect-changes:
     name: 변경 감지 (Swagger Hash + Server Version)
     runs-on: [self-hosted, windows]
+    env:
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.156:8080' }}
+      SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
+      SERVER_EXE_NAME: qfe-server.exe
+      SERVER_LICENSE_KEY: 1
+      SERVER_MODE_CHOICE: 1
+      SERVER_INSTANCE_COUNT: 1
+      SERVER_MODEL_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model
+      SERVER_DB_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db
+      SERVER_LOG_DIR: server_logs
+      HEALTH_CHECK_PATH: /health
+      PYTHONIOENCODING: utf-8
     outputs:
       should_run: ${{ steps.compare.outputs.should_run }}
       swagger_hash: ${{ steps.hash.outputs.swagger_hash }}
