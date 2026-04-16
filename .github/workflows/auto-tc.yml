@@ -80,7 +80,7 @@ jobs:
           "swagger_hash=$finalHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
 
-      - name: API 서버 실행 (job1: detect)
+      - name: API 서버 실행 (job1 detect)
         id: start_server_detect
         shell: pwsh
         run: |
@@ -386,7 +386,7 @@ jobs:
           Write-Host "[Server] model: $env:SERVER_MODEL_PATH"
           Write-Host "[Server] db: $env:SERVER_DB_PATH"
 
-      - name: API 서버 실행 (job2: test)
+      - name: API 서버 실행 (job2 test)
         id: start_server_test
         shell: pwsh
         run: |
