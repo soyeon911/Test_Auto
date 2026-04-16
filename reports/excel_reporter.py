@@ -21,8 +21,8 @@ from openpyxl.utils import get_column_letter
 # ─── colour palette ───────────────────────────────────────────────────────────
 _BLUE_DARK = "1F497D"
 _BLUE_TITLE = "2E75B6"
-_GREEN_BG = "C6EFCE"
-_RED_BG = "FFC7CE"
+_GREEN_BG = "EAF7EA"
+_RED_BG = "FFE5E5"
 _YELLOW_BG = "FFEB9C"
 
 _METHOD_COLORS = {
@@ -345,6 +345,8 @@ class ExcelReportBuilder:
             else:
                 height = 38
             ws.row_dimensions[r].height = height
+            
+            ws.freeze_panes = "A3"
 
     # ─── test result loaders ──────────────────────────────────────────────────
 
