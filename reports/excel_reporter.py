@@ -3,8 +3,7 @@ Excel Report Builder — 3-sheet workbook
 
   Sheet 1 · Summary    — test run key metrics
   Sheet 2 · API List   — endpoint catalog from the API spec
-  Sheet 3 . TC Spec    — testcase document (설계 문서 중심)
-  Sheet 4 · TC Table   — per-test-case: condition / data / expected /
+  Sheet 3 · TC Table   — per-test-case: condition / data / expected /
                           actual status / outcome / duration (실행 결과 중심)
 """
 from __future__ import annotations
@@ -61,12 +60,9 @@ class ExcelReportBuilder:
 
         ws2 = wb.create_sheet("API List")
         self._build_api_list(ws2, endpoints or [])
-        
-        ws3 = wb.create_sheet("TC Spec")
-        self._build_tc_spec(ws3, normalized_tests)
 
-        ws4 = wb.create_sheet("TC Table")
-        self._build_tc_table(ws4, normalized_tests, base_url)
+        ws3 = wb.create_sheet("TC Table")
+        self._build_tc_table(ws3, normalized_tests, base_url)
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(self.output_path)
@@ -186,81 +182,8 @@ class ExcelReportBuilder:
 
         return ""
     
-    # ─── Sheet 3: TC Spec  ────────────────────────────────────────────────────
-    
-    
-    def _build_tc_spec(self, ws, tests: list[dict[str, Any]]) -> None:
-        from openpyxl.styles import Alignment
-        from openpyxl.utils import get_column_letter
 
-        # 제목
-        self._title_banner(ws, "A1:H1", "TC Specification")
-        ws.row_dimensions[1].height = 24
-
-        headers = [
-            "TC ID",
-            "Endpoint",
-            "Method",
-            "Rule Type",
-            "Description",
-            "Precondition",
-            "Input",
-            "Expected Result",
-        ]
-
-        self._header_row(ws, 2, headers)
-
-        # 컬럼 너비
-        col_widths = [12, 40, 12, 20, 50, 50, 60, 40]
-        for i, w in enumerate(col_widths, start=1):
-            ws.column_dimensions[get_column_letter(i)].width = w
-
-        for idx, item in enumerate(tests, start=1):
-
-            tc_id = f"TC-{idx:04d}"
-
-            endpoint = item.get("request_path", "")
-            method = item.get("request_method", "")
-            rule_type = item.get("rule_type", "")
-
-            description = item.get("condition", "") or ""
-
-            precondition = self._build_precondition(item)
-
-            request_query = self._format_value(item.get("request_query", {}))
-            request_headers = self._format_value(item.get("request_headers", {}))
-            request_body = self._pick_request_payload(item)
-
-            input_data = f"Query:\n{request_query}\n\nHeaders:\n{request_headers}\n\nBody:\n{request_body}"
-
-            expected = item.get("expected_status_display", "") or ""
-
-            row_vals = [
-                tc_id,
-                endpoint,
-                method,
-                rule_type,
-                description,
-                precondition,
-                input_data,
-                expected,
-            ]
-
-            r = idx + 2
-            for col, val in enumerate(row_vals, start=1):
-                cell = ws.cell(row=r, column=col, value=val)
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
-
-            # row height 자동 조정
-            max_len = max(len(str(v)) if v else 0 for v in row_vals)
-            approx_lines = max_len / 60
-            height = max(24, min(120, int(approx_lines * 15)))
-            ws.row_dimensions[r].height = height
-
-        # 헤더 고정
-        ws.freeze_panes = "A3"
-
-    # ─── Sheet 4: TC Table ────────────────────────────────────────────────────
+    # ─── Sheet 3: TC Table ────────────────────────────────────────────────────
     
     def _build_tc_table(self, ws, tests: list[dict[str, Any]], base_url: str) -> None:
         self._title_banner(ws, "A1:X1", "TC (Test Case) Table")
@@ -698,29 +621,6 @@ class ExcelReportBuilder:
             return str(meta["expected"])
         return ""
     
-    def _build_precondition(self, item: dict[str, Any]) -> str:
-        rule = (item.get("rule_type") or "").lower()
-        axis = (item.get("axis") or "").lower()
-
-        if "state" in axis:
-            return "Target resource must exist and be in valid state"
-
-        if "positive" in rule:
-            return "All required fields are present with valid values"
-
-        if "required" in rule:
-            return "Field is required and must be provided"
-
-        if "enum" in rule:
-            return "Field value must be within defined enum"
-
-        if "type" in rule:
-            return "Field must match the defined data type"
-
-        if "boundary" in rule:
-            return "Field must satisfy defined range constraints"
-
-        return "None"
 
     def _build_expected_display(self, item: dict[str, Any], info: dict[str, str]) -> str:
         if item.get("expected_status_display"):

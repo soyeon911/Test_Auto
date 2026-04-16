@@ -9,8 +9,8 @@
 
   body {
     font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
-    background: #0f1117;
-    color: #e2e8f0;
+    background: #f6f4f6;
+    color: #000000;
     min-height: 100vh;
     padding: 40px 20px;
   }
@@ -20,13 +20,13 @@
     font-size: 22px;
     font-weight: 700;
     letter-spacing: 0.05em;
-    color: #f8fafc;
+    color: #000000;
     margin-bottom: 6px;
   }
   .subtitle {
     text-align: center;
     font-size: 13px;
-    color: #64748b;
+    color: #78787a;
     margin-bottom: 48px;
   }
 
@@ -53,15 +53,15 @@
     font-weight: 600;
     letter-spacing: 0.03em;
   }
-  .chip-cron    { background: #1e3a5f; color: #93c5fd; border: 1px solid #2563eb; }
-  .chip-push    { background: #1a3a2a; color: #86efac; border: 1px solid #16a34a; }
-  .chip-manual  { background: #3b2f1a; color: #fcd34d; border: 1px solid #d97706; }
+  .chip-cron    { background: #720f80; color: #f6d2db; border: 1px solid #a12944; }
+  .chip-push    { background: #2b102f; color: #f0c7f5; border: 1px solid #720f80; }
+  .chip-manual  { background: #2d2d2e; color: #e7d7ea; border: 1px solid #78787a; }
 
   /* ── Connectors ─────────────────────────────────────────── */
   .arrow-down {
     width: 2px;
     height: 28px;
-    background: linear-gradient(to bottom, #475569, #334155);
+    background: linear-gradient(to bottom, #78787a, #78787a);
     margin: 0 auto;
     position: relative;
   }
@@ -73,7 +73,7 @@
     transform: translateX(-50%);
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
-    border-top: 7px solid #475569;
+    border-top: 7px solid #78787a;
   }
 
   /* ── Job containers ─────────────────────────────────────── */
@@ -84,14 +84,14 @@
     position: relative;
   }
   .job-detect {
-    background: #111827;
-    border: 1.5px solid #1d4ed8;
-    box-shadow: 0 0 0 1px #1e3a5f, 0 4px 24px rgba(29,78,216,0.15);
+    background: #f6f4f6;
+    border: 1.5px solid #a12944;
+    box-shadow: 0 0 0 1px #720f80, 0 4px 24px rgba(161,41,68,0.18);
   }
   .job-run {
-    background: #0f1a12;
-    border: 1.5px solid #15803d;
-    box-shadow: 0 0 0 1px #14532d, 0 4px 24px rgba(21,128,61,0.15);
+    background: #f6f4f6;
+    border: 1.5px solid #720f80;
+    box-shadow: 0 0 0 1px #a12944, 0 4px 24px rgba(114,15,128,0.18);
   }
 
   .job-label {
@@ -106,15 +106,15 @@
     border-radius: 6px;
     margin-bottom: 18px;
   }
-  .job-label-detect { background: #1e3a5f; color: #93c5fd; }
-  .job-label-run    { background: #14532d; color: #86efac; }
+  .job-label-detect { background: #720f80; color: #f6d2db; }
+  .job-label-run    { background: #a12944; color: #f0c7f5; }
   .job-label-dot {
     width: 7px; height: 7px;
     border-radius: 50%;
     animation: pulse 2s infinite;
   }
-  .dot-blue  { background: #3b82f6; }
-  .dot-green { background: #22c55e; }
+  .dot-blue  { background: #a12944; }
+  .dot-green { background: #720f80; }
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50%       { opacity: 0.4; }
@@ -148,14 +148,14 @@
     text-align: center;
   }
   .step-blue {
-    background: #0f1f3d;
-    border: 1px solid #1d4ed8;
-    color: #bfdbfe;
+    background: #1b0e1a;
+    border: 1px solid #a12944;
+    color: #f6dbe2;
   }
   .step-green {
-    background: #0a1f12;
-    border: 1px solid #166534;
-    color: #bbf7d0;
+    background: #140815;
+    border: 1px solid #720f80;
+    color: #f0d7f2;
   }
   .step-green:hover, .step-blue:hover {
     filter: brightness(1.15);
@@ -181,21 +181,21 @@
   .diamond {
     width: 56px;
     height: 56px;
-    background: #1c1f10;
-    border: 2px solid #ca8a04;
+    background: #1a0f1c;
+    border: 2px solid #720f80;
     transform: rotate(45deg);
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
     flex-shrink: 0;
-    box-shadow: 0 0 16px rgba(202,138,4,0.2);
+    box-shadow: 0 0 16px rgba(114,15,128,0.22);
   }
   .diamond-text {
     transform: rotate(-45deg);
     font-size: 10px;
     font-weight: 700;
-    color: #fde68a;
+    color: #f2d6f6;
     text-align: center;
     line-height: 1.2;
     white-space: nowrap;
@@ -230,16 +230,38 @@
     border-radius: 4px;
     margin-bottom: 4px;
   }
-  .label-false { background: #450a0a; color: #fca5a5; }
-  .label-true  { background: #052e16; color: #86efac; }
+  .label-false { background: #2a1116; color: #f0c5cf; }
+  .label-true  { background: #2a0a2f; color: #f0c7f5; }
 
   /* horizontal line for branch split */
   .branch-line-h {
     height: 2px;
-    background: #334155;
+    background: #78787a;
     width: 80px;
     margin-top: 14px; /* align with arrow */
   }
+
+  .decision-split {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: -4px;
+    margin-bottom: 2px;
+  }
+  .split-v {
+    width: 2px;
+    height: 12px;
+    background: #78787a;
+  }
+  .split-h {
+    width: 58%;
+    max-width: 360px;
+    min-width: 230px;
+    height: 2px;
+    background: #78787a;
+  }
+
 
   /* ── Skip / error terminal ──────────────────────────────── */
   .terminal-skip {
@@ -247,9 +269,9 @@
     border-radius: 8px;
     font-size: 12px;
     font-weight: 600;
-    background: #1c0a0a;
-    border: 1px solid #7f1d1d;
-    color: #fca5a5;
+    background: #190d10;
+    border: 1px solid #a12944;
+    color: #f0c5cf;
     text-align: center;
     min-width: 130px;
   }
@@ -258,9 +280,9 @@
     border-radius: 8px;
     font-size: 12px;
     font-weight: 600;
-    background: #1c0a0a;
-    border: 1px solid #7f1d1d;
-    color: #fca5a5;
+    background: #190d10;
+    border: 1px solid #a12944;
+    color: #f0c5cf;
     text-align: center;
     min-width: 200px;
   }
@@ -273,6 +295,21 @@
     justify-content: center;
     gap: 0;
   }
+
+  .hc-split {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 0;
+  }
+  .hc-split-h {
+    width: 350px;
+    max-width: calc(100% - 120px);
+    height: 2px;
+    background: #78787a;
+    transform: translateX(18px);
+  }
+
   .hc-main { display: flex; flex-direction: column; align-items: center; }
   .hc-fail-side {
     display: flex;
@@ -283,7 +320,7 @@
 
   .arrow-right {
     height: 2px;
-    background: #475569;
+    background: #78787a;
     width: 36px;
     position: relative;
     margin-top: 14px;
@@ -296,14 +333,14 @@
     transform: translateY(-50%);
     border-top: 5px solid transparent;
     border-bottom: 5px solid transparent;
-    border-left: 7px solid #475569;
+    border-left: 7px solid #78787a;
   }
 
   /* ── Small connector variants ───────────────────────────── */
   .arrow-sm {
     width: 2px;
     height: 20px;
-    background: #334155;
+    background: #78787a;
     margin: 0 auto;
     position: relative;
   }
@@ -315,7 +352,7 @@
     transform: translateX(-50%);
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-top: 6px solid #334155;
+    border-top: 6px solid #78787a;
   }
 
   /* ── Legend ─────────────────────────────────────────────── */
@@ -326,8 +363,8 @@
     flex-wrap: wrap;
     margin-top: 40px;
     padding: 14px 24px;
-    background: #111827;
-    border: 1px solid #1e293b;
+    background: #120a12;
+    border: 1px solid #78787a;
     border-radius: 10px;
     max-width: 900px;
     width: 100%;
@@ -337,7 +374,7 @@
     align-items: center;
     gap: 7px;
     font-size: 12px;
-    color: #94a3b8;
+    color: #c6c6c8;
   }
   .legend-dot {
     width: 10px; height: 10px;
@@ -400,6 +437,11 @@
           </div>
         </div>
 
+        <div class="decision-split">
+          <div class="split-v"></div>
+          <div class="split-h"></div>
+        </div>
+
         <!-- Branch row -->
         <div class="branch-row">
           <!-- FALSE branch (left) -->
@@ -416,7 +458,7 @@
             <div style="display:flex;flex-direction:column;align-items:center;">
               <div class="branch-label label-true">true</div>
               <div class="arrow-sm"></div>
-              <div style="font-size:11px;color:#86efac;font-weight:600;letter-spacing:0.05em;opacity:0.8">
+              <div style="font-size:11px;color:#f0c7f5;font-weight:600;letter-spacing:0.05em;opacity:0.8">
                 → Job 2 실행
               </div>
             </div>
@@ -450,29 +492,32 @@
 
       <div class="step step-green">
         <span class="step-icon">🚀</span> Start API Server
-        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">qfe-server.exe</span>
+        <span style="margin-left:auto;font-size:10px;color:#e4b5ea;opacity:0.7">qfe-server.exe</span>
       </div>
       <div class="arrow-sm"></div>
 
       <!-- Health Check Pre + fail branch -->
+      <div class="hc-split">
+        <div class="hc-split-h"></div>
+      </div>
       <div class="hc-branch-wrap">
         <div class="hc-main">
-          <div class="step step-green" style="min-width:280px;">
+          <div class="step step-green" >
             <span class="step-icon">🩺</span> Health Check
-            <span style="margin-left:auto;font-size:10px;background:#0d2e1a;padding:2px 6px;border-radius:4px;color:#4ade80">Pre-test</span>
+            <span style="margin-left:auto;font-size:10px;background:#250b2a;padding:2px 6px;border-radius:4px;color:#e4b5ea">Pre-test</span>
           </div>
         </div>
         <div style="display:flex;align-items:center;padding-top:10px;">
           <div class="arrow-right"></div>
           <div class="hc-fail-side">
-            <div style="font-size:10px;font-weight:700;color:#fca5a5;margin-bottom:4px;letter-spacing:0.06em">FAIL</div>
+            <div style="font-size:10px;font-weight:700;color:#f0c5cf;margin-bottom:4px;letter-spacing:0.06em">FAIL</div>
             <div class="terminal-error">💥 Collect Crash Logs &amp; Stop</div>
           </div>
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:#4ade80;font-weight:600;margin:2px 0;">
-        <span style="font-size:10px;font-weight:700;color:#86efac;letter-spacing:0.06em">SUCCESS ↓</span>
+      <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:#e4b5ea;font-weight:600;margin:2px 0;">
+        <span style="font-size:10px;font-weight:700;color:#f0c7f5;letter-spacing:0.06em">SUCCESS ↓</span>
       </div>
 
       <div class="step step-green">
@@ -482,7 +527,7 @@
 
       <div class="step step-green">
         <span class="step-icon">🦙</span> Ollama Check
-        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">llama3.1:8b (optional)</span>
+        <span style="margin-left:auto;font-size:10px;color:#e4b5ea;opacity:0.7">llama3.1:8b (optional)</span>
       </div>
       <div class="arrow-sm"></div>
 
@@ -493,37 +538,37 @@
 
       <div class="step step-green">
         <span class="step-icon">⚡</span> Generate Test Cases
-        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">main.py generate</span>
+        <span style="margin-left:auto;font-size:10px;color:#e4b5ea;opacity:0.7">main.py generate</span>
       </div>
       <div class="arrow-sm"></div>
 
       <div class="step step-green">
         <span class="step-icon">🧪</span> Run pytest
-        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">--json-report</span>
+        <span style="margin-left:auto;font-size:10px;color:#e4b5ea;opacity:0.7">--json-report</span>
       </div>
       <div class="arrow-sm"></div>
 
       <div class="step step-green">
         <span class="step-icon">📊</span> Generate Excel Report
-        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">test_report.xlsx / test_report2.xlsx</span>
+        <span style="margin-left:auto;font-size:10px;color:#e4b5ea;opacity:0.7">test_report.xlsx / test_report2.xlsx</span>
       </div>
       <div class="arrow-sm"></div>
 
       <div class="step step-green">
         <span class="step-icon">🩺</span> Health Check
-        <span style="margin-left:auto;font-size:10px;background:#0d2e1a;padding:2px 6px;border-radius:4px;color:#4ade80">Post-test</span>
+        <span style="margin-left:auto;font-size:10px;background:#250b2a;padding:2px 6px;border-radius:4px;color:#e4b5ea">Post-test</span>
       </div>
       <div class="arrow-sm"></div>
 
       <div class="step step-green">
         <span class="step-icon">📦</span> Upload Artifacts
-        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">14일 보존</span>
+        <span style="margin-left:auto;font-size:10px;color:#e4b5ea;opacity:0.7">14일 보존</span>
       </div>
       <div class="arrow-sm"></div>
 
       <div class="step step-green">
         <span class="step-icon">💾</span> Update Cache
-        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">swagger_hash :: server_version</span>
+        <span style="margin-left:auto;font-size:10px;color:#e4b5ea;opacity:0.7">swagger_hash :: server_version</span>
       </div>
       <div class="arrow-sm"></div>
 
@@ -542,23 +587,23 @@
   <!-- Legend -->
   <div class="legend">
     <div class="legend-item">
-      <div class="legend-dot" style="background:#1d4ed8;"></div>
+      <div class="legend-dot" style="background:#a12944;"></div>
       Job 1 · detect-changes
     </div>
     <div class="legend-item">
-      <div class="legend-dot" style="background:#15803d;"></div>
+      <div class="legend-dot" style="background:#720f80;"></div>
       Job 2 · run-pipeline
     </div>
     <div class="legend-item">
-      <div class="legend-dot" style="background:#ca8a04;border-radius:2px;transform:rotate(45deg);width:8px;height:8px;"></div>
+      <div class="legend-dot" style="background:#720f80;border-radius:2px;transform:rotate(45deg);width:8px;height:8px;"></div>
       조건 분기 (Decision)
     </div>
     <div class="legend-item">
-      <div class="legend-dot" style="background:#7f1d1d;"></div>
+      <div class="legend-dot" style="background:#a12944;"></div>
       종료 / 오류 경로
     </div>
     <div class="legend-item">
-      <div class="legend-dot" style="background:#064e3b;"></div>
+      <div class="legend-dot" style="background:#720f80;"></div>
       성공 경로
     </div>
   </div>
