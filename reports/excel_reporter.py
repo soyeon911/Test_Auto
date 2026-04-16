@@ -324,27 +324,9 @@ class ExcelReportBuilder:
             for col in range(1, len(headers) + 1):
                 ws.cell(row=r, column=col).fill = PatternFill(fill_type="solid", fgColor=bg)
 
-            max_len = max(
-                len(str(v)) if v else 0
-                for v in [
-                    request_body_or_args,
-                    response_msg,
-                    item.get("exception_message", ""),
-                    longrepr
-                ]
-            )
+            
 
-            # 길이에 따라 높이 증가
-            if max_len > 300:
-                height = 120
-            elif max_len > 150:
-                height = 80
-            elif max_len > 80:
-                height = 50
-            else:
-                height = 24
-
-            ws.row_dimensions[r].height = height
+            ws.row_dimensions[r].height = 30
 
     # ─── test result loaders ──────────────────────────────────────────────────
 
