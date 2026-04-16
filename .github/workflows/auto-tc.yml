@@ -27,7 +27,6 @@ defaults:
     shell: powershell
 
 jobs:
-  detect-changes:
     detect-changes:
     name: 변경 감지 (Swagger Hash + Server Version)
     runs-on: [self-hosted, windows]
