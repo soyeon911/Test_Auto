@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoTC Pipeline — Flowchart</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #f8fafc;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 13px;
+    color: #64748b;
+    margin-bottom: 48px;
+  }
+
+  /* ── Overall layout ─────────────────────────────────────── */
+  .diagram {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  /* ── Trigger ─────────────────────────────────────────────── */
+  .trigger-box {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .trigger-chip {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .chip-cron    { background: #1e3a5f; color: #93c5fd; border: 1px solid #2563eb; }
+  .chip-push    { background: #1a3a2a; color: #86efac; border: 1px solid #16a34a; }
+  .chip-manual  { background: #3b2f1a; color: #fcd34d; border: 1px solid #d97706; }
+
+  /* ── Connectors ─────────────────────────────────────────── */
+  .arrow-down {
+    width: 2px;
+    height: 28px;
+    background: linear-gradient(to bottom, #475569, #334155);
+    margin: 0 auto;
+    position: relative;
+  }
+  .arrow-down::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 7px solid #475569;
+  }
+
+  /* ── Job containers ─────────────────────────────────────── */
+  .job-container {
+    width: 100%;
+    border-radius: 14px;
+    padding: 20px 24px 24px;
+    position: relative;
+  }
+  .job-detect {
+    background: #111827;
+    border: 1.5px solid #1d4ed8;
+    box-shadow: 0 0 0 1px #1e3a5f, 0 4px 24px rgba(29,78,216,0.15);
+  }
+  .job-run {
+    background: #0f1a12;
+    border: 1.5px solid #15803d;
+    box-shadow: 0 0 0 1px #14532d, 0 4px 24px rgba(21,128,61,0.15);
+  }
+
+  .job-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 6px;
+    margin-bottom: 18px;
+  }
+  .job-label-detect { background: #1e3a5f; color: #93c5fd; }
+  .job-label-run    { background: #14532d; color: #86efac; }
+  .job-label-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  .dot-blue  { background: #3b82f6; }
+  .dot-green { background: #22c55e; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+  }
+
+  /* ── Step nodes ─────────────────────────────────────────── */
+  .steps-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    min-width: 280px;
+    max-width: 380px;
+    width: 100%;
+    position: relative;
+  }
+  .step-icon {
+    font-size: 15px;
+    flex-shrink: 0;
+    width: 22px;
+    text-align: center;
+  }
+  .step-blue {
+    background: #0f1f3d;
+    border: 1px solid #1d4ed8;
+    color: #bfdbfe;
+  }
+  .step-green {
+    background: #0a1f12;
+    border: 1px solid #166534;
+    color: #bbf7d0;
+  }
+  .step-green:hover, .step-blue:hover {
+    filter: brightness(1.15);
+    cursor: default;
+  }
+
+  /* ── Decision diamond ───────────────────────────────────── */
+  .decision-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    width: 100%;
+  }
+  .diamond-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 64px;
+  }
+  .diamond {
+    width: 56px;
+    height: 56px;
+    background: #1c1f10;
+    border: 2px solid #ca8a04;
+    transform: rotate(45deg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    flex-shrink: 0;
+    box-shadow: 0 0 16px rgba(202,138,4,0.2);
+  }
+  .diamond-text {
+    transform: rotate(-45deg);
+    font-size: 10px;
+    font-weight: 700;
+    color: #fde68a;
+    text-align: center;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  /* ── Branch layout ──────────────────────────────────────── */
+  .branch-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0;
+    width: 100%;
+    margin-top: 0;
+  }
+  .branch-false {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 160px;
+  }
+  .branch-true {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+  }
+  .branch-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+  }
+  .label-false { background: #450a0a; color: #fca5a5; }
+  .label-true  { background: #052e16; color: #86efac; }
+
+  /* horizontal line for branch split */
+  .branch-line-h {
+    height: 2px;
+    background: #334155;
+    width: 80px;
+    margin-top: 14px; /* align with arrow */
+  }
+
+  /* ── Skip / error terminal ──────────────────────────────── */
+  .terminal-skip {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #1c0a0a;
+    border: 1px solid #7f1d1d;
+    color: #fca5a5;
+    text-align: center;
+    min-width: 130px;
+  }
+  .terminal-error {
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #1c0a0a;
+    border: 1px solid #7f1d1d;
+    color: #fca5a5;
+    text-align: center;
+    min-width: 200px;
+  }
+
+  /* ── Health check branch ─────────────────────────────────── */
+  .hc-branch-wrap {
+    display: flex;
+    width: 100%;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0;
+  }
+  .hc-main { display: flex; flex-direction: column; align-items: center; }
+  .hc-fail-side {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 28px;
+  }
+
+  .arrow-right {
+    height: 2px;
+    background: #475569;
+    width: 36px;
+    position: relative;
+    margin-top: 14px;
+  }
+  .arrow-right::after {
+    content: '';
+    position: absolute;
+    right: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 7px solid #475569;
+  }
+
+  /* ── Small connector variants ───────────────────────────── */
+  .arrow-sm {
+    width: 2px;
+    height: 20px;
+    background: #334155;
+    margin: 0 auto;
+    position: relative;
+  }
+  .arrow-sm::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 6px solid #334155;
+  }
+
+  /* ── Legend ─────────────────────────────────────────────── */
+  .legend {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 40px;
+    padding: 14px 24px;
+    background: #111827;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    max-width: 900px;
+    width: 100%;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: #94a3b8;
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>⚙️ AutoTC — CI/CD Pipeline Flowchart</h1>
+<p class="subtitle">GitHub Actions · Self-hosted Windows Runner · 192.168.150.166</p>
+
+<div class="diagram">
+
+  <!-- TRIGGER -->
+  <div class="trigger-box">
+    <span class="trigger-chip chip-cron">⏰ cron (매 1시간)</span>
+    <span class="trigger-chip chip-push">⬆ push (swagger 변경)</span>
+    <span class="trigger-chip chip-manual">▶ workflow_dispatch</span>
+  </div>
+
+  <div class="arrow-down"></div>
+
+  <!-- JOB 1: detect-changes -->
+  <div class="job-container job-detect" style="max-width:700px;">
+    <div class="job-label job-label-detect">
+      <span class="job-label-dot dot-blue"></span>
+      Job 1 · detect-changes
+    </div>
+
+    <div class="steps-col">
+
+      <div class="step step-blue">
+        <span class="step-icon">📥</span> Checkout Repository
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-blue">
+        <span class="step-icon">#️⃣</span> Compute Swagger Hash
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-blue">
+        <span class="step-icon">🔖</span> Get Server Version
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-blue">
+        <span class="step-icon">🗃️</span> Compare with Cache
+        <span style="margin-left:auto;font-size:10px;color:#60a5fa;opacity:0.7">.cache/last_run_state.txt</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <!-- Decision -->
+      <div class="decision-wrap">
+        <div class="diamond-container">
+          <div class="diamond">
+            <span class="diamond-text">should<br>_run?</span>
+          </div>
+        </div>
+
+        <!-- Branch row -->
+        <div class="branch-row">
+          <!-- FALSE branch (left) -->
+          <div class="branch-false">
+            <div style="display:flex;flex-direction:column;align-items:center;">
+              <div class="branch-label label-false">false</div>
+              <div class="arrow-sm"></div>
+              <div class="terminal-skip">⏭ Skip Pipeline</div>
+            </div>
+          </div>
+
+          <!-- TRUE branch (right - leads down) -->
+          <div class="branch-true">
+            <div style="display:flex;flex-direction:column;align-items:center;">
+              <div class="branch-label label-true">true</div>
+              <div class="arrow-sm"></div>
+              <div style="font-size:11px;color:#86efac;font-weight:600;letter-spacing:0.05em;opacity:0.8">
+                → Job 2 실행
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="arrow-down"></div>
+
+  <!-- JOB 2: run-pipeline -->
+  <div class="job-container job-run" style="max-width:700px;">
+    <div class="job-label job-label-run">
+      <span class="job-label-dot dot-green"></span>
+      Job 2 · run-pipeline
+    </div>
+
+    <div class="steps-col">
+
+      <div class="step step-green">
+        <span class="step-icon">🐍</span> Setup Python Environment
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">✅</span> Validate Server Files
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">🚀</span> Start API Server
+        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">qfe-server.exe</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <!-- Health Check Pre + fail branch -->
+      <div class="hc-branch-wrap">
+        <div class="hc-main">
+          <div class="step step-green" style="min-width:280px;">
+            <span class="step-icon">🩺</span> Health Check
+            <span style="margin-left:auto;font-size:10px;background:#0d2e1a;padding:2px 6px;border-radius:4px;color:#4ade80">Pre-test</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;padding-top:10px;">
+          <div class="arrow-right"></div>
+          <div class="hc-fail-side">
+            <div style="font-size:10px;font-weight:700;color:#fca5a5;margin-bottom:4px;letter-spacing:0.06em">FAIL</div>
+            <div class="terminal-error">💥 Collect Crash Logs &amp; Stop</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:#4ade80;font-weight:600;margin:2px 0;">
+        <span style="font-size:10px;font-weight:700;color:#86efac;letter-spacing:0.06em">SUCCESS ↓</span>
+      </div>
+
+      <div class="step step-green">
+        <span class="step-icon">📄</span> Download Swagger
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">🦙</span> Ollama Check
+        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">llama3.1:8b (optional)</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">🧹</span> Clean Old Test Cases
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">⚡</span> Generate Test Cases
+        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">main.py generate</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">🧪</span> Run pytest
+        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">--json-report</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">📊</span> Generate Excel Report
+        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">test_report.xlsx / test_report2.xlsx</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">🩺</span> Health Check
+        <span style="margin-left:auto;font-size:10px;background:#0d2e1a;padding:2px 6px;border-radius:4px;color:#4ade80">Post-test</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">📦</span> Upload Artifacts
+        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">14일 보존</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">💾</span> Update Cache
+        <span style="margin-left:auto;font-size:10px;color:#4ade80;opacity:0.7">swagger_hash :: server_version</span>
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">📝</span> Finalize Result
+      </div>
+      <div class="arrow-sm"></div>
+
+      <div class="step step-green">
+        <span class="step-icon">🛑</span> Stop Server
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#1d4ed8;"></div>
+      Job 1 · detect-changes
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#15803d;"></div>
+      Job 2 · run-pipeline
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#ca8a04;border-radius:2px;transform:rotate(45deg);width:8px;height:8px;"></div>
+      조건 분기 (Decision)
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#7f1d1d;"></div>
+      종료 / 오류 경로
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#064e3b;"></div>
+      성공 경로
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

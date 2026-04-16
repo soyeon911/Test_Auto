@@ -607,6 +607,7 @@ jobs:
             ${{ env.REPORT_DIR }}/pytest_output.txt
             ${{ env.REPORT_DIR }}/allure-results/
             ${{ env.REPORT_DIR }}/test_report.xlsx
+            ${{ env.REPORT_DIR }}/test_report2.xlsx
           retention-days: 14
 
       - name: 상태 캐시 업데이트
