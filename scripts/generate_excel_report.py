@@ -4,7 +4,7 @@ generate_excel_report.py — CI용 Excel 리포트 생성 스크립트
 Usage:
     python scripts/generate_excel_report.py \
         --report-dir reports \
-        --base-url   http://192.168.150.166:8080 \
+        --base-url   http://192.168.150.156:8080 \
         --swagger    input/QFEapi.json \
         --config     config/config.yaml
 

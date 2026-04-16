@@ -32,7 +32,7 @@ class TestRunner:
         )
 
         server_cfg = config.get("server", {})
-        self.base_url = server_cfg.get("base_url", "http://192.168.150.166:8080")
+        self.base_url = server_cfg.get("base_url", "http://192.168.150.156:8080")
 
     # ─── public API ──────────────────────────────────────────────────────────
 
