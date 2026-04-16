@@ -42,22 +42,47 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Python 환경 설정
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: 의존성 설치
+      - name: Swagger Hash 계산
+        id: hash
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
+          $swaggerFiles = @()
+          if (Test-Path "input") {
+            $swaggerFiles += Get-ChildItem -Path "input" -Include "*.yaml","*.yml","*.json" -Recurse
+          }
+          foreach ($extra in @("QFEapi.yaml","QFEapi.json")) {
+            if (Test-Path $extra) { $swaggerFiles += Get-Item $extra }
+          }
+
+          if ($swaggerFiles.Count -eq 0) {
+            Write-Error "Swagger 파일을 찾을 수 없습니다."
+            exit 1
+          }
+
+          $hasher = [System.Security.Cryptography.SHA256]::Create()
+          $combined = ""
+
+          foreach ($f in ($swaggerFiles | Sort-Object FullName -Unique)) {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            $h = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace("-", "").ToLower()
+            $combined += "$($f.Name):$h;"
+            Write-Host "[Hash] $($f.Name) -> $h"
+          }
+
+          $finalHash = [System.BitConverter]::ToString(
+            $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($combined))
+          ).Replace("-", "").ToLower()
+
+          Write-Host "[Hash] 최종 Swagger 해시: $finalHash"
+          "swagger_hash=$finalHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
 
       - name: API 서버 실행 (job1 detect)
         id: start_server_detect
-        shell: powershell
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -235,44 +260,6 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "swagger_source=$swaggerSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Swagger Hash 계산
-        id: hash
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
-
-          $swaggerFiles = @()
-          if (Test-Path "input") {
-            $swaggerFiles += Get-ChildItem -Path "input" -Include "*.yaml","*.yml","*.json" -Recurse
-          }
-          foreach ($extra in @("QFEapi.yaml","QFEapi.json")) {
-            if (Test-Path $extra) { $swaggerFiles += Get-Item $extra }
-          }
-
-          if ($swaggerFiles.Count -eq 0) {
-            Write-Error "Swagger 파일을 찾을 수 없습니다."
-            exit 1
-          }
-
-          $hasher = [System.Security.Cryptography.SHA256]::Create()
-          $combined = ""
-
-          foreach ($f in ($swaggerFiles | Sort-Object FullName -Unique)) {
-            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
-            $h = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace("-", "").ToLower()
-            $combined += "$($f.Name):$h;"
-            Write-Host "[Hash] $($f.Name) -> $h"
-          }
-
-          $finalHash = [System.BitConverter]::ToString(
-            $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($combined))
-          ).Replace("-", "").ToLower()
-
-          Write-Host "[Hash] 최종 Swagger 해시: $finalHash"
-          "swagger_hash=$finalHash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-
       - name: 이전 캐시와 비교
         id: compare
         run: |
@@ -312,7 +299,7 @@ jobs:
 
       - name: API 서버 종료 (job1 detect)
         if: always()
-        shell: powershell
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -326,33 +313,6 @@ jobs:
             }
           }
 
-  run-pipeline:
-    name: AutoTC 파이프라인 실행
-    needs: detect-changes
-    if: needs.detect-changes.outputs.should_run == 'true'
-    runs-on: [self-hosted, windows]
-
-    env:
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.156:8080' }}
-      SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
-      SERVER_EXE_NAME: qfe-server.exe
-      SERVER_LICENSE_KEY: 1
-      SERVER_MODE_CHOICE: 1
-      SERVER_INSTANCE_COUNT: 1
-      SERVER_MODEL_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model
-      SERVER_DB_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db
-      REPORT_DIR: reports
-      CRASH_LOG_DIR: crash_logs
-      SERVER_LOG_DIR: server_logs
-      # 서버 stderr 로그 파일 경로 (conftest crash guard / build_diag 가 읽음)
-      SWAGGER_SOURCE: ${{ needs.detect-changes.outputs.swagger_source }}
-      SERVER_LOG_FILE: server_logs/server_stderr.log
-      LLM_PROVIDER: ollama
-      LLM_MODEL: llama3.1:8b
-      OLLAMA_BASE_URL: http://localhost:11434
-      PYTHONIOENCODING: utf-8
-
-    steps:
   run-pipeline:
     name: AutoTC 파이프라인 실행
     needs: detect-changes
@@ -428,7 +388,7 @@ jobs:
 
       - name: API 서버 실행 (job2 test)
         id: start_server_test
-        shell: powershell
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -618,35 +578,6 @@ jobs:
             Get-Content $env:SERVER_STDERR_LOG -ErrorAction SilentlyContinue
           }
 
-      - name: Crash 로그 수집 (테스트 전)
-        if: steps.pre_health.outputs.server_up == 'false'
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          scripts\collect_crash_logs.ps1 -OutputDir $env:CRASH_LOG_DIR -Label "pre_test"
-
-      - name: Crash 로그 업로드 (테스트 전)
-        if: steps.pre_health.outputs.server_up == 'false'
-        uses: actions/upload-artifact@v4
-        with:
-          name: crash-logs-pre-${{ github.run_id }}
-          path: ${{ env.CRASH_LOG_DIR }}/
-          retention-days: 14
-
-      - name: 서버 로그 업로드 (테스트 전 실패 시)
-        if: steps.pre_health.outputs.server_up == 'false'
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-logs-pre-${{ github.run_id }}
-          path: ${{ env.SERVER_LOG_DIR }}/
-          retention-days: 14
-
-      - name: 서버 다운 시 중단
-        if: steps.pre_health.outputs.server_up == 'false'
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          Write-Host "::error::API 서버가 기동되지 않았습니다. server_logs와 crash_logs를 확인하세요."
-          exit 1
-
       - name: 서버 Swagger 다운로드
         id: fetch_swagger
         run: |
@@ -682,6 +613,35 @@ jobs:
 
           Write-Host "[Swagger] downloaded: $swaggerUrl -> $swaggerPath"
           "DOWNLOADED_SWAGGER=$swaggerPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Crash 로그 수집 (테스트 전)
+        if: steps.pre_health.outputs.server_up == 'false'
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          scripts\collect_crash_logs.ps1 -OutputDir $env:CRASH_LOG_DIR -Label "pre_test"
+
+      - name: Crash 로그 업로드 (테스트 전)
+        if: steps.pre_health.outputs.server_up == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-logs-pre-${{ github.run_id }}
+          path: ${{ env.CRASH_LOG_DIR }}/
+          retention-days: 14
+
+      - name: 서버 로그 업로드 (테스트 전 실패 시)
+        if: steps.pre_health.outputs.server_up == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs-pre-${{ github.run_id }}
+          path: ${{ env.SERVER_LOG_DIR }}/
+          retention-days: 14
+
+      - name: 서버 다운 시 중단
+        if: steps.pre_health.outputs.server_up == 'false'
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          Write-Host "::error::API 서버가 기동되지 않았습니다. server_logs와 crash_logs를 확인하세요."
+          exit 1
 
       - name: Ollama health check
         run: |
@@ -910,7 +870,7 @@ jobs:
 
       - name: API 서버 종료 (job2 test)
         if: always()
-        shell: powershell
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
