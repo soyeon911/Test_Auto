@@ -297,7 +297,7 @@ jobs:
             "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
 
-      - name: API 서버 종료 (job1: detect)
+      - name: API 서버 종료 (job1 detect)
         if: always()
         shell: pwsh
         run: |
@@ -868,7 +868,7 @@ jobs:
 
           Write-Host "[Result] Pipeline completed successfully."
 
-      - name: API 서버 종료 (job2: test)
+      - name: API 서버 종료 (job2 test)
         if: always()
         shell: pwsh
         run: |
