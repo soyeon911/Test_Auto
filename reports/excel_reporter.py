@@ -180,10 +180,12 @@ class ExcelReportBuilder:
             return "false"
 
         return ""
-    # ─── Sheet 3: TC Table ────────────────────────────────────────────────────
+    
 
+    # ─── Sheet 3: TC Table ────────────────────────────────────────────────────
+    
     def _build_tc_table(self, ws, tests: list[dict[str, Any]], base_url: str) -> None:
-        self._title_banner(ws, "A1:AA1", "TC (Test Case) Table")
+        self._title_banner(ws, "A1:X1", "TC (Test Case) Table")
         ws.row_dimensions[1].height = 24
 
         headers = [
@@ -193,38 +195,34 @@ class ExcelReportBuilder:
             "HTTP Method / Function",     # 4
             "Path / Module",              # 5
             "Rule Type",                  # 6
-            "Axis",                       # 7  (diag.axis)
-            "Reason Code",                # 8  (diag.reason_code)
+            "Axis",                       # 7
+            "Reason Code",                # 8
             "Target Field",               # 9
             "Test Condition",             # 10
             "Request Query",              # 11
             "Request Headers",            # 12
             "Request Body / Arguments",   # 13
             "Expected",                   # 14
-            "Actual Status",              # 15
-            "Response / Result Snippet",  # 16
-            "Response Success",           # 17 (diag.response_success)
-            "Response Error Code",        # 18 (diag.response_error_code)
-            "Response Msg",               # 19 (diag.response_msg)
-            "Exception Type",             # 20
-            "Exception Message",          # 21
-            "Server Crash",               # 22
-            "Server Log Tail",            # 23
-            "Outcome",                    # 24
-            "Duration (s)",               # 25
-            "Error Detail",               # 26 (diag.error_detail)
-            "Failure Detail (pytest)",    # 27 (longrepr)
+            "Actual",                     # 15
+            "Response Msg",               # 16
+            "Exception Type",             # 17
+            "Exception Message",          # 18
+            "Server Crash",               # 19
+            "Server Log Tail",            # 20
+            "Outcome",                    # 21
+            "Duration (s)",               # 22
+            "Error Detail",               # 23
+            "Failure Detail (pytest)",    # 24
         ]
         self._header_row(ws, 2, headers)
 
         col_widths = [
-            5, 28, 12, 24, 34,    # 1-5
-            18, 14, 22,            # 6-8
-            20, 38, 28, 28, 38,    # 9-13
-            28, 14, 42,            # 14-16
-            16, 20, 38,            # 17-19
-            18, 42, 12, 42,        # 20-23
-            12, 12, 42, 55,        # 24-27
+            5, 28, 12, 24, 34,   # 1-5
+            18, 14, 22,          # 6-8
+            20, 38, 28, 28, 38,  # 9-13
+            28, 30, 42,          # 14-16
+            18, 42, 12, 42,      # 17-20
+            12, 12, 42, 55,      # 21-24
         ]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
@@ -238,8 +236,8 @@ class ExcelReportBuilder:
             longrepr = str(item.get("longrepr") or "")
 
             info = self._parse_nodeid(nodeid, src_cache)
+
             _raw_status = item.get("actual_status")
-            # actual_status가 int(resp.status_code)로 기록된 경우 str 변환
             if _raw_status is not None and _raw_status != "":
                 actual_status = str(_raw_status)
             else:
@@ -251,20 +249,17 @@ class ExcelReportBuilder:
                 )
 
             target_type = item.get("target_type") or self._infer_target_type(item, info)
-
             method_or_function = item.get("request_method") or item.get("function") or info["method"]
             path_or_module = item.get("request_path") or info["path"] or item.get("request_url") or ""
 
             request_query = self._format_value(item.get("request_query", {}))
             request_headers = self._format_value(item.get("request_headers", {}))
-
             request_body_or_args = self._pick_request_payload(item)
-            response_or_result = self._pick_response_or_result(item)
 
             expected_display = item.get("expected_status_display") or self._build_expected_display(item, info)
+            actual_display = self._build_actual_display(item, actual_status)
+
             rule_type = item.get("rule_type") or info["rule_type"]
-            # rule_type = item.get("rule_type", "")     fallback 제거 시 아예 못 읽어옴
-            # axis가 있으면 rule_type에 "(axis)" 형태로 병기
             axis = item.get("axis", "")
             if axis and rule_type and axis not in rule_type:
                 rule_type_display = f"{rule_type} ({axis})"
@@ -274,12 +269,13 @@ class ExcelReportBuilder:
             target_field = item.get("target_param", "")
             condition = item.get("condition") or info["condition"]
 
-            # response_success 표시용 변환
             rs = item.get("response_success")
             if rs is None:
                 rs_display = ""
             else:
                 rs_display = "true" if rs else "false"
+
+            response_msg = item.get("response_msg", "") or ""
 
             row_vals = [
                 idx,                                          # 1
@@ -296,19 +292,16 @@ class ExcelReportBuilder:
                 request_headers,                              # 12
                 request_body_or_args,                         # 13
                 expected_display,                             # 14
-                actual_status,                                # 15
-                response_or_result,                           # 16
-                rs_display,                                   # 17
-                item.get("response_error_code", "") or "",    # 18
-                item.get("response_msg", "") or "",           # 19
-                item.get("exception_type", ""),               # 20
-                item.get("exception_message", ""),            # 21
-                "Y" if item.get("server_crashed") else "",   # 22
-                (item.get("server_log_tail") or "")[:2000],  # 23
-                outcome.upper(),                              # 24
-                duration,                                     # 25
-                item.get("error_detail", ""),                 # 26
-                longrepr[:2000] if outcome in {"failed", "broken"} else "",  # 27
+                actual_display,                               # 15
+                response_msg,                                 # 16
+                item.get("exception_type", ""),               # 17
+                item.get("exception_message", ""),            # 18
+                "Y" if item.get("server_crashed") else "",   # 19
+                (item.get("server_log_tail") or "")[:2000],  # 20
+                outcome.upper(),                              # 21
+                duration,                                     # 22
+                item.get("error_detail", ""),                 # 23
+                longrepr[:2000] if outcome in {"failed", "broken"} else "",  # 24
             ]
 
             r = idx + 2
@@ -320,11 +313,10 @@ class ExcelReportBuilder:
 
             if expected_success and rs_display:
                 if expected_success == rs_display:
-                    bg = _GREEN_BG   # ✔️ 기대와 실제 일치
+                    bg = _GREEN_BG
                 else:
-                    bg = _RED_BG     # ❌ mismatch
+                    bg = _RED_BG
             elif rs_display:
-                # expected 없으면 기존 방식 fallback
                 bg = _GREEN_BG if rs_display == "true" else _RED_BG
             else:
                 bg = _YELLOW_BG
@@ -334,7 +326,12 @@ class ExcelReportBuilder:
 
             has_long_text = any(
                 isinstance(v, str) and len(v) > 80
-                for v in [request_body_or_args, response_or_result, item.get("exception_message", ""), longrepr]
+                for v in [
+                    request_body_or_args,
+                    response_msg,
+                    item.get("exception_message", ""),
+                    longrepr,
+                ]
             )
             ws.row_dimensions[r].height = 72 if has_long_text else 24
 
@@ -616,6 +613,25 @@ class ExcelReportBuilder:
         if item.get("expected_status"):
             return ", ".join(map(str, item["expected_status"]))
         return info.get("expected_status", "")
+    
+    def _build_actual_display(self, item: dict[str, Any], actual_status: str) -> str:
+        head = str(actual_status) if actual_status else ""
+
+        tail_parts: list[str] = []
+
+        rs = item.get("response_success")
+        if rs is not None:
+            tail_parts.append(f"success={'true' if rs else 'false'}")
+
+        ec = item.get("response_error_code")
+        if ec not in [None, ""]:
+            tail_parts.append(f"error_code={ec}")
+
+        tail = ", ".join(tail_parts)
+
+        if head and tail:
+            return f"{head} / {tail}"
+        return head or tail
 
     def _pick_request_payload(self, item: dict[str, Any]) -> str:
         if item.get("request_body") is not None:
@@ -843,3 +859,5 @@ class ExcelReportBuilder:
             if m:
                 return m.group(1)
         return ""
+    
+    
