@@ -69,8 +69,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: API 서버 실행 (job1 detect)
-        id: start_server_detect
+      - name: API 서버 실행·버전 조회 (job1 detect)
+        id: server_version
         shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -156,99 +156,102 @@ jobs:
           $proc.StandardInput.Flush()
           $proc.StandardInput.Close()
 
-          "DETECT_SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "DETECT_SERVER_STDOUT_LOG=$stdoutLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "DETECT_SERVER_STDERR_LOG=$stderrLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
           $healthUrl = "$($env:BASE_URL)$($env:HEALTH_CHECK_PATH)"
           $ready = $false
 
-          for ($i = 0; $i -lt 20; $i++) {
-            Start-Sleep -Seconds 1
+          try {
+            for ($i = 0; $i -lt 20; $i++) {
+              Start-Sleep -Seconds 1
 
-            if ($proc.HasExited) {
-              break
-            }
-
-            try {
-              $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
-              if ($resp.StatusCode -eq 200) {
-                $ready = $true
+              if ($proc.HasExited) {
                 break
               }
+
+              try {
+                $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+                if ($resp.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              }
+              catch {}
             }
-            catch {}
-          }
 
-          if ($proc.HasExited -or -not $ready) {
-            if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) }
-            $outText = $proc.StandardOutput.ReadToEnd()
-            $errText = $proc.StandardError.ReadToEnd()
+            if ($proc.HasExited -or -not $ready) {
+              if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) }
+              $outText = $proc.StandardOutput.ReadToEnd()
+              $errText = $proc.StandardError.ReadToEnd()
 
-            $outText | Out-File -FilePath $stdoutLog -Encoding utf8
-            $errText | Out-File -FilePath $stderrLog -Encoding utf8
+              $outText | Out-File -FilePath $stdoutLog -Encoding utf8
+              $errText | Out-File -FilePath $stderrLog -Encoding utf8
 
-            Write-Host "[Detect Server] stdout:"
-            Get-Content $stdoutLog -ErrorAction SilentlyContinue
-            Write-Host "[Detect Server] stderr:"
-            Get-Content $stderrLog -ErrorAction SilentlyContinue
+              Write-Host "[Detect Server] stdout:"
+              Get-Content $stdoutLog -ErrorAction SilentlyContinue
+              Write-Host "[Detect Server] stderr:"
+              Get-Content $stderrLog -ErrorAction SilentlyContinue
 
-            throw "detect-changes용 서버가 정상 기동하지 않았습니다. exit=$($proc.ExitCode)"
-          }
+              throw "detect-changes용 서버가 정상 기동하지 않았습니다. exit=$($proc.ExitCode)"
+            }
 
-          Write-Host "[Detect Server] started pid=$($proc.Id)"
-    
+            Write-Host "[Detect Server] started pid=$($proc.Id)"
 
-      - name: 서버 버전 조회
-        id: server_version
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+            # ── 서버 버전 조회 ────────────────────────────────────────────────
+            $baseUrl = "http://127.0.0.1:8080"
+            if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
 
-          $baseUrl = "http://127.0.0.1:8080"
-          if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
+            $version = "unknown"
+            $swaggerSource = ""
 
-          $version = "unknown"
-          $swaggerSource = ""
-
-          foreach ($ep in @("/version", "/api/v2/version")) {
-            try {
-              $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-              if ($null -ne $resp.version -and "$($resp.version)".Trim() -ne "") {
-                $version = [string]$resp.version
-                Write-Host "[Version] API $ep -> $version"
-                break
+            foreach ($ep in @("/version", "/api/v2/version")) {
+              try {
+                $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
+                if ($null -ne $resp.version -and "$($resp.version)".Trim() -ne "") {
+                  $version = [string]$resp.version
+                  Write-Host "[Version] API $ep -> $version"
+                  break
+                }
+              }
+              catch {
+                Write-Host "[Version] API $ep 실패: $($_.Exception.Message)"
               }
             }
-            catch {
-              Write-Host "[Version] API $ep 실패: $($_.Exception.Message)"
+
+            foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json", "/api/v2/docs/doc.json")) {
+              try {
+                $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
+                if (-not $swaggerSource) {
+                  $swaggerSource = "$baseUrl$ep"
+                }
+
+                if ($version -eq "unknown" -and $null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
+                  $version = [string]$resp.info.version
+                  Write-Host "[Version] Swagger $ep -> $version"
+                }
+
+                if ($swaggerSource) { break }
+              }
+              catch {
+                Write-Host "[Version] Swagger $ep 실패: $($_.Exception.Message)"
+              }
+            }
+
+            Write-Host "[Version] 최종 서버 버전: $version"
+            Write-Host "[Version] Swagger Source: $swaggerSource"
+            "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "swagger_source=$swaggerSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          finally {
+            # ── 서버 종료 (항상 실행) ─────────────────────────────────────────
+            if ($proc -and -not $proc.HasExited) {
+              try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+                Write-Host "[Detect Server] stopped PID=$($proc.Id)"
+              }
+              catch {
+                Write-Warning "[Detect Server] failed to stop PID=$($proc.Id) : $($_.Exception.Message)"
+              }
             }
           }
-
-          foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json", "/api/v2/docs/doc.json")) {
-            try {
-              $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-              if (-not $swaggerSource) {
-                $swaggerSource = "$baseUrl$ep"
-              }
-
-              if ($version -eq "unknown" -and $null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
-                $version = [string]$resp.info.version
-                Write-Host "[Version] Swagger $ep -> $version"
-              }
-
-              if ($swaggerSource) { break }
-            }
-            catch {
-              Write-Host "[Version] Swagger $ep 실패: $($_.Exception.Message)"
-            }
-          }
-
-          Write-Host "[Version] 최종 서버 버전: $version"
-          Write-Host "[Version] Swagger Source: $swaggerSource"
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "swagger_source=$swaggerSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Swagger Hash 계산
         id: hash
@@ -323,22 +326,6 @@ jobs:
           else {
             Write-Host "[Compare] 변경 감지됨 -> 실행"
             "should_run=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
-
-      - name: API 서버 종료 (job1 detect)
-        if: always()
-        shell: powershell
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
-          if ($env:DETECT_SERVER_PID) {
-            try {
-              Stop-Process -Id ([int]$env:DETECT_SERVER_PID) -Force -ErrorAction Stop
-              Write-Host "[Detect Server] stopped PID=$env:DETECT_SERVER_PID"
-            }
-            catch {
-              Write-Warning "[Detect Server] failed to stop PID=$env:DETECT_SERVER_PID : $($_.Exception.Message)"
-            }
           }
 
   run-pipeline:
