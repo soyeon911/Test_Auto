@@ -27,9 +27,16 @@ defaults:
     shell: powershell
 
 jobs:
-    detect-changes:
+  detect-changes:
     name: 변경 감지 (Swagger Hash + Server Version)
     runs-on: [self-hosted, windows]
+
+    outputs:
+      should_run: ${{ steps.compare.outputs.should_run }}
+      swagger_hash: ${{ steps.hash.outputs.swagger_hash }}
+      server_version: ${{ steps.server_version.outputs.version }}
+      swagger_source: ${{ steps.server_version.outputs.swagger_source }}
+
     env:
       BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.156:8080' }}
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
@@ -42,12 +49,7 @@ jobs:
       SERVER_LOG_DIR: server_logs
       HEALTH_CHECK_PATH: /health
       PYTHONIOENCODING: utf-8
-    outputs:
-      should_run: ${{ steps.compare.outputs.should_run }}
-      swagger_hash: ${{ steps.hash.outputs.swagger_hash }}
-      server_version: ${{ steps.server_version.outputs.version }}
-      swagger_source: ${{ steps.server_version.outputs.swagger_source }}
-
+      
     steps:
       - name: Checkout
         uses: actions/checkout@v5
