@@ -553,7 +553,7 @@ jobs:
 
           $healthCandidates = @(
             "$env:BASE_URL/health",
-            "$env:BASE_URL/api/v2/health"
+            "$env:BASE_URL/health"
           )
 
           $maxRetries = 20
@@ -799,7 +799,7 @@ jobs:
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
           $up = $false
-          foreach ($healthUrl in @("$env:BASE_URL/v2/health", "$env:BASE_URL/api/v2/health")) {
+          foreach ($healthUrl in @("$env:BASE_URL/health", "$env:BASE_URL/health")) {
             try {
               $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
               if ($null -ne $resp.StatusCode -and $resp.StatusCode -lt 500) {
