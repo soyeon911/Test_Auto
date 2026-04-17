@@ -111,14 +111,14 @@ jobs:
 
             Write-Host "[Detect Server] found listener(s) on port $Port : $($pids -join ', ')"
 
-            foreach ($pid in $pids) {
+            foreach ($procPid in $pids) {
               try {
-                $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction Stop
-                Write-Host "[Detect Server] stopping PID=$pid Name=$($procInfo.Name)"
-                Stop-Process -Id $pid -Force -ErrorAction Stop
+                $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $procPid" -ErrorAction Stop
+                Write-Host "[Detect Server] stopping PID=$procPid Name=$($procInfo.Name)"
+                Stop-Process -Id $procPid -Force -ErrorAction Stop
               }
               catch {
-                Write-Warning "[Detect Server] failed to stop PID=$pid : $($_.Exception.Message)"
+                Write-Warning "[Detect Server] failed to stop PID=$procPid : $($_.Exception.Message)"
               }
             }
 
