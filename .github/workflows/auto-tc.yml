@@ -340,7 +340,7 @@ jobs:
             }
           }
 
-run-pipeline:
+  run-pipeline:
     name: AutoTC 파이프라인 실행
     needs: detect-changes
     if: needs.detect-changes.outputs.should_run == 'true'
