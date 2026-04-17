@@ -455,14 +455,14 @@ jobs:
 
             Write-Host "[Test Server] found listener(s) on port $Port : $($pids -join ', ')"
 
-            foreach ($pid in $pids) {
+            foreach ($listnerpid in $pids) {
               try {
-                $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction Stop
-                Write-Host "[Test Server] stopping PID=$pid Name=$($procInfo.Name)"
-                Stop-Process -Id $pid -Force -ErrorAction Stop
+                $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerpid" -ErrorAction Stop
+                Write-Host "[Test Server] stopping PID=$listenerpid Name=$($procInfo.Name)"
+                Stop-Process -Id $listenerpid -Force -ErrorAction Stop
               }
               catch {
-                Write-Warning "[Test Server] failed to stop PID=$pid : $($_.Exception.Message)"
+                Write-Warning "[Test Server] failed to stop PID=$listenerpid : $($_.Exception.Message)"
               }
             }
 
