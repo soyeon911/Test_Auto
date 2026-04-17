@@ -18,7 +18,7 @@ on:
         default: 'false'
         type: boolean
       base_url:
-        description: '서버 Base URL (기본값: http://192.168.150.156:8080)'
+        description: '서버 Base URL (기본값: http://127.0.0.1:8080)'
         required: false
         default: ''
 
@@ -38,7 +38,7 @@ jobs:
       swagger_source: ${{ steps.server_version.outputs.swagger_source }}
 
     env:
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.156:8080' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
       SERVER_EXE_NAME: qfe-server.exe
       SERVER_LICENSE_KEY: 1
@@ -206,13 +206,13 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $baseUrl = "http://192.168.150.156:8080"
+          $baseUrl = "http://127.0.0.1:8080"
           if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
 
           $version = "unknown"
           $swaggerSource = ""
 
-          foreach ($ep in @("/version", "/api/version")) {
+          foreach ($ep in @("/version", "/api/v2/version")) {
             try {
               $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
               if ($null -ne $resp.version -and "$($resp.version)".Trim() -ne "") {
@@ -226,7 +226,7 @@ jobs:
             }
           }
 
-          foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json", "/docs/doc.json")) {
+          foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json", "/api/v2/docs/doc.json")) {
             try {
               $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
               if (-not $swaggerSource) {
@@ -348,7 +348,7 @@ jobs:
     runs-on: [self-hosted, windows]
 
     env:
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.156:8080' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
       SERVER_EXE_NAME: qfe-server.exe
       SERVER_LICENSE_KEY: 1
@@ -553,7 +553,7 @@ jobs:
 
           $healthCandidates = @(
             "$env:BASE_URL/health",
-            "$env:BASE_URL/api/health"
+            "$env:BASE_URL/api/v2/health"
           )
 
           $maxRetries = 20
@@ -799,7 +799,7 @@ jobs:
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
           $up = $false
-          foreach ($healthUrl in @("$env:BASE_URL/health", "$env:BASE_URL/api/health")) {
+          foreach ($healthUrl in @("$env:BASE_URL/v2/health", "$env:BASE_URL/api/v2/health")) {
             try {
               $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
               if ($null -ne $resp.StatusCode -and $resp.StatusCode -lt 500) {
