@@ -181,6 +181,7 @@ jobs:
           }
 
           if ($proc.HasExited -or -not $ready) {
+            if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) }
             $outText = $proc.StandardOutput.ReadToEnd()
             $errText = $proc.StandardError.ReadToEnd()
 
@@ -365,6 +366,7 @@ jobs:
       LLM_MODEL: llama3.1:8b
       OLLAMA_BASE_URL: http://localhost:11434
       PYTHONIOENCODING: utf-8
+      HEALTH_CHECK_PATH: /health
 
     steps:
       - name: Checkout
@@ -525,6 +527,7 @@ jobs:
           }
 
           if ($proc.HasExited -or -not $ready) {
+            if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) }
             $outText = $proc.StandardOutput.ReadToEnd()
             $errText = $proc.StandardError.ReadToEnd()
 
