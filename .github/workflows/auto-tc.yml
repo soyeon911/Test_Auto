@@ -202,36 +202,25 @@ jobs:
             $version = "unknown"
             $swaggerSource = ""
 
-            foreach ($ep in @("/version", "/api/v2/version")) {
-              try {
-                $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-                if ($null -ne $resp.version -and "$($resp.version)".Trim() -ne "") {
-                  $version = [string]$resp.version
-                  Write-Host "[Version] API $ep -> $version"
-                  break
-                }
-              }
-              catch {
-                Write-Host "[Version] API $ep 실패: $($_.Exception.Message)"
+            # QFE 서버 버전: GET /api/v2/info -> { data: { version: "x.x.x" } }
+            try {
+              $resp = Invoke-RestMethod -Uri "$baseUrl/api/v2/info" -TimeoutSec 5 -ErrorAction Stop
+              if ($null -ne $resp.data.version -and "$($resp.data.version)".Trim() -ne "") {
+                $version = [string]$resp.data.version
+                Write-Host "[Version] /api/v2/info -> $version"
               }
             }
+            catch {
+              Write-Host "[Version] /api/v2/info 실패: $($_.Exception.Message)"
+            }
 
-            foreach ($ep in @("/swagger.json", "/v2/api-docs", "/openapi.json", "/api/v2/docs/doc.json")) {
-              try {
-                $resp = Invoke-RestMethod -Uri "$baseUrl$ep" -TimeoutSec 5 -ErrorAction Stop
-                if (-not $swaggerSource) {
-                  $swaggerSource = "$baseUrl$ep"
-                }
-
-                if ($version -eq "unknown" -and $null -ne $resp.info.version -and "$($resp.info.version)".Trim() -ne "") {
-                  $version = [string]$resp.info.version
-                  Write-Host "[Version] Swagger $ep -> $version"
-                }
-
-                if ($swaggerSource) { break }
-              }
-              catch {
-                Write-Host "[Version] Swagger $ep 실패: $($_.Exception.Message)"
+            # Swagger 소스: 로컬 파일 우선, 없으면 빈 문자열
+            $localSwagger = @("input/QFEapi.json", "input/QFEapi.yaml", "QFEapi.json", "QFEapi.yaml")
+            foreach ($f in $localSwagger) {
+              if (Test-Path $f) {
+                $swaggerSource = (Resolve-Path $f).Path
+                Write-Host "[Version] Swagger Source (local): $swaggerSource"
+                break
               }
             }
 
