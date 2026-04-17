@@ -433,7 +433,7 @@ jobs:
 
             Write-Host "[Test Server] found listener(s) on port $Port : $($pids -join ', ')"
 
-            foreach ($listnerpid in $pids) {
+            foreach ($listenerpid in $pids) {
               try {
                 $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerpid" -ErrorAction Stop
                 Write-Host "[Test Server] stopping PID=$listenerpid Name=$($procInfo.Name)"
@@ -454,29 +454,31 @@ jobs:
 
           Stop-PortListeners -Port $serverPort
 
-          $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName = $serverExe
-          $psi.WorkingDirectory = $env:SERVER_DIR
-          $psi.Arguments = "-host 0.0.0.0"
-          $psi.UseShellExecute = $false
-          $psi.RedirectStandardInput = $true
-          $psi.RedirectStandardOutput = $true
-          $psi.RedirectStandardError = $true
-          $psi.CreateNoWindow = $true
+          # ── Start-Process + 파일 리다이렉션 ─────────────────────────────────
+          # 파이프(RedirectStandardOutput=true) 방식은 스텝 종료 시 파이프가 닫혀
+          # 서버 프로세스가 죽는 문제가 있음. Start-Process + 파일 리다이렉션으로
+          # 부모 PowerShell 수명과 독립적인 프로세스를 생성.
+          $stdinFile = Join-Path $env:SERVER_LOG_DIR "server_stdin.tmp"
+          @(
+            $env:SERVER_LICENSE_KEY,
+            $env:SERVER_MODE_CHOICE,
+            $env:SERVER_INSTANCE_COUNT,
+            $env:SERVER_MODEL_PATH,
+            $env:SERVER_DB_PATH,
+            ""
+          ) | Set-Content -Path $stdinFile -Encoding ascii
 
-          $proc = New-Object System.Diagnostics.Process
-          $proc.StartInfo = $psi
-          $proc.Start() | Out-Null
+          $proc = Start-Process `
+            -FilePath        $serverExe `
+            -WorkingDirectory $env:SERVER_DIR `
+            -ArgumentList    "-host 0.0.0.0" `
+            -RedirectStandardInput  $stdinFile `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError  $stderrLog `
+            -PassThru `
+            -WindowStyle Hidden
 
           Start-Sleep -Milliseconds 500
-
-          $proc.StandardInput.WriteLine($env:SERVER_LICENSE_KEY)
-          $proc.StandardInput.WriteLine($env:SERVER_MODE_CHOICE)
-          $proc.StandardInput.WriteLine($env:SERVER_INSTANCE_COUNT)
-          $proc.StandardInput.WriteLine($env:SERVER_MODEL_PATH)
-          $proc.StandardInput.WriteLine($env:SERVER_DB_PATH)
-          $proc.StandardInput.Flush()
-          $proc.StandardInput.Close()
 
           "SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "SERVER_STDOUT_LOG=$stdoutLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -504,11 +506,6 @@ jobs:
 
           if ($proc.HasExited -or -not $ready) {
             if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) }
-            $outText = $proc.StandardOutput.ReadToEnd()
-            $errText = $proc.StandardError.ReadToEnd()
-
-            $outText | Out-File -FilePath $stdoutLog -Encoding utf8
-            $errText | Out-File -FilePath $stderrLog -Encoding utf8
 
             Write-Host "[Test Server] stdout:"
             Get-Content $stdoutLog -ErrorAction SilentlyContinue
