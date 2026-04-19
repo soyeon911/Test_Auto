@@ -187,3 +187,71 @@ def build_diag(
 def attach_diag(request, diag: dict) -> None:
     """pytest request fixture의 user_properties에 diag를 첨부한다."""
     request.node.user_properties.append(("diag", diag))
+
+
+# ─── 실패 원인 분류 ────────────────────────────────────────────────────────────
+
+def classify_failure_cause(
+    outcome: str,
+    axis: str,
+    reason_code: str,
+    response_success,       # bool | None
+    response_error_code,    # int | None
+    server_crash: bool = False,
+) -> str:
+    """
+    테스트 결과(outcome)와 diag 정보를 조합하여 실패 원인을 분류한다.
+
+    반환값 카테고리:
+        PASS                    — 테스트 통과
+        서버 Crash (5xx)        — 서버가 5xx로 응답하거나 crash
+        서버 미응답              — 연결 거부 / 타임아웃
+        상태 미충족 (DB 없음)   — state 축 + API가 "데이터 없음" 오류 반환
+        엔드포인트 버그          — schema/domain 축에서 validation이 수행되지 않음
+                                  (잘못된 입력에도 success=true 반환)
+        예상치 못한 실패         — 정상 입력인데 API가 오류 반환 (positive 실패 등)
+        TC 실패 (단언 오류)      — 위 분류에 해당하지 않는 assertion 실패
+        알 수 없음               — outcome이 passed가 아닌데 분류 불가
+    """
+    outcome = (outcome or "").lower()
+
+    if outcome == "passed":
+        return "PASS"
+
+    # 서버 crash / 연결 거부
+    if server_crash:
+        return "서버 Crash (5xx)"
+    if reason_code == "connection_refused":
+        return "서버 미응답"
+    if reason_code in {"timeout", "http_5xx"}:
+        return "서버 Crash (5xx)"
+
+    # state 축 — positive TC 실패의 원인 구분
+    if axis == "state":
+        # API가 success=false 로 응답 → DB/상태 사전 조건 미충족 (서버 자체 버그 X)
+        if response_success is False:
+            return "상태 미충족 (DB 없음)"
+        # API가 success=true 인데 TC assertion 실패 → TC 로직 오류 가능성
+        if response_success is True:
+            return "TC 실패 (단언 오류)"
+
+    # schema 축 — 잘못된 입력을 서버가 묵인
+    if axis == "schema":
+        if response_success is True:
+            return "엔드포인트 버그 (Validation 미수행)"
+        if response_success is False:
+            # expected pass인데 fail → positive TC가 상태 문제로 실패했을 수도
+            return "예상치 못한 실패"
+
+    # domain 축 — enum/range/semantic 검증 미수행
+    if axis == "domain":
+        if response_success is True:
+            return "엔드포인트 버그 (도메인 검증 미수행)"
+        if response_success is False:
+            return "예상치 못한 실패"
+
+    # runtime 축
+    if axis == "runtime":
+        return "서버 Crash (5xx)"
+
+    return "알 수 없음"

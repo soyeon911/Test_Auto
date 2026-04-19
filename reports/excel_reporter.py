@@ -25,6 +25,27 @@ _GREEN_BG = "EAF7EA"
 _RED_BG = "FFE5E5"
 _YELLOW_BG = "FFEB9C"
 
+# Failure Cause 색상
+_FC_COLORS: dict[str, str] = {
+    "PASS":                             "EAF7EA",   # 연초록
+    "서버 Crash (5xx)":                 "F4CCCC",   # 연빨강
+    "서버 미응답":                       "F4CCCC",   # 연빨강
+    "상태 미충족 (DB 없음)":             "FCE5CD",   # 연주황
+    "엔드포인트 버그 (Validation 미수행)":"FFE5E5",   # 연분홍
+    "엔드포인트 버그 (도메인 검증 미수행)":"FFE5E5",  # 연분홍
+    "예상치 못한 실패":                  "FFF2CC",   # 연노랑
+    "TC 실패 (단언 오류)":              "FFF2CC",   # 연노랑
+    "알 수 없음":                        "EFEFEF",   # 회색
+}
+
+# Axis 한글 표시
+_AXIS_LABEL: dict[str, str] = {
+    "schema":  "schema (구조 검증)",
+    "domain":  "domain (값 의미 검증)",
+    "state":   "state (상태 검증)",
+    "runtime": "runtime (안정성 검증)",
+}
+
 _METHOD_COLORS = {
     "GET": "D9EAD3",
     "POST": "FCE5CD",
@@ -186,7 +207,7 @@ class ExcelReportBuilder:
     # ─── Sheet 3: TC Table ────────────────────────────────────────────────────
     
     def _build_tc_table(self, ws, tests: list[dict[str, Any]], base_url: str) -> None:
-        self._title_banner(ws, "A1:X1", "TC (Test Case) Table")
+        self._title_banner(ws, "A1:Y1", "TC (Test Case) Table")
         ws.row_dimensions[1].height = 24
 
         headers = [
@@ -211,19 +232,20 @@ class ExcelReportBuilder:
             "Server Crash",               # 19
             "Server Log Tail",            # 20
             "Outcome",                    # 21
-            "Duration (s)",               # 22
-            "Error Detail",               # 23
-            "Failure Detail (pytest)",    # 24
+            "Failure Cause",              # 22  ← NEW
+            "Duration (s)",               # 23
+            "Error Detail",               # 24
+            "Failure Detail (pytest)",    # 25
         ]
         self._header_row(ws, 2, headers)
 
         col_widths = [
             5, 28, 12, 24, 34,   # 1-5
-            18, 14, 22,          # 6-8
+            18, 24, 22,          # 6-8  (Axis 폭 확장)
             20, 38, 28, 28, 70,  # 9-13
             28, 28, 38,          # 14-16
             18, 42, 12, 42,      # 17-20
-            12, 12, 42, 55,      # 21-24
+            12, 30, 12, 42, 55,  # 21-25  (Failure Cause 30)
         ]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
@@ -262,10 +284,10 @@ class ExcelReportBuilder:
 
             rule_type = item.get("rule_type") or info["rule_type"]
             axis = item.get("axis", "")
-            if axis and rule_type and axis not in rule_type:
-                rule_type_display = f"{rule_type} ({axis})"
-            else:
-                rule_type_display = rule_type
+            # Axis 한글 표시 (가독성 향상)
+            axis_display = _AXIS_LABEL.get(axis, axis)
+            # Rule Type 표시: axis 한글 병기 제거 (별도 컬럼에서 보여주므로 중복 X)
+            rule_type_display = rule_type
 
             target_field = item.get("target_param", "")
             condition = item.get("condition") or info["condition"]
@@ -278,6 +300,20 @@ class ExcelReportBuilder:
 
             response_msg = item.get("response_msg", "") or ""
 
+            # ── Failure Cause 분류 ───────────────────────────────────
+            try:
+                from tests.helpers.diag import classify_failure_cause
+                failure_cause = classify_failure_cause(
+                    outcome=outcome,
+                    axis=axis,
+                    reason_code=item.get("reason_code", ""),
+                    response_success=rs,
+                    response_error_code=item.get("response_error_code"),
+                    server_crash=bool(item.get("server_crashed")),
+                )
+            except Exception:
+                failure_cause = "PASS" if outcome == "passed" else "알 수 없음"
+
             row_vals = [
                 idx,                                          # 1
                 base_url,                                     # 2
@@ -285,7 +321,7 @@ class ExcelReportBuilder:
                 method_or_function,                           # 4
                 path_or_module,                               # 5
                 rule_type_display,                            # 6
-                axis,                                         # 7
+                axis_display,                                 # 7  한글 포함 표시
                 item.get("reason_code", ""),                  # 8
                 target_field,                                 # 9
                 condition,                                    # 10
@@ -300,9 +336,10 @@ class ExcelReportBuilder:
                 "Y" if item.get("server_crashed") else "",   # 19
                 (item.get("server_log_tail") or "")[:2000],  # 20
                 outcome.upper(),                              # 21
-                duration,                                     # 22
-                item.get("error_detail", ""),                 # 23
-                longrepr[:2000] if outcome in {"failed", "broken"} else "",  # 24
+                failure_cause,                                # 22  ← NEW
+                duration,                                     # 23
+                item.get("error_detail", ""),                 # 24
+                longrepr[:2000] if outcome in {"failed", "broken"} else "",  # 25
             ]
 
             r = idx + 2
@@ -310,20 +347,16 @@ class ExcelReportBuilder:
                 cell = ws.cell(row=r, column=col, value=val)
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
 
-            expected_success = self._extract_expected_success(expected_display)
-
-            if expected_success and rs_display:
-                if expected_success == rs_display:
-                    bg = _GREEN_BG
-                else:
-                    bg = _RED_BG
-            elif rs_display:
-                bg = _GREEN_BG if rs_display == "true" else _RED_BG
-            else:
-                bg = _YELLOW_BG
+            # 행 배경색: Failure Cause 기반으로 결정 (기존 response_success 기반보다 명확)
+            bg = _FC_COLORS.get(failure_cause, _YELLOW_BG)
 
             for col in range(1, len(headers) + 1):
                 ws.cell(row=r, column=col).fill = PatternFill(fill_type="solid", fgColor=bg)
+
+            # Failure Cause 컬럼(22)은 별도 진하게 표시
+            fc_cell = ws.cell(row=r, column=22)
+            if failure_cause != "PASS" and failure_cause != "알 수 없음":
+                fc_cell.font = Font(bold=True)
 
             
             max_len = max(

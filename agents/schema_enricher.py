@@ -202,13 +202,69 @@ class SchemaEnricher:
         field_location: str,
         field_description: str,
     ) -> tuple[str, list[str]]:
+        # Priority 0: spec author가 x-semantic-tag 확장 속성으로 명시한 경우 최우선 신뢰
+        explicit_tag = schema.get("x-semantic-tag") or schema.get("x_semantic_tag")
+        if explicit_tag and explicit_tag in KNOWN_TAGS:
+            return explicit_tag, ["x-semantic-tag"]
+
+        # Priority 1: Swagger format 필드 기반 확정 태깅
+        swagger_tag = self._tag_from_swagger_format(name, schema)
+        if swagger_tag:
+            return swagger_tag, ["swagger_format"]
+
+        # Priority 2: 휴리스틱 (강화된 word-boundary 기반)
         tag = self._heuristic(name, schema, field_location, field_description)
         return tag, ["field_name", "description", "example", "format", "type"]
 
-    # threshold, score, confidence가 있으면 integer도 threshold_float으로 강제
-    # channel은 따로 안 잡고 integer_count로 보내버리는 문제
+    # ── Swagger format 우선 태깅 ─────────────────────────────────────
+    # format 필드가 명시된 경우 heuristic보다 신뢰도가 높으므로 먼저 처리한다.
 
-    # channel은 channel_count / threshold는 threshold_numeric으로 분류 -> 일반 number는 무조건 threshold가 아님
+    _FORMAT_TAG_MAP: dict[str, str] = {
+        "date-time":  "datetime_string",
+        "date":       "datetime_string",
+        "time":       "datetime_string",
+        "email":      "email_string",
+        "uuid":       "uuid_string",
+        "uri":        "url_string",
+        "url":        "url_string",
+        "hostname":   "url_string",
+        "ipv4":       "url_string",
+        "ipv6":       "url_string",
+        "password":   "password_string",
+    }
+
+    def _tag_from_swagger_format(self, name: str, schema: dict) -> str:
+        fmt = (schema.get("format") or "").lower()
+        n = name.lower()
+
+        # format: byte / binary → base64 계열. image vs template 구분
+        if fmt in {"byte", "binary"}:
+            desc_name_blob = f"{schema.get('description', '')} {n}".lower()
+            if any(x in desc_name_blob for x in ("template", "feature", "vector", "embedding")):
+                return "base64_template"
+            return "base64_image"
+
+        # format 직접 매핑
+        mapped = self._FORMAT_TAG_MAP.get(fmt)
+        if mapped:
+            return mapped
+
+        # format: int32/int64 → ID 패턴 (format 명시 + name 패턴 조합)
+        if fmt in {"int32", "int64"}:
+            if re.search(r"(^|_)(user|face|group|template|device|person|subject)_?id$", n):
+                return "numeric_id"
+
+        return ""
+
+    # ── 강화된 휴리스틱 ──────────────────────────────────────────────
+    # 변경 원칙:
+    #   1. description/blob substring 매칭 → field name 기반 word-boundary 우선
+    #   2. 단일 키워드 매칭 제거 → 복수 신호 조합 요구
+    #   3. threshold_numeric: ftype==number 전용 (integer 제외)
+    #   4. url_string: name에 url/uri 있거나 format:uri → 아니면 미분류
+    #   5. file_path: name에 file/path 있고 + 파일 확장자/디렉토리 컨텍스트 필요
+    #   6. base64: format:byte 없으면 name+desc 양쪽에 근거 필요
+
     def _heuristic(
         self,
         name: str,
@@ -217,7 +273,7 @@ class SchemaEnricher:
         field_description: str,
     ) -> str:
         ftype = schema.get("type", "string")
-        fmt = schema.get("format", "")
+        fmt = schema.get("format", "").lower()
         enum_vals = schema.get("enum")
         desc = f"{schema.get('description', '')} {field_description}".lower()
         example = str(schema.get("example", "")).lower()
@@ -226,61 +282,79 @@ class SchemaEnricher:
         if enum_vals:
             return "enum_mode"
 
-        if field_location == "path" and re.search(r"(^|_)(user|face|group|template|device|person|subject)_?id$", n):
-            return "path_user_id" if n in {"user_id", "{user_id}"} else ("numeric_id" if ftype == "integer" else "identifier")
+        # path param ID 패턴
+        if field_location == "path" and re.search(
+            r"(^|_)(user|face|group|template|device|person|subject)_?id$", n
+        ):
+            return "path_user_id" if n in {"user_id", "{user_id}"} else (
+                "numeric_id" if ftype == "integer" else "identifier"
+            )
 
-        blob = f"{example} {desc} {n}"
-
-        if any(x in blob for x in ("base64", "encoded", "binary", "bytes", "blob")):
-            if any(x in blob for x in ("template", "feature", "vector", "embedding", "face data", "face_data")):
+        # ── base64 계열 ────────────────────────────────────────────
+        # 조건: name 또는 desc 모두에 base64/encoded/binary 근거가 있어야 함
+        # (description에만 있는 경우 오탐 방지)
+        name_has_b64 = any(x in n for x in ("base64", "encoded", "image", "template", "photo", "img"))
+        desc_has_b64 = any(x in desc for x in ("base64", "encoded", "binary", "bytes", "blob"))
+        if name_has_b64 or (desc_has_b64 and ftype == "string"):
+            desc_name = f"{desc} {n}"
+            if any(x in desc_name for x in ("template", "feature", "vector", "embedding", "face_data")):
                 return "base64_template"
-            if any(x in blob for x in ("image", "img", "photo", "jpeg", "jpg", "png", "raw image", "picture")):
+            if any(x in desc_name for x in ("image", "img", "photo", "jpeg", "jpg", "png", "picture")):
                 return "base64_image"
 
-        if any(x in blob for x in ("email", "e-mail")):
+        # ── email ──────────────────────────────────────────────────
+        # field name에 email이 있거나, format:email (format은 _tag_from_swagger_format에서 먼저 잡힘)
+        if re.search(r"(^|_)e?mail(_|$)", n):
             return "email_string"
 
-        if any(x in blob for x in ("password", "secret", "token", "passwd", "credential")):
+        # ── password ───────────────────────────────────────────────
+        if any(x in n for x in ("password", "passwd", "secret", "credential")):
             return "password_string"
 
-        if any(x in blob for x in ("url", "uri", "endpoint", "host", "link")):
+        # ── url/uri ────────────────────────────────────────────────
+        # name에 url/uri가 있어야 분류 (description의 "endpoint" 등은 미분류)
+        if re.search(r"(^|_)(url|uri)(_|$)", n):
             return "url_string"
 
-        if any(x in blob for x in ("path", "dir", "file", "folder", "directory", ".cfg", ".json", ".yaml", ".yml")):
+        # ── file path ─────────────────────────────────────────────
+        # name에 file/path가 있고 파일 컨텍스트(확장자, dir 등)가 추가로 필요
+        if any(x in n for x in ("file_path", "filepath", "file_name", "filename", "dir_path", "dirpath")):
+            return "file_path"
+        if any(x in n for x in ("file", "folder", "directory")) and any(
+            x in desc for x in ("path", "dir", ".json", ".cfg", ".yaml", ".yml", "file")
+        ):
             return "file_path"
 
-        if fmt == "date-time" or any(x in n for x in ("datetime", "timestamp", "date_time")):
+        # ── datetime ───────────────────────────────────────────────
+        if any(x in n for x in ("datetime", "timestamp", "date_time", "created_at", "updated_at")):
             return "datetime_string"
 
-        if fmt == "email":
-            return "email_string"
-
-        if fmt == "uuid" or "uuid" in n:
+        # ── uuid ───────────────────────────────────────────────────
+        if "uuid" in n or fmt == "uuid":
             return "uuid_string"
 
+        # ── ID 패턴 ────────────────────────────────────────────────
         if re.search(r"(^|_)(user|face|group|template|device|person|subject)_?id$", n):
             return "numeric_id" if ftype == "integer" else "identifier"
-
         if n.endswith("_id") or n == "id":
             return "numeric_id" if ftype == "integer" else "identifier"
 
-        # channel은 integer_count와 분리
+        # ── channel count ─────────────────────────────────────────
         if ftype == "integer" and "channel" in n:
             return "channel_count"
 
-        # threshold/score/confidence 등은 숫자 의미 필드로만 분류
-        if any(x in blob for x in ("threshold", "score", "confidence", "ratio", "similarity")) and ftype in {"number", "integer"}:
+        # ── threshold_numeric ─────────────────────────────────────
+        # ftype==number(float) 전용. integer는 범용 카운터일 수 있으므로 제외.
+        # name 또는 description에 threshold/score/confidence 등이 있어야 함.
+        if ftype == "number" and (
+            any(x in n for x in ("threshold", "score", "confidence", "ratio", "similarity"))
+            or any(x in desc for x in ("threshold", "similarity score", "confidence score"))
+        ):
             return "threshold_numeric"
-        '''
-        if ftype == "integer":
-            if any(x in n for x in ("width", "height", "count", "limit", "size", "page", "max", "min", "total", "sub_id")):
-                return "integer_count"
-            return "numeric_id"
-        '''
-        # 일반 number를 threshold로 몰지 않는다
+
+        # 일반 number는 plain_string으로 fallback (threshold로 오분류 방지)
         if ftype == "number":
-            return "plain_string"  # 아래에서 별도 처리하지 않으면 fallback
-            # 더 안전하게는 "numeric_id" 같은 태그를 새로 만드는 것도 가능
+            return "plain_string"
 
         if ftype == "boolean":
             return "boolean_flag"
