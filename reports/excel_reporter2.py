@@ -52,6 +52,57 @@ _TYPE_KO = {
     "missing_required":"필수누락(MissingRequired)",
 }
 
+_EXPECTED_RESULT_TYPE_KO = {
+    "expected_pass": "기대: 성공",
+    "expected_fail": "기대: 실패",
+    "probe_only":    "탐색용 (Probe Only)",
+}
+
+_AXIS_LABEL = {
+    "schema":  "schema (구조 검증)",
+    "domain":  "domain (값 의미 검증)",
+    "state":   "state (상태 검증)",
+    "runtime": "runtime (안정성 검증)",
+}
+
+_PROFILE_KO = {
+    "raw_image":      "raw_image",
+    "face_operation": "face_operation",
+    "match_verdict":  "match_verdict",
+    "default":        "default",
+}
+
+
+def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
+    outcome = str(item.get("outcome", "")).lower()
+    if outcome == "passed":
+        return "PASS"
+
+    if item.get("server_crashed"):
+        return "서버 Crash (5xx)"
+
+    expected_result_type = str(item.get("expected_result_type") or "")
+    axis = str(item.get("axis") or "")
+    reason_code = str(item.get("reason_code") or "")
+    response_success = item.get("response_success")
+
+    if expected_result_type == "probe_only":
+        return "Probe Only"
+
+    if expected_result_type == "expected_pass" and reason_code == "precondition_not_met":
+        return "상태 미충족 (DB/fixture 없음)"
+
+    if expected_result_type == "expected_fail" and response_success is True:
+        if axis == "schema":
+            return "엔드포인트 버그 (Validation 미수행)"
+        return "엔드포인트 버그 (도메인 검증 미수행)"
+
+    if expected_result_type == "expected_fail":
+        return "TC 실패 (단언 오류)"
+
+    return "알 수 없음"
+
+
 _EP_DESC = {
     "/health":                "서버 상태 확인",
     "/api/v2/detect":         "얼굴 인식/검출",
@@ -115,18 +166,18 @@ class ExcelReportBuilder2:
     # ─── Sheet 1: TC 명세서 ────────────────────────────────────────────────────
 
     def _build_tc_spec(self, ws, tests: list[dict[str, Any]]) -> None:
-        self._title_banner(ws, "A1:K1", "TC 명세서 (Test Case Specification)")
+        self._title_banner(ws, "A1:N1", "TC 명세서 (현재 Rule/Diag 반영)")
         ws.row_dimensions[1].height = 26
 
         headers = [
             "TC ID", "HTTP 메서드", "엔드포인트", "기능설명",
-            "테스트유형", "테스트조건",
-            "기댓값\n(HTTP 상태)", "기댓값\n(응답)",
-            "실행결과", "P/F", "비고",
+            "테스트유형", "세부유형", "프로파일",
+            "기대결과유형", "Semantic Tag", "Policy",
+            "테스트조건", "기댓값", "실행결과", "P/F",
         ]
         self._header_row(ws, 2, headers)
 
-        col_widths = [10, 12, 32, 18, 20, 42, 14, 28, 28, 8, 20]
+        col_widths = [10, 12, 32, 18, 18, 18, 16, 18, 16, 12, 44, 28, 30, 8]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -134,19 +185,23 @@ class ExcelReportBuilder2:
         la = Alignment(horizontal="left",   vertical="top", wrap_text=True)
 
         for idx, item in enumerate(tests, start=1):
-            info   = self._parse_nodeid(item.get("nodeid", ""), {})
-            method = (item.get("request_method") or info["method"]).upper()
-            path   = item.get("request_path") or info["path"] or ""
-            rtype  = item.get("rule_type") or info["rule_type"] or ""
-            cond   = item.get("condition") or info["condition"] or ""
-            outcome = str(item.get("outcome", "")).lower()
-            pf     = "PASS" if outcome == "passed" else "FAIL"
+            info = self._parse_nodeid(item.get("nodeid", ""), {})
 
-            exp_http, exp_resp = self._split_expected(
-                item.get("expected_status_display") or info.get("expected_status", "")
-            )
+            method = (item.get("request_method") or info["method"]).upper()
+            path = item.get("request_path") or info["path"] or ""
+            rtype = item.get("rule_type") or info["rule_type"] or ""
+            subtype = item.get("rule_subtype", "")
+            profile = item.get("endpoint_profile", "")
+            expected_result_type = item.get("expected_result_type", "")
+            semantic_tag = item.get("semantic_tag", "")
+            policy = item.get("policy", "")
+            cond = item.get("condition") or info["condition"] or ""
+
+            outcome = str(item.get("outcome", "")).lower()
+            pf = "PASS" if outcome == "passed" else "FAIL"
+
+            expected_display = item.get("expected_status_display") or info.get("expected_status", "")
             actual = self._build_actual_short(item)
-            note   = self._build_note(item, outcome)
 
             row_vals = [
                 f"TC-{idx:04d}",
@@ -154,22 +209,24 @@ class ExcelReportBuilder2:
                 path,
                 _EP_DESC.get(path, ""),
                 _TYPE_KO.get(rtype, rtype),
+                subtype,
+                _PROFILE_KO.get(profile, profile),
+                _EXPECTED_RESULT_TYPE_KO.get(expected_result_type, expected_result_type),
+                semantic_tag,
+                policy,
                 cond,
-                exp_http,
-                exp_resp,
+                expected_display,
                 actual,
                 pf,
-                note,
             ]
 
             r = idx + 2
             for ci, val in enumerate(row_vals, start=1):
                 c = ws.cell(row=r, column=ci, value=val)
                 c.border = _BORDER
-                c.alignment = ca if ci in (1, 2, 7, 10) else la
+                c.alignment = ca if ci in (1, 2, 14) else la
 
-            # P/F 색상
-            pf_cell = ws.cell(row=r, column=10)
+            pf_cell = ws.cell(row=r, column=14)
             if pf == "PASS":
                 pf_cell.font = Font(name="Arial", size=9, bold=True, color=_GREEN_DARK)
                 pf_cell.fill = PatternFill("solid", start_color=_GREEN_FILL, end_color=_GREEN_FILL)
@@ -177,99 +234,98 @@ class ExcelReportBuilder2:
                 pf_cell.font = Font(name="Arial", size=9, bold=True, color=_RED_FONT)
                 pf_cell.fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
 
-            # 행 stripe
             if pf == "FAIL":
-                for ci in range(1, 10):
+                for ci in range(1, 14):
                     ws.cell(row=r, column=ci).fill = PatternFill("solid", start_color="FFF0ED", end_color="FFF0ED")
             elif idx % 2 == 0:
-                for ci in range(1, 10):
+                for ci in range(1, 14):
                     ws.cell(row=r, column=ci).fill = PatternFill("solid", start_color=_STRIPE, end_color=_STRIPE)
 
-            ws.row_dimensions[r].height = max(14, min(60, 14 + len(cond) // 5))
+            ws.row_dimensions[r].height = max(18, min(64, 18 + len(cond) // 4))
 
         ws.freeze_panes = "A3"
-        ws.auto_filter.ref = f"A2:K{len(tests) + 2}"
+        ws.auto_filter.ref = f"A2:N{len(tests) + 2}"
 
     # ─── Sheet 2: 엔드포인트별 요약 ───────────────────────────────────────────
 
     def _build_endpoint_summary(self, ws, tests: list[dict[str, Any]]) -> None:
-        self._title_banner(ws, "A1:H1", "엔드포인트별 테스트 요약")
+        self._title_banner(ws, "A1:J1", "엔드포인트별 요약 (성격별 분리)")
         ws.row_dimensions[1].height = 26
 
         headers = [
             "HTTP 메서드", "엔드포인트", "기능설명",
-            "전체 TC", "PASS", "FAIL", "통과율 (%)", "주요 이슈",
+            "전체 TC", "PASS", "FAIL",
+            "Expected Pass 실패", "Expected Fail 이상동작", "Probe Only 실패", "주요 이슈",
         ]
         self._header_row(ws, 2, headers)
 
-        col_widths = [12, 32, 18, 10, 10, 10, 12, 50]
+        col_widths = [12, 32, 18, 10, 10, 10, 16, 18, 16, 50]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
-        # 엔드포인트 × 메서드 집계
         ep_map: dict[tuple[str, str], dict] = {}
         for item in tests:
-            info   = self._parse_nodeid(item.get("nodeid", ""), {})
+            info = self._parse_nodeid(item.get("nodeid", ""), {})
             method = (item.get("request_method") or info["method"]).upper() or "POST"
-            path   = item.get("request_path") or info["path"] or "(unknown)"
-            key    = (method, path)
+            path = item.get("request_path") or info["path"] or "(unknown)"
+            key = (method, path)
+
             if key not in ep_map:
-                ep_map[key] = {"total": 0, "pass": 0, "fail": 0, "fail_conditions": []}
+                ep_map[key] = {
+                    "total": 0, "pass": 0, "fail": 0,
+                    "expected_pass_fail": 0,
+                    "expected_fail_misbehave": 0,
+                    "probe_only_fail": 0,
+                    "issues": [],
+                }
+
             ep_map[key]["total"] += 1
             outcome = str(item.get("outcome", "")).lower()
+            expected_result_type = str(item.get("expected_result_type") or "")
+            failure_cause = classify_failure_cause_from_item(item)
+
             if outcome == "passed":
                 ep_map[key]["pass"] += 1
             else:
                 ep_map[key]["fail"] += 1
-                cond = item.get("condition") or ""
-                if cond and cond not in ep_map[key]["fail_conditions"]:
-                    ep_map[key]["fail_conditions"].append(cond)
+                if expected_result_type == "expected_pass":
+                    ep_map[key]["expected_pass_fail"] += 1
+                elif expected_result_type == "expected_fail":
+                    ep_map[key]["expected_fail_misbehave"] += 1
+                elif expected_result_type == "probe_only":
+                    ep_map[key]["probe_only_fail"] += 1
+
+                issue = failure_cause
+                if issue and issue not in ep_map[key]["issues"]:
+                    ep_map[key]["issues"].append(issue)
 
         ca = Alignment(horizontal="center", vertical="center")
-        la = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+        la = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-        for ri, ((method, path), stat) in enumerate(
-            sorted(ep_map.items(), key=lambda x: x[0][1]), start=3
-        ):
-            total  = stat["total"]
-            passed = stat["pass"]
-            failed = stat["fail"]
-            rate   = round(passed / total * 100, 1) if total else 0.0
-            issues = "; ".join(stat["fail_conditions"][:3])
-            if len(stat["fail_conditions"]) > 3:
-                issues += f" 외 {len(stat['fail_conditions']) - 3}건"
+        for ri, ((method, path), stat) in enumerate(sorted(ep_map.items(), key=lambda x: x[0][1]), start=3):
+            issues = "; ".join(stat["issues"][:3]) or "없음"
 
             row_vals = [
                 method, path, _EP_DESC.get(path, ""),
-                total, passed, failed, f"{rate}%", issues or "없음",
+                stat["total"], stat["pass"], stat["fail"],
+                stat["expected_pass_fail"],
+                stat["expected_fail_misbehave"],
+                stat["probe_only_fail"],
+                issues,
             ]
+
             bg = _METHOD_COLORS.get(method, _WHITE)
 
             for ci, val in enumerate(row_vals, start=1):
                 c = ws.cell(row=ri, column=ci, value=val)
                 c.border = _BORDER
-                c.alignment = ca if ci in (1, 4, 5, 6, 7) else la
+                c.alignment = ca if ci in (1,4,5,6,7,8,9) else la
                 if ci <= 3:
                     c.fill = PatternFill("solid", start_color=bg, end_color=bg)
 
-            # PASS/FAIL 셀 색
             ws.cell(row=ri, column=5).fill = PatternFill("solid", start_color=_GREEN_FILL, end_color=_GREEN_FILL)
-            if failed > 0:
+            if stat["fail"] > 0:
                 ws.cell(row=ri, column=6).fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
-
-            # 통과율 색상
-            rate_cell = ws.cell(row=ri, column=7)
-            if rate >= 90:
-                rate_cell.fill = PatternFill("solid", start_color=_GREEN_FILL, end_color=_GREEN_FILL)
-                rate_cell.font = Font(bold=True, color=_GREEN_DARK)
-            elif rate >= 70:
-                rate_cell.fill = PatternFill("solid", start_color=_YELLOW_FILL, end_color=_YELLOW_FILL)
-                rate_cell.font = Font(bold=True)
-            else:
-                rate_cell.fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
-                rate_cell.font = Font(bold=True, color=_RED_FONT)
-
-            ws.row_dimensions[ri].height = 18
 
         ws.freeze_panes = "A3"
 
@@ -285,135 +341,200 @@ class ExcelReportBuilder2:
     ) -> None:
         self._title_banner(ws, "A1:F1", "자동화 테스트 최종 리포트 — 종합 요약")
         ws.row_dimensions[1].height = 28
-        ws.column_dimensions["A"].width = 20
+        ws.column_dimensions["A"].width = 22
         ws.column_dimensions["B"].width = 18
         ws.column_dimensions["C"].width = 18
         ws.column_dimensions["D"].width = 18
         ws.column_dimensions["E"].width = 18
-        ws.column_dimensions["F"].width = 28
+        ws.column_dimensions["F"].width = 36
 
         total  = len(tests)
-        passed = sum(1 for t in tests if str(t.get("outcome","")).lower() == "passed")
+        passed = sum(1 for t in tests if str(t.get("outcome", "")).lower() == "passed")
         failed = total - passed
         rate   = round(passed / total * 100, 1) if total else 0.0
+
+        # ── 현재 구조용 추가 KPI 계산 ───────────────────────────────────────
+        expected_pass_fail = 0
+        expected_fail_misbehave = 0
+        probe_only_fail = 0
+        precondition_fail = 0
+
+        for item in tests:
+            outcome = str(item.get("outcome", "")).lower()
+            if outcome == "passed":
+                continue
+
+            expected_result_type = str(item.get("expected_result_type") or "")
+            reason_code = str(item.get("reason_code") or "")
+            response_success = item.get("response_success")
+
+            if expected_result_type == "expected_pass":
+                expected_pass_fail += 1
+                if reason_code == "precondition_not_met":
+                    precondition_fail += 1
+
+            elif expected_result_type == "expected_fail":
+                if response_success is True:
+                    expected_fail_misbehave += 1
+
+            elif expected_result_type == "probe_only":
+                probe_only_fail += 1
 
         # ── KPI 박스 ────────────────────────────────────────────────────────
         self._section_header(ws, "A3:F3", "📊 핵심 지표 (KPI)")
 
         kpi_labels = ["총 TC 수", "PASS", "FAIL", "통과율"]
         kpi_values = [str(total), str(passed), str(failed), f"{rate}%"]
-        kpi_fgs    = [_BLUE_LIGHT, _GREEN_FILL, _RED_FILL,
-                      _GREEN_FILL if rate >= 80 else _YELLOW_FILL if rate >= 60 else _RED_FILL]
-        kpi_fonts  = [_BLUE_DARK,  _GREEN_DARK, _RED_FONT,
-                      _GREEN_DARK if rate >= 80 else "7F6000" if rate >= 60 else _RED_FONT]
+        kpi_fgs    = [
+            _BLUE_LIGHT,
+            _GREEN_FILL,
+            _RED_FILL,
+            _GREEN_FILL if rate >= 80 else _YELLOW_FILL if rate >= 60 else _RED_FILL
+        ]
+        kpi_fonts  = [
+            _BLUE_DARK,
+            _GREEN_DARK,
+            _RED_FONT,
+            _GREEN_DARK if rate >= 80 else "7F6000" if rate >= 60 else _RED_FONT
+        ]
 
         for ci, (label, value, fg, fc) in enumerate(zip(kpi_labels, kpi_values, kpi_fgs, kpi_fonts), start=1):
             lc = ws.cell(row=4, column=ci, value=label)
-            lc.font  = Font(bold=True, size=10, color=_WHITE)
-            lc.fill  = PatternFill("solid", start_color=_BLUE_DARK, end_color=_BLUE_DARK)
+            lc.font = Font(bold=True, size=10, color=_WHITE)
+            lc.fill = PatternFill("solid", start_color=_BLUE_DARK, end_color=_BLUE_DARK)
             lc.alignment = Alignment(horizontal="center", vertical="center")
             lc.border = _BORDER
             ws.row_dimensions[4].height = 20
 
             vc = ws.cell(row=5, column=ci, value=value)
-            vc.font  = Font(bold=True, size=16, color=fc)
-            vc.fill  = PatternFill("solid", start_color=fg, end_color=fg)
+            vc.font = Font(bold=True, size=16, color=fc)
+            vc.fill = PatternFill("solid", start_color=fg, end_color=fg)
             vc.alignment = Alignment(horizontal="center", vertical="center")
             vc.border = _BORDER
             ws.row_dimensions[5].height = 32
 
+        # ── 현재 구조용 KPI 추가 박스 ───────────────────────────────────────
+        self._section_header(ws, "A7:F7", "🧭 현재 Rule/Oracle 구조 기반 지표")
+
+        extra_rows = [
+            ("Expected Pass 실패", expected_pass_fail, _RED_FILL, _RED_FONT),
+            ("Expected Fail 이상동작", expected_fail_misbehave, _RED_FILL, _RED_FONT),
+            ("Probe Only 실패", probe_only_fail, _YELLOW_FILL, "7F6000"),
+            ("Precondition 실패", precondition_fail, "FCE5CD", "9C5700"),
+        ]
+
+        for i, (label, value, fill, font_color) in enumerate(extra_rows, start=8):
+            lc = ws.cell(row=i, column=1, value=label)
+            lc.font = Font(bold=True)
+            lc.fill = PatternFill("solid", start_color=_GRAY_HEADER, end_color=_GRAY_HEADER)
+            lc.alignment = Alignment(horizontal="left", vertical="center")
+            lc.border = _BORDER
+
+            vc = ws.cell(row=i, column=2, value=value)
+            vc.font = Font(bold=True, color=font_color)
+            vc.fill = PatternFill("solid", start_color=fill, end_color=fill)
+            vc.alignment = Alignment(horizontal="center", vertical="center")
+            vc.border = _BORDER
+
+            ws.merge_cells(start_row=i, start_column=2, end_row=i, end_column=3)
+            ws.row_dimensions[i].height = 18
+
+        next_row = 13
+
         # ── 테스트유형별 분석 ────────────────────────────────────────────────
-        self._section_header(ws, "A7:F7", "🔍 테스트유형별 분석")
+        self._section_header(ws, f"A{next_row}:F{next_row}", "🔍 테스트유형별 분석")
 
         type_headers = ["테스트유형", "전체", "PASS", "FAIL", "통과율", "판정"]
         for ci, h in enumerate(type_headers, start=1):
-            c = ws.cell(row=8, column=ci, value=h)
-            c.font  = Font(bold=True, color=_WHITE)
-            c.fill  = PatternFill("solid", start_color=_BLUE_DARK, end_color=_BLUE_DARK)
+            c = ws.cell(row=next_row + 1, column=ci, value=h)
+            c.font = Font(bold=True, color=_WHITE)
+            c.fill = PatternFill("solid", start_color=_BLUE_DARK, end_color=_BLUE_DARK)
             c.alignment = Alignment(horizontal="center", vertical="center")
             c.border = _BORDER
-        ws.row_dimensions[8].height = 18
+        ws.row_dimensions[next_row + 1].height = 18
 
         type_counts: dict[str, dict] = {}
         for item in tests:
-            info  = self._parse_nodeid(item.get("nodeid", ""), {})
+            info = self._parse_nodeid(item.get("nodeid", ""), {})
             rtype = item.get("rule_type") or info["rule_type"] or "기타"
             if rtype not in type_counts:
                 type_counts[rtype] = {"total": 0, "pass": 0, "fail": 0}
             type_counts[rtype]["total"] += 1
-            if str(item.get("outcome","")).lower() == "passed":
+            if str(item.get("outcome", "")).lower() == "passed":
                 type_counts[rtype]["pass"] += 1
             else:
                 type_counts[rtype]["fail"] += 1
 
-        for ri, (rtype, stat) in enumerate(
-            sorted(type_counts.items(), key=lambda x: -x[1]["total"]), start=9
-        ):
-            t = stat["total"]; p = stat["pass"]; f = stat["fail"]
+        row_cursor = next_row + 2
+        for rtype, stat in sorted(type_counts.items(), key=lambda x: -x[1]["total"]):
+            t = stat["total"]
+            p = stat["pass"]
+            f = stat["fail"]
             r2 = round(p / t * 100, 1) if t else 0.0
             verdict = "✅ 양호" if r2 >= 90 else "⚠️ 주의" if r2 >= 60 else "❌ 불량"
 
             row_vals = [_TYPE_KO.get(rtype, rtype), t, p, f, f"{r2}%", verdict]
             for ci, val in enumerate(row_vals, start=1):
-                c = ws.cell(row=ri, column=ci, value=val)
+                c = ws.cell(row=row_cursor, column=ci, value=val)
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border = _BORDER
                 if ci == 1:
                     c.alignment = Alignment(horizontal="left", vertical="center")
-            if f > 0:
-                ws.cell(row=ri, column=4).fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
-            ws.cell(row=ri, column=3).fill = PatternFill("solid", start_color=_GREEN_FILL, end_color=_GREEN_FILL)
-            ws.row_dimensions[ri].height = 17
 
-        next_row = 9 + len(type_counts) + 1
+            ws.cell(row=row_cursor, column=3).fill = PatternFill("solid", start_color=_GREEN_FILL, end_color=_GREEN_FILL)
+            if f > 0:
+                ws.cell(row=row_cursor, column=4).fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
+
+            ws.row_dimensions[row_cursor].height = 17
+            row_cursor += 1
 
         # ── 주요 실패 원인 ───────────────────────────────────────────────────
-        self._section_header(ws, f"A{next_row}:F{next_row}", "⚠️ 주요 실패 원인 분석")
-        fail_tests = [t for t in tests if str(t.get("outcome","")).lower() != "passed"]
+        self._section_header(ws, f"A{row_cursor + 1}:F{row_cursor + 1}", "⚠️ 주요 실패 원인 분석")
+        fail_tests = [t for t in tests if str(t.get("outcome", "")).lower() != "passed"]
 
         fail_reasons: dict[str, int] = {}
         for item in fail_tests:
-            cond = item.get("condition") or ""
-            if not cond:
-                info = self._parse_nodeid(item.get("nodeid",""), {})
-                cond = info.get("condition","")
-            key = cond[:60] if cond else "(조건 정보 없음)"
-            fail_reasons[key] = fail_reasons.get(key, 0) + 1
+            cause = classify_failure_cause_from_item(item)
+            fail_reasons[cause] = fail_reasons.get(cause, 0) + 1
 
         top_reasons = sorted(fail_reasons.items(), key=lambda x: -x[1])[:10]
-        for i, (reason, cnt) in enumerate(top_reasons):
-            rr = next_row + 1 + i
-            ws.cell(row=rr, column=1, value=f"{i+1}.").alignment = Alignment(horizontal="center")
+        for i, (reason, cnt) in enumerate(top_reasons, start=1):
+            rr = row_cursor + 1 + i
+            ws.cell(row=rr, column=1, value=f"{i}.").alignment = Alignment(horizontal="center")
             ws.cell(row=rr, column=1).border = _BORDER
+
             c = ws.cell(row=rr, column=2, value=reason)
             c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
             c.border = _BORDER
             ws.merge_cells(f"B{rr}:E{rr}")
+
             cnt_c = ws.cell(row=rr, column=6, value=f"{cnt}건")
             cnt_c.alignment = Alignment(horizontal="center")
             cnt_c.fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
             cnt_c.border = _BORDER
             ws.row_dimensions[rr].height = 16
 
-        next_row = next_row + 1 + len(top_reasons) + 1
+        row_cursor = row_cursor + 2 + len(top_reasons)
 
         # ── 실행 환경 ────────────────────────────────────────────────────────
-        self._section_header(ws, f"A{next_row}:F{next_row}", "🖥️ 실행 환경 정보")
+        self._section_header(ws, f"A{row_cursor}:F{row_cursor}", "🖥️ 실행 환경 정보")
         env_rows = [
-            ("생성일시",     datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("소스 파일",    source_file),
-            ("서버 URL",     base_url),
+            ("생성일시", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("소스 파일", source_file),
+            ("서버 URL", base_url),
             ("총 실행 시간", f"{summary.get('duration_seconds', '')} 초"),
             ("테스트 프레임워크", "pytest + pytest-json-report"),
-            ("리포트 작성",  "excel_reporter2.py (AutoTC)"),
+            ("리포트 작성", "excel_reporter2.py (AutoTC)"),
         ]
-        for i, (label, value) in enumerate(env_rows):
-            rr = next_row + 1 + i
+
+        for i, (label, value) in enumerate(env_rows, start=1):
+            rr = row_cursor + i
             lc = ws.cell(row=rr, column=1, value=label)
             lc.font = Font(bold=True)
             lc.fill = PatternFill("solid", start_color=_GRAY_HEADER, end_color=_GRAY_HEADER)
             lc.border = _BORDER
             lc.alignment = Alignment(horizontal="left", vertical="center")
+
             vc = ws.cell(row=rr, column=2, value=value)
             vc.border = _BORDER
             vc.alignment = Alignment(horizontal="left", vertical="center")
@@ -423,40 +544,42 @@ class ExcelReportBuilder2:
     # ─── Sheet 4: 전체 결과 상세 ──────────────────────────────────────────────
 
     def _build_detail_table(self, ws, tests: list[dict[str, Any]], base_url: str) -> None:
-        self._title_banner(ws, "A1:L1", "자동화 테스트 최종 리포트 — 전체 결과 상세")
+        self._title_banner(ws, "A1:P1", "자동화 테스트 최종 리포트 — 전체 결과 상세")
         ws.row_dimensions[1].height = 26
 
         headers = [
             "#", "TC ID", "HTTP 메서드", "엔드포인트",
-            "테스트유형", "테스트조건",
-            "기댓값(HTTP)", "기댓값(응답)",
-            "실제 HTTP", "실제 응답",
+            "테스트유형", "세부유형", "프로파일", "기대결과유형",
+            "Axis", "Reason Code",
+            "테스트조건", "기댓값", "실제 HTTP", "실제 응답",
             "P/F", "소요시간(s)",
         ]
         self._header_row(ws, 2, headers)
 
-        col_widths = [5, 10, 12, 30, 20, 42, 14, 26, 14, 26, 8, 12]
+        col_widths = [5,10,12,30,18,18,16,18,18,20,42,28,12,32,8,12]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
         ca = Alignment(horizontal="center", vertical="top", wrap_text=True)
-        la = Alignment(horizontal="left",   vertical="top", wrap_text=True)
+        la = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
         for idx, item in enumerate(tests, start=1):
-            info    = self._parse_nodeid(item.get("nodeid", ""), {})
-            method  = (item.get("request_method") or info["method"]).upper()
-            path    = item.get("request_path") or info["path"] or ""
-            rtype   = item.get("rule_type") or info["rule_type"] or ""
-            cond    = item.get("condition") or info["condition"] or ""
-            outcome = str(item.get("outcome", "")).lower()
-            pf      = "PASS" if outcome == "passed" else "FAIL"
-            dur     = round(float(item.get("duration", 0) or 0), 3)
+            info = self._parse_nodeid(item.get("nodeid", ""), {})
+            method = (item.get("request_method") or info["method"]).upper()
+            path = item.get("request_path") or info["path"] or ""
+            rtype = item.get("rule_type") or info["rule_type"] or ""
+            subtype = item.get("rule_subtype", "")
+            profile = item.get("endpoint_profile", "")
+            expected_result_type = item.get("expected_result_type", "")
+            axis = _AXIS_LABEL.get(item.get("axis", ""), item.get("axis", ""))
+            reason_code = item.get("reason_code", "")
+            cond = item.get("condition") or info["condition"] or ""
+            pf = "PASS" if str(item.get("outcome", "")).lower() == "passed" else "FAIL"
+            dur = round(float(item.get("duration", 0) or 0), 3)
 
-            exp_http, exp_resp = self._split_expected(
-                item.get("expected_status_display") or info.get("expected_status", "")
-            )
-            act_http  = str(item.get("actual_status") or "")
-            act_resp  = self._build_actual_resp(item)
+            expected_display = item.get("expected_status_display") or info.get("expected_status", "")
+            act_http = str(item.get("actual_status") or "")
+            act_resp = self._build_actual_resp(item)
 
             row_vals = [
                 idx,
@@ -464,9 +587,13 @@ class ExcelReportBuilder2:
                 method,
                 path,
                 _TYPE_KO.get(rtype, rtype),
+                subtype,
+                _PROFILE_KO.get(profile, profile),
+                _EXPECTED_RESULT_TYPE_KO.get(expected_result_type, expected_result_type),
+                axis,
+                reason_code,
                 cond,
-                exp_http,
-                exp_resp,
+                expected_display,
                 act_http,
                 act_resp,
                 pf,
@@ -477,10 +604,9 @@ class ExcelReportBuilder2:
             for ci, val in enumerate(row_vals, start=1):
                 c = ws.cell(row=r, column=ci, value=val)
                 c.border = _BORDER
-                c.alignment = ca if ci in (1, 2, 3, 7, 9, 11, 12) else la
+                c.alignment = ca if ci in (1,2,3,12,13,15,16) else la
 
-            # P/F 색상
-            pf_c = ws.cell(row=r, column=11)
+            pf_c = ws.cell(row=r, column=15)
             if pf == "PASS":
                 pf_c.font = Font(bold=True, color=_GREEN_DARK)
                 pf_c.fill = PatternFill("solid", start_color=_GREEN_FILL, end_color=_GREEN_FILL)
@@ -488,18 +614,17 @@ class ExcelReportBuilder2:
                 pf_c.font = Font(bold=True, color=_RED_FONT)
                 pf_c.fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
 
-            # 행 stripe
             if pf == "FAIL":
-                for ci in [1,2,3,4,5,6,7,8,9,10,12]:
+                for ci in range(1, 15):
                     ws.cell(row=r, column=ci).fill = PatternFill("solid", start_color="FFF0ED", end_color="FFF0ED")
             elif idx % 2 == 0:
-                for ci in [1,2,3,4,5,6,7,8,9,10,12]:
+                for ci in range(1, 15):
                     ws.cell(row=r, column=ci).fill = PatternFill("solid", start_color=_STRIPE, end_color=_STRIPE)
 
-            ws.row_dimensions[r].height = max(14, min(56, 14 + len(cond) // 5))
+            ws.row_dimensions[r].height = max(16, min(60, 16 + len(cond) // 5))
 
         ws.freeze_panes = "A3"
-        ws.auto_filter.ref = f"A2:L{len(tests) + 2}"
+        ws.auto_filter.ref = f"A2:P{len(tests) + 2}"
 
     # ─── test result loaders ─────────────────────────────────────────────────
 
@@ -543,7 +668,15 @@ class ExcelReportBuilder2:
                 "outcome":  t.get("outcome", "unknown"),
                 "duration": call.get("duration", t.get("duration", 0)),
                 "longrepr": str(call.get("longrepr") or t.get("longrepr") or ""),
-                "rule_type":       meta.get("rule_type", ""),
+
+                # tc_meta
+                "rule_type":            meta.get("rule_type", ""),
+                "rule_subtype":         meta.get("rule_subtype", ""),
+                "endpoint_profile":     meta.get("endpoint_profile", ""),
+                "semantic_tag":         meta.get("semantic_tag", ""),
+                "policy":               meta.get("policy", ""),
+                "expected_result_type": meta.get("expected_result_type", ""),
+
                 "target_param":    meta.get("target_param", ""),
                 "condition":       meta.get("condition", ""),
                 "request_method":  meta.get("request_method", ""),
@@ -558,8 +691,14 @@ class ExcelReportBuilder2:
                 "exception_type":  meta.get("exception_type", ""),
                 "exception_message": meta.get("exception_message", ""),
                 "server_crashed":  meta.get("server_crashed", False),
-                "axis": "", "reason_code": "", "error_detail": "",
-                "response_success": None, "response_error_code": None, "response_msg": None,
+
+                # diag merge target
+                "axis": "",
+                "reason_code": "",
+                "error_detail": "",
+                "response_success": None,
+                "response_error_code": None,
+                "response_msg": None,
             })
         return out
 

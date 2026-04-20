@@ -27,16 +27,57 @@ _YELLOW_BG = "FFEB9C"
 
 # Failure Cause 색상
 _FC_COLORS: dict[str, str] = {
-    "PASS":                             "EAF7EA",   # 연초록
-    "서버 Crash (5xx)":                 "F4CCCC",   # 연빨강
-    "서버 미응답":                       "F4CCCC",   # 연빨강
-    "상태 미충족 (DB 없음)":             "FCE5CD",   # 연주황
-    "엔드포인트 버그 (Validation 미수행)":"FFE5E5",   # 연분홍
-    "엔드포인트 버그 (도메인 검증 미수행)":"FFE5E5",  # 연분홍
-    "예상치 못한 실패":                  "FFF2CC",   # 연노랑
-    "TC 실패 (단언 오류)":              "FFF2CC",   # 연노랑
-    "알 수 없음":                        "EFEFEF",   # 회색
+    "PASS":                              "EAF7EA",
+    "서버 Crash (5xx)":                  "F4CCCC",
+    "서버 미응답":                        "F4CCCC",
+    "상태 미충족 (DB/fixture 없음)":      "FCE5CD",
+    "엔드포인트 버그 (Validation 미수행)": "FFE5E5",
+    "엔드포인트 버그 (도메인 검증 미수행)": "FFE5E5",
+    "예상된 실패":                        "EAF7EA",
+    "Probe Only":                        "FFF2CC",
+    "TC 실패 (단언 오류)":               "FFF2CC",
+    "알 수 없음":                         "EFEFEF",
 }
+
+def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
+    outcome = str(item.get("outcome", "")).lower()
+    if outcome == "passed":
+        return "PASS"
+
+    if item.get("server_crashed"):
+        return "서버 Crash (5xx)"
+
+    exc_type = str(item.get("exception_type") or "")
+    if "Connection" in exc_type or "Connect" in exc_type:
+        return "서버 미응답"
+
+    expected_result_type = str(item.get("expected_result_type") or "")
+    axis = str(item.get("axis") or "")
+    reason_code = str(item.get("reason_code") or "")
+    response_success = item.get("response_success")
+    response_error_code = item.get("response_error_code")
+
+    # probe_only는 crash만 아니면 의미상 탐색 성공인데,
+    # pytest outcome이 failed면 단언 또는 분류 문제로 본다.
+    if expected_result_type == "probe_only":
+        return "Probe Only"
+
+    # expected_pass인데 상태/fixture가 없어 실패
+    if expected_result_type == "expected_pass" and reason_code == "precondition_not_met":
+        return "상태 미충족 (DB/fixture 없음)"
+
+    # expected_fail인데 서버가 success=true를 반환
+    if expected_result_type == "expected_fail" and response_success is True:
+        if axis == "schema":
+            return "엔드포인트 버그 (Validation 미수행)"
+        return "엔드포인트 버그 (도메인 검증 미수행)"
+
+    # expected_fail인데 실제로 fail 응답을 잘 돌려준 경우는 원래 PASS여야 하므로
+    # 여기까지 왔다는 건 보통 assertion/분류 문제
+    if expected_result_type == "expected_fail":
+        return "TC 실패 (단언 오류)"
+
+    return "알 수 없음"
 
 # Axis 한글 표시
 _AXIS_LABEL: dict[str, str] = {
@@ -217,35 +258,41 @@ class ExcelReportBuilder:
             "HTTP Method / Function",     # 4
             "Path / Module",              # 5
             "Rule Type",                  # 6
-            "Axis",                       # 7
-            "Reason Code",                # 8
-            "Target Field",               # 9
-            "Test Condition",             # 10
-            "Request Query",              # 11
-            "Request Headers",            # 12
-            "Request Body / Arguments",   # 13
-            "Expected",                   # 14
-            "Actual",                     # 15
-            "Response Msg",               # 16
-            "Exception Type",             # 17
-            "Exception Message",          # 18
-            "Server Crash",               # 19
-            "Server Log Tail",            # 20
-            "Outcome",                    # 21
-            "Failure Cause",              # 22  ← NEW
-            "Duration (s)",               # 23
-            "Error Detail",               # 24
-            "Failure Detail (pytest)",    # 25
+            "Rule Subtype",               # 7
+            "Endpoint Profile",           # 8
+            "Expected Result Type",       # 9
+            "Semantic Tag",               # 10
+            "Policy",                     # 11
+            "Axis",                       # 12
+            "Reason Code",                # 13
+            "Target Field",               # 14
+            "Test Condition",             # 15
+            "Request Query",              # 16
+            "Request Headers",            # 17
+            "Request Body / Arguments",   # 18
+            "Expected",                   # 19
+            "Actual",                     # 20
+            "Response Msg",               # 21
+            "Exception Type",             # 22
+            "Exception Message",          # 23
+            "Server Crash",               # 24
+            "Server Log Tail",            # 25
+            "Outcome",                    # 26
+            "Failure Cause",              # 27
+            "Duration (s)",               # 28
+            "Error Detail",               # 29
+            "Failure Detail (pytest)",    # 30
         ]
         self._header_row(ws, 2, headers)
 
         col_widths = [
-            5, 28, 12, 24, 34,   # 1-5
-            18, 24, 22,          # 6-8  (Axis 폭 확장)
-            20, 38, 28, 28, 70,  # 9-13
-            28, 28, 38,          # 14-16
-            18, 42, 12, 42,      # 17-20
-            12, 30, 12, 42, 55,  # 21-25  (Failure Cause 30)
+            5, 26, 12, 22, 34,   # 1-5
+            16, 18, 18, 18, 16, 12,  # 6-11
+            22, 22, 18, 42,      # 12-15
+            28, 28, 70,          # 16-18
+            28, 28, 38,          # 19-21
+            18, 42, 12, 42,      # 22-25
+            12, 30, 12, 42, 55,  # 26-30
         ]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
@@ -283,36 +330,20 @@ class ExcelReportBuilder:
             actual_display = self._build_actual_display(item, actual_status)
 
             rule_type = item.get("rule_type") or info["rule_type"]
+            rule_subtype = item.get("rule_subtype", "")
+            endpoint_profile = item.get("endpoint_profile", "")
+            expected_result_type = item.get("expected_result_type", "")
+            semantic_tag = item.get("semantic_tag", "")
+            policy = item.get("policy", "")
+
             axis = item.get("axis", "")
-            # Axis 한글 표시 (가독성 향상)
             axis_display = _AXIS_LABEL.get(axis, axis)
-            # Rule Type 표시: axis 한글 병기 제거 (별도 컬럼에서 보여주므로 중복 X)
-            rule_type_display = rule_type
 
             target_field = item.get("target_param", "")
             condition = item.get("condition") or info["condition"]
 
-            rs = item.get("response_success")
-            if rs is None:
-                rs_display = ""
-            else:
-                rs_display = "true" if rs else "false"
-
             response_msg = item.get("response_msg", "") or ""
-
-            # ── Failure Cause 분류 ───────────────────────────────────
-            try:
-                from tests.helpers.diag import classify_failure_cause
-                failure_cause = classify_failure_cause(
-                    outcome=outcome,
-                    axis=axis,
-                    reason_code=item.get("reason_code", ""),
-                    response_success=rs,
-                    response_error_code=item.get("response_error_code"),
-                    server_crash=bool(item.get("server_crashed")),
-                )
-            except Exception:
-                failure_cause = "PASS" if outcome == "passed" else "알 수 없음"
+            failure_cause = classify_failure_cause_from_item(item)
 
             row_vals = [
                 idx,                                          # 1
@@ -320,26 +351,31 @@ class ExcelReportBuilder:
                 target_type,                                  # 3
                 method_or_function,                           # 4
                 path_or_module,                               # 5
-                rule_type_display,                            # 6
-                axis_display,                                 # 7  한글 포함 표시
-                item.get("reason_code", ""),                  # 8
-                target_field,                                 # 9
-                condition,                                    # 10
-                request_query,                                # 11
-                request_headers,                              # 12
-                request_body_or_args,                         # 13
-                expected_display,                             # 14
-                actual_display,                               # 15
-                response_msg,                                 # 16
-                item.get("exception_type", ""),               # 17
-                item.get("exception_message", ""),            # 18
-                "Y" if item.get("server_crashed") else "",   # 19
-                (item.get("server_log_tail") or "")[:2000],  # 20
-                outcome.upper(),                              # 21
-                failure_cause,                                # 22  ← NEW
-                duration,                                     # 23
-                item.get("error_detail", ""),                 # 24
-                longrepr[:2000] if outcome in {"failed", "broken"} else "",  # 25
+                rule_type,                                    # 6
+                rule_subtype,                                 # 7
+                endpoint_profile,                             # 8
+                expected_result_type,                         # 9
+                semantic_tag,                                 # 10
+                policy,                                       # 11
+                axis_display,                                 # 12
+                item.get("reason_code", ""),                  # 13
+                target_field,                                 # 14
+                condition,                                    # 15
+                request_query,                                # 16
+                request_headers,                              # 17
+                request_body_or_args,                         # 18
+                expected_display,                             # 19
+                actual_display,                               # 20
+                response_msg,                                 # 21
+                item.get("exception_type", ""),               # 22
+                item.get("exception_message", ""),            # 23
+                "Y" if item.get("server_crashed") else "",   # 24
+                (item.get("server_log_tail") or "")[:2000],  # 25
+                outcome.upper(),                              # 26
+                failure_cause,                                # 27
+                duration,                                     # 28
+                item.get("error_detail", ""),                 # 29
+                longrepr[:2000] if outcome in {"failed", "broken"} else "",  # 30
             ]
 
             r = idx + 2
@@ -353,9 +389,8 @@ class ExcelReportBuilder:
             for col in range(1, len(headers) + 1):
                 ws.cell(row=r, column=col).fill = PatternFill(fill_type="solid", fgColor=bg)
 
-            # Failure Cause 컬럼(22)은 별도 진하게 표시
-            fc_cell = ws.cell(row=r, column=22)
-            if failure_cause != "PASS" and failure_cause != "알 수 없음":
+            fc_cell = ws.cell(row=r, column=27)
+            if failure_cause not in {"PASS", "알 수 없음"}:
                 fc_cell.font = Font(bold=True)
 
             
@@ -505,15 +540,21 @@ class ExcelReportBuilder:
                 "nodeid": t.get("nodeid", ""),
                 "outcome": t.get("outcome", "unknown"),
                 "duration": call.get("duration", t.get("duration", 0)),
-                # pytest-json-report: longrepr은 call 단계에 있음
-                # t["call"]["longrepr"] 우선, fallback으로 t["longrepr"] 확인
                 "longrepr": str(
                     call.get("longrepr")
                     or t.get("longrepr")
                     or ""
                 ),
+
+                # tc_meta 기반 핵심 필드
                 "target_type": self._detect_target_type_from_meta(meta),
                 "rule_type": meta.get("rule_type", ""),
+                "rule_subtype": meta.get("rule_subtype", ""),
+                "endpoint_profile": meta.get("endpoint_profile", ""),
+                "semantic_tag": meta.get("semantic_tag", ""),
+                "policy": meta.get("policy", ""),
+                "expected_result_type": meta.get("expected_result_type", ""),
+
                 "target_param": meta.get("target_param", ""),
                 "condition": meta.get("condition", ""),
                 "request_method": meta.get("request_method", ""),
@@ -536,7 +577,8 @@ class ExcelReportBuilder:
                 "exception_message": meta.get("exception_message", ""),
                 "server_crashed": meta.get("server_crashed", False),
                 "server_log_tail": meta.get("server_log_tail", ""),
-                # ── diag 필드 (build_diag + _apply_diag 로 채워짐) ──────────
+
+                # diag merge 대상
                 "axis": "",
                 "reason_code": "",
                 "error_detail": "",
