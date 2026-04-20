@@ -21,6 +21,15 @@ on:
         description: '서버 Base URL (기본값: http://127.0.0.1:8080)'
         required: false
         default: ''
+      reset_semantic_cache:
+        description: 'semantic cache 강제 초기화'
+        required: false
+        default: 'true'
+        type: boolean
+      match_threshold:
+        description: 'match/verify score threshold'
+        required: false
+        default: '0'
 
 defaults:
   run:
@@ -343,6 +352,8 @@ jobs:
       OLLAMA_BASE_URL: http://localhost:11434
       PYTHONIOENCODING: utf-8
       HEALTH_CHECK_PATH: /health
+      RESET_SEMANTIC_CACHE: ${{ inputs.reset_semantic_cache != '' && inputs.reset_semantic_cache || 'true' }}
+      MATCH_THRESHOLD: ${{ inputs.match_threshold != '' && inputs.match_threshold || '0' }}
 
     steps:
       - name: Checkout
@@ -676,6 +687,42 @@ jobs:
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           if (Test-Path "tests\generated\rule") { Remove-Item "tests\generated\rule\*" -Recurse -Force }
           if (Test-Path "tests\generated\ai") { Remove-Item "tests\generated\ai\*" -Recurse -Force }
+      
+      
+      - name: config override 적용
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $configPath = "config.yaml"
+
+          if (-not (Test-Path $configPath)) {
+            if (Test-Path "config\config.yaml") {
+              $configPath = "config\config.yaml"
+            } else {
+              throw "config.yaml 파일을 찾을 수 없습니다."
+            }
+          }
+
+          Write-Host "[Config] using $configPath"
+          $text = Get-Content $configPath -Raw -Encoding UTF8
+
+          $text = [regex]::Replace(
+            $text,
+            '(?m)^(\s*reset_cache:\s*).*$',
+            "`${1}$env:RESET_SEMANTIC_CACHE"
+          )
+
+          $text = [regex]::Replace(
+            $text,
+            '(?m)^(\s*match_threshold:\s*).*$',
+            "`${1}$env:MATCH_THRESHOLD"
+          )
+
+          Set-Content -Path $configPath -Value $text -Encoding UTF8
+
+          Write-Host "[Config] reset_cache=$env:RESET_SEMANTIC_CACHE"
+          Write-Host "[Config] match_threshold=$env:MATCH_THRESHOLD"
+          
 
       - name: TC 생성 (generate)
         run: |

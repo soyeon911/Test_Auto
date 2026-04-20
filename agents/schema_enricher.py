@@ -7,6 +7,13 @@ from pathlib import Path
 from typing import Any
 
 
+# 캐시 버전.
+# semantic 정책이 바뀌면 이 값을 올려서 예전 캐시를 무효화한다.
+SEMANTIC_SCHEMA_VERSION = "qfe_semantic_v2"
+
+
+# 전체적으로 "알고 있는" semantic tag 집합.
+# 단, 실제 활성화 여부는 _QFE_ACTIVE_TAGS에서 한 번 더 제한한다.
 KNOWN_TAGS: frozenset[str] = frozenset({
     "plain_string",
     "identifier",
@@ -16,24 +23,49 @@ KNOWN_TAGS: frozenset[str] = frozenset({
     "enum_mode",
     "config_json",
     "path_user_id",
-    # "integer_count",
     "channel_count",
     "boolean_flag",
+    "numeric_id",
+    # generic tags (known but disabled by default in QFE)
     "datetime_string",
     "email_string",
     "password_string",
     "file_path",
     "url_string",
     "uuid_string",
+})
+
+
+# QFE Swagger에서 실제로 관찰되었거나, 현재 generator가 지원해야 하는 tag만 활성화.
+# 이 집합에 없는 tag는 최종적으로 plain_string으로 fallback.
+_QFE_ACTIVE_TAGS: frozenset[str] = frozenset({
+    "plain_string",
+    "identifier",
+    "base64_image",
+    "base64_template",
+    "threshold_numeric",
+    "enum_mode",
+    "config_json",
+    "path_user_id",
+    "channel_count",
+    "boolean_flag",
     "numeric_id",
+})
+
+
+# QFE Swagger에서 허용할 Swagger format.
+# format이 있어도 여기 없는 값은 semantic 확정 근거로 사용하지 않는다.
+_QFE_ACTIVE_FORMATS: frozenset[str] = frozenset({
+    "byte",
+    "binary",
+    "int32",
+    "int64",
 })
 
 
 class SchemaEnricher:
     """
-    Backward-compatible name, but now acts as a schema enricher.
-
-    It injects:
+    Enriches parsed endpoint schemas with:
       - semantic_tag
       - x_constraints
       - x_probe_policy
@@ -50,7 +82,6 @@ class SchemaEnricher:
         )
         self._load_file_cache()
 
-        # 캐시 강제 초기화
         if config.get("tc_generation", {}).get("semantic_tagging", {}).get("reset_cache"):
             self._mem = {}
             if self._cache_path.exists():
@@ -60,11 +91,10 @@ class SchemaEnricher:
                     pass
 
     def _load_file_cache(self) -> None:
-        """Load full enrich cache from disk (JSON)."""
         if not self._cache_path.exists():
             return
         try:
-            with open(self._cache_path, 'r', encoding='utf-8') as f:
+            with open(self._cache_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
                     for k, v in data.items():
@@ -72,15 +102,11 @@ class SchemaEnricher:
                             self._mem[k] = v
         except Exception:
             pass
-    
-    # 저장 시 semantic tag만 남기고 다시 읽을 때 x_constraints, x_probe_policy가 사라질 수 있는 문제점
-    # 한 번 캐시된 field는 다음 실행부터 semantic_tag만 남은 반쪽 데이터로 재사용될 수 있으며 이럴 경우 boundary/policy 생성이 흔들림
 
     def _save_file_cache(self) -> None:
-        """Save full enrich cache to disk (JSON)."""
         self._cache_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with open(self._cache_path, 'w', encoding='utf-8') as f:
+            with open(self._cache_path, "w", encoding="utf-8") as f:
                 json.dump(self._mem, f, indent=2, ensure_ascii=False)
         except Exception:
             pass
@@ -123,16 +149,9 @@ class SchemaEnricher:
     # ──────────────────────────────────────────────────────────────
 
     def _tag_nested_schema(self, schema: dict, field_location: str = "body") -> None:
-        """
-        Recursively enrich:
-          - object.properties
-          - array.items
-          - array.items.properties
-        """
         if not schema:
             return
 
-        # object properties
         properties = schema.get("properties", {})
         for field_name, field_schema in properties.items():
             enriched = self._enrich_field(
@@ -144,10 +163,8 @@ class SchemaEnricher:
             field_schema.update(enriched)
             self._tag_nested_schema(field_schema, field_location=field_location)
 
-        # array items
         items = schema.get("items")
         if isinstance(items, dict):
-            # enrich array item object itself if meaningful
             self._tag_nested_schema(items, field_location=field_location)
 
     def _enrich_field(
@@ -202,68 +219,72 @@ class SchemaEnricher:
         field_location: str,
         field_description: str,
     ) -> tuple[str, list[str]]:
-        # Priority 0: spec author가 x-semantic-tag 확장 속성으로 명시한 경우 최우선 신뢰
+        # Priority 0: x-semantic-tag 명시값
         explicit_tag = schema.get("x-semantic-tag") or schema.get("x_semantic_tag")
         if explicit_tag and explicit_tag in KNOWN_TAGS:
-            return explicit_tag, ["x-semantic-tag"]
+            normalized = self._normalize_tag(explicit_tag)
+            return normalized, ["x-semantic-tag"]
 
-        # Priority 1: Swagger format 필드 기반 확정 태깅
+        # Priority 1: Swagger format
         swagger_tag = self._tag_from_swagger_format(name, schema)
         if swagger_tag:
-            return swagger_tag, ["swagger_format"]
+            normalized = self._normalize_tag(swagger_tag)
+            return normalized, ["swagger_format"]
 
-        # Priority 2: 휴리스틱 (강화된 word-boundary 기반)
+        # Priority 2: heuristic
         tag = self._heuristic(name, schema, field_location, field_description)
-        return tag, ["field_name", "description", "example", "format", "type"]
+        normalized = self._normalize_tag(tag)
+        return normalized, ["field_name", "description", "example", "format", "type"]
 
-    # ── Swagger format 우선 태깅 ─────────────────────────────────────
-    # format 필드가 명시된 경우 heuristic보다 신뢰도가 높으므로 먼저 처리한다.
+    def _normalize_tag(self, tag: str) -> str:
+        # unknown / inactive tag는 전부 plain_string으로 내린다.
+        if not tag:
+            return "plain_string"
+        if tag not in KNOWN_TAGS:
+            return "plain_string"
+        if tag not in _QFE_ACTIVE_TAGS:
+            return "plain_string"
+        return tag
+
+    # ──────────────────────────────────────────────────────────────
+    # swagger-format tagging
+    # ──────────────────────────────────────────────────────────────
 
     _FORMAT_TAG_MAP: dict[str, str] = {
-        "date-time":  "datetime_string",
-        "date":       "datetime_string",
-        "time":       "datetime_string",
-        "email":      "email_string",
-        "uuid":       "uuid_string",
-        "uri":        "url_string",
-        "url":        "url_string",
-        "hostname":   "url_string",
-        "ipv4":       "url_string",
-        "ipv6":       "url_string",
-        "password":   "password_string",
+        # QFE에서 바로 의미를 부여할 수 있는 것은 최소화
+        # byte / binary는 아래에서 base64_image / base64_template로 세분화
     }
 
     def _tag_from_swagger_format(self, name: str, schema: dict) -> str:
         fmt = (schema.get("format") or "").lower()
         n = name.lower()
 
-        # format: byte / binary → base64 계열. image vs template 구분
+        if not fmt or fmt not in _QFE_ACTIVE_FORMATS:
+            return ""
+
+        # format: byte / binary → base64 계열
         if fmt in {"byte", "binary"}:
             desc_name_blob = f"{schema.get('description', '')} {n}".lower()
-            if any(x in desc_name_blob for x in ("template", "feature", "vector", "embedding")):
+            if any(x in desc_name_blob for x in ("template", "feature", "vector", "embedding", "face_data")):
                 return "base64_template"
             return "base64_image"
 
-        # format 직접 매핑
+        # format: int32/int64 + ID 패턴
+        if fmt in {"int32", "int64"}:
+            if re.search(r"(^|_)(user|face|group|template|device|person|subject)_?id$", n):
+                return "numeric_id"
+            if n.endswith("_id") or n == "id":
+                return "numeric_id"
+
         mapped = self._FORMAT_TAG_MAP.get(fmt)
         if mapped:
             return mapped
 
-        # format: int32/int64 → ID 패턴 (format 명시 + name 패턴 조합)
-        if fmt in {"int32", "int64"}:
-            if re.search(r"(^|_)(user|face|group|template|device|person|subject)_?id$", n):
-                return "numeric_id"
-
         return ""
 
-    # ── 강화된 휴리스틱 ──────────────────────────────────────────────
-    # 변경 원칙:
-    #   1. description/blob substring 매칭 → field name 기반 word-boundary 우선
-    #   2. 단일 키워드 매칭 제거 → 복수 신호 조합 요구
-    #   3. threshold_numeric: ftype==number 전용 (integer 제외)
-    #   4. url_string: name에 url/uri 있거나 format:uri → 아니면 미분류
-    #   5. file_path: name에 file/path 있고 + 파일 확장자/디렉토리 컨텍스트 필요
-    #   6. base64: format:byte 없으면 name+desc 양쪽에 근거 필요
+    # ──────────────────────────────────────────────────────────────
+    # heuristic tagging
+    # ──────────────────────────────────────────────────────────────
 
     def _heuristic(
         self,
@@ -273,16 +294,14 @@ class SchemaEnricher:
         field_description: str,
     ) -> str:
         ftype = schema.get("type", "string")
-        fmt = schema.get("format", "").lower()
         enum_vals = schema.get("enum")
         desc = f"{schema.get('description', '')} {field_description}".lower()
-        example = str(schema.get("example", "")).lower()
         n = name.lower()
 
         if enum_vals:
             return "enum_mode"
 
-        # path param ID 패턴
+        # path param ID
         if field_location == "path" and re.search(
             r"(^|_)(user|face|group|template|device|person|subject)_?id$", n
         ):
@@ -290,75 +309,39 @@ class SchemaEnricher:
                 "numeric_id" if ftype == "integer" else "identifier"
             )
 
-        # ── base64 계열 ────────────────────────────────────────────
-        # 조건: name 또는 desc 모두에 base64/encoded/binary 근거가 있어야 함
-        # (description에만 있는 경우 오탐 방지)
-        name_has_b64 = any(x in n for x in ("base64", "encoded", "image", "template", "photo", "img"))
-        desc_has_b64 = any(x in desc for x in ("base64", "encoded", "binary", "bytes", "blob"))
-        if name_has_b64 or (desc_has_b64 and ftype == "string"):
+        # base64 / image / template
+        name_has_blob_signal = any(x in n for x in ("base64", "encoded", "image", "template", "photo", "img"))
+        desc_has_blob_signal = any(x in desc for x in ("base64", "encoded", "binary", "bytes", "blob"))
+
+        if ftype == "string" and (name_has_blob_signal or desc_has_blob_signal):
             desc_name = f"{desc} {n}"
             if any(x in desc_name for x in ("template", "feature", "vector", "embedding", "face_data")):
                 return "base64_template"
-            if any(x in desc_name for x in ("image", "img", "photo", "jpeg", "jpg", "png", "picture")):
+            if any(x in desc_name for x in ("image", "img", "photo", "jpeg", "jpg", "png", "picture", "raw")):
                 return "base64_image"
 
-        # ── email ──────────────────────────────────────────────────
-        # field name에 email이 있거나, format:email (format은 _tag_from_swagger_format에서 먼저 잡힘)
-        if re.search(r"(^|_)e?mail(_|$)", n):
-            return "email_string"
-
-        # ── password ───────────────────────────────────────────────
-        if any(x in n for x in ("password", "passwd", "secret", "credential")):
-            return "password_string"
-
-        # ── url/uri ────────────────────────────────────────────────
-        # name에 url/uri가 있어야 분류 (description의 "endpoint" 등은 미분류)
-        if re.search(r"(^|_)(url|uri)(_|$)", n):
-            return "url_string"
-
-        # ── file path ─────────────────────────────────────────────
-        # name에 file/path가 있고 파일 컨텍스트(확장자, dir 등)가 추가로 필요
-        if any(x in n for x in ("file_path", "filepath", "file_name", "filename", "dir_path", "dirpath")):
-            return "file_path"
-        if any(x in n for x in ("file", "folder", "directory")) and any(
-            x in desc for x in ("path", "dir", ".json", ".cfg", ".yaml", ".yml", "file")
-        ):
-            return "file_path"
-
-        # ── datetime ───────────────────────────────────────────────
-        if any(x in n for x in ("datetime", "timestamp", "date_time", "created_at", "updated_at")):
-            return "datetime_string"
-
-        # ── uuid ───────────────────────────────────────────────────
-        if "uuid" in n or fmt == "uuid":
-            return "uuid_string"
-
-        # ── ID 패턴 ────────────────────────────────────────────────
+        # id / identifier
         if re.search(r"(^|_)(user|face|group|template|device|person|subject)_?id$", n):
             return "numeric_id" if ftype == "integer" else "identifier"
         if n.endswith("_id") or n == "id":
             return "numeric_id" if ftype == "integer" else "identifier"
 
-        # ── channel count ─────────────────────────────────────────
+        # channel
         if ftype == "integer" and "channel" in n:
             return "channel_count"
 
-        # ── threshold_numeric ─────────────────────────────────────
-        # ftype==number(float) 전용. integer는 범용 카운터일 수 있으므로 제외.
-        # name 또는 description에 threshold/score/confidence 등이 있어야 함.
+        # threshold / score / confidence
         if ftype == "number" and (
             any(x in n for x in ("threshold", "score", "confidence", "ratio", "similarity"))
             or any(x in desc for x in ("threshold", "similarity score", "confidence score"))
         ):
             return "threshold_numeric"
 
-        # 일반 number는 plain_string으로 fallback (threshold로 오분류 방지)
-        if ftype == "number":
-            return "plain_string"
-
+        # boolean
         if ftype == "boolean":
             return "boolean_flag"
 
+        # config-like json string
         if ftype == "string":
             if any(x in n for x in ("json", "config", "setting", "option")):
                 return "config_json"
@@ -401,14 +384,10 @@ class SchemaEnricher:
         if semantic_tag in {"base64_image", "base64_template"}:
             inferred_encoding = "base64"
 
-        if semantic_tag == "email_string":
-            inferred_format = "email"
-        elif semantic_tag == "datetime_string":
-            inferred_format = "date-time"
-        elif semantic_tag == "uuid_string":
-            inferred_format = "uuid"
-        elif semantic_tag == "url_string":
-            inferred_format = "uri"
+        # QFE 활성 tag 기준에서는 email/url/uuid/datetime는 plain_string으로 내려오므로
+        # 여기서는 실제 활성 semantic만 처리하면 된다.
+        if semantic_tag == "threshold_numeric":
+            inferred_format = "numeric-threshold"
 
         return {
             "minimum": explicit_min if explicit_min is not None else inferred_min,
@@ -441,11 +420,11 @@ class SchemaEnricher:
         has_explicit_range = min_source == "explicit" or max_source == "explicit"
         has_inferred_range = min_source == "description" or max_source == "description"
 
-        if semantic_tag in {"base64_image", "base64_template", "email_string", "uuid_string", "datetime_string", "url_string"}:
+        if semantic_tag in {"base64_image", "base64_template"}:
             semantic_policy = "must_fail"
         elif semantic_tag == "threshold_numeric":
             semantic_policy = "must_fail" if (has_explicit_range or has_inferred_range) else "probe_only"
-        elif semantic_tag in {"integer_count", "channel_count", "numeric_id"}:
+        elif semantic_tag in {"channel_count", "numeric_id", "path_user_id"}:
             semantic_policy = "probe_only"
         else:
             semantic_policy = "probe_only"
@@ -470,22 +449,16 @@ class SchemaEnricher:
 
         lower = text.lower().strip()
 
-        # ±90 degrees → (-90, 90)
         pm = re.search(r"[±+-]\s*(\d+(?:\.\d+)?)", lower)
         if pm and ("degree" in lower or "angle" in lower or "range" in lower):
             v = float(pm.group(1))
             return (-v, v)
 
         patterns = [
-            # (0-100000), (0 ~ 100000)
             r"\(\s*(-?\d+(?:\.\d+)?)\s*[-~]\s*(-?\d+(?:\.\d+)?)\s*\)",
-            # range: 0 to 100000 / range 0-100000
             r"range\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*(?:to|[-~])\s*(-?\d+(?:\.\d+)?)",
-            # between 0 and 100000
             r"between\s*(-?\d+(?:\.\d+)?)\s*and\s*(-?\d+(?:\.\d+)?)",
-            # 0 <= x <= 100000
             r"(-?\d+(?:\.\d+)?)\s*<=\s*[a-z_]+\s*<=\s*(-?\d+(?:\.\d+)?)",
-            # generic 0 to 100000 / 0-100000 / 0~100000
             r"(-?\d+(?:\.\d+)?)\s*(?:to|[-~])\s*(-?\d+(?:\.\d+)?)",
         ]
 
@@ -501,10 +474,12 @@ class SchemaEnricher:
     @staticmethod
     def _cache_key(name: str, schema: dict, field_location: str, field_description: str) -> str:
         parts = (
+            SEMANTIC_SCHEMA_VERSION,
             name,
             schema.get("type", ""),
             schema.get("format", ""),
             (field_description or "")[:80],
             str(sorted(schema.get("enum", []) or [])),
+            str(schema.get("x-semantic-tag") or schema.get("x_semantic_tag") or ""),
         )
         return "|".join(str(p) for p in parts)

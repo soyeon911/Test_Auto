@@ -3,12 +3,13 @@ Rule-Based TC Generator — deterministic, zero-AI layer.
 
 For each API endpoint it generates pytest functions covering:
 
-  positive         — one valid happy-path request
-  missing_required — omit each required field/param
-  wrong_type       — send wrong type per param/field
-  boundary         — schema/enriched min/max boundary values
-  invalid_enum     — unlisted value for enum params/body
-  semantic_probe   — semantic-tag-specific invalid / exploratory probes
+  positive           — endpoint-aware positive / probe_only checks
+  missing_required   — omit each required field/param
+  wrong_type         — send wrong type per param/field
+  boundary           — schema/enriched min/max boundary values
+  invalid_enum       — unlisted value for enum params/body
+  semantic_probe     — semantic-tag-specific invalid / exploratory probes
+  raw_image_relation — cross-field relation checks for raw image endpoints
 
 The output is a plain Python code string, ready to be written to a .py file
 or fed as context to the AI augmentation step.
@@ -16,22 +17,37 @@ or fed as context to the AI augmentation step.
 
 from __future__ import annotations
 
+import base64
 import re
 import textwrap
 from typing import Any
 
 
-# 0415 수정사항
-"""
-현재 semantic tag 기본값을 range/type보다 먼저 써서 TC 생성 -> matching-threshold를 깨뜨림
-수정 로직
-1. explicit/inferred range가 있으면 그 값을 먼저 사용
-2. integer면 int, number면 float
-3. 그 다음에만 tag fallback
-"""
+# ──────────────────────────────────────────────────────────────
+# semantic / fixture policy
+# ──────────────────────────────────────────────────────────────
 
+SUPPORTED_QFE_TAGS: frozenset[str] = frozenset({
+    "plain_string",
+    "identifier",
+    "base64_image",
+    "base64_template",
+    "threshold_numeric",
+    "enum_mode",
+    "config_json",
+    "path_user_id",
+    "channel_count",
+    "boolean_flag",
+    "numeric_id",
+})
 
-# ─── type helpers ─────────────────────────────────────────────────────────────
+SUPPORTED_QFE_PROBE_TAGS: frozenset[str] = frozenset({
+    "base64_image",
+    "base64_template",
+    "threshold_numeric",
+    "numeric_id",
+    "boolean_flag",
+})
 
 _GOOD: dict[str, Any] = {
     "integer": 1,
@@ -42,32 +58,60 @@ _GOOD: dict[str, Any] = {
     "object": {},
 }
 
+# generic good values. endpoint-specific positives may override semantics later.
 _GOOD_BY_TAG: dict[str, Any] = {
     "plain_string": "hello",
     "identifier": "item_001",
-    "base64_image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64_image": (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+        "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    ),
     "base64_template": "AAEC",
-    # "threshold_float": 0.7,
     "threshold_numeric": 1,
     "config_json": "{}",
     "path_user_id": 1,
-    # "integer_count": 10,
-    # "integer_count": 1,
     "channel_count": 3,
     "boolean_flag": True,
-    "datetime_string": "2024-01-01T00:00:00Z",
-    "email_string": "test@example.com",
-    "password_string": "Test1234!",
-    "file_path": "/tmp/test.txt",
-    "url_string": "https://example.com",
-    "uuid_string": "00000000-0000-0000-0000-000000000001",
     "numeric_id": 1,
 }
+
+# 1×1 white PNG — schema-valid but contains no face
+_TINY_WHITE_IMAGE_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+# raw image fixtures
+_RAW_W, _RAW_H, _RAW_C = 4, 4, 3
+_RAW_IMG_VALID_B64 = base64.b64encode(bytes(_RAW_W * _RAW_H * _RAW_C)).decode()
+_RAW_IMG_MISMATCH_B64 = base64.b64encode(bytes(10)).decode()
+
+# endpoint profiles
+_MATCH_VERDICT_PATHS: frozenset[str] = frozenset({
+    "/api/v2/match",
+    "/api/v2/match-images",
+    "/api/v2/verify",
+    "/api/v2/verify-template",
+})
+
+_FACE_OPERATION_PATHS: frozenset[str] = frozenset({
+    "/api/v2/detect",
+    "/api/v2/hpe",
+    "/api/v2/mask",
+    "/api/v2/extract",
+    "/api/v2/fam",
+    "/api/v2/enroll",
+    "/api/v2/identify",
+    "/api/v2/identify-template",
+})
+
+_RAW_IMAGE_FIELDS: frozenset[str] = frozenset({"width", "height", "channel", "image_data"})
 
 _SEMANTIC_PROBES: dict[str, list[dict[str, Any]]] = {
     "base64_image": [
         {"value": "not_base64!@#", "label": "invalid_b64", "policy": "must_fail"},
         {"value": "", "label": "empty_b64", "policy": "must_fail"},
+        {"value": _TINY_WHITE_IMAGE_B64, "label": "no_face_image", "policy": "probe_only"},
     ],
     "base64_template": [
         {"value": "not_base64!@#", "label": "invalid_b64", "policy": "must_fail"},
@@ -82,34 +126,15 @@ _SEMANTIC_PROBES: dict[str, list[dict[str, Any]]] = {
         {"value": -1, "label": "negative_id", "policy": "probe_only"},
         {"value": 0, "label": "zero_id", "policy": "probe_only"},
     ],
-    # "integer_count": [
-    #     {"value": -1, "label": "negative", "policy": "probe_only"},
-    #     {"value": 0, "label": "zero", "policy": "probe_only"},
-    #     {"value": 10001, "label": "overflow", "policy": "probe_only"},
-    # ],
-    "email_string": [
-        {"value": "not_an_email", "label": "invalid_fmt", "policy": "must_fail"},
-        {"value": "@nodomain", "label": "malformed", "policy": "must_fail"},
-    ],
-    "uuid_string": [
-        {"value": "not-a-uuid", "label": "invalid_fmt", "policy": "must_fail"},
-        {"value": "", "label": "empty", "policy": "must_fail"},
-    ],
-    "datetime_string": [
-        {"value": "not_a_date", "label": "invalid_fmt", "policy": "must_fail"},
-    ],
-    "url_string": [
-        {"value": "not_a_url", "label": "invalid_fmt", "policy": "must_fail"},
-    ],
     "boolean_flag": [
         {"value": "not_boolean", "label": "wrong_type", "policy": "must_fail"},
     ],
 }
 
-# (semantic_tag, probe_label) → (axis, reason_code)
 _SEMANTIC_PROBE_DIAG: dict[tuple[str, str], tuple[str, str]] = {
     ("base64_image", "invalid_b64"): ("domain", "invalid_base64"),
     ("base64_image", "empty_b64"): ("domain", "invalid_base64"),
+    ("base64_image", "no_face_image"): ("domain", "no_face_detected"),
     ("base64_template", "invalid_b64"): ("domain", "invalid_base64"),
     ("base64_template", "empty_b64"): ("domain", "invalid_base64"),
     ("threshold_numeric", "below_range"): ("domain", "range_violation"),
@@ -117,15 +142,6 @@ _SEMANTIC_PROBE_DIAG: dict[tuple[str, str], tuple[str, str]] = {
     ("threshold_numeric", "wrong_type"): ("schema", "type_mismatch"),
     ("numeric_id", "negative_id"): ("domain", "range_violation"),
     ("numeric_id", "zero_id"): ("domain", "range_violation"),
-    ("integer_count", "negative"): ("domain", "range_violation"),
-    ("integer_count", "zero"): ("domain", "range_violation"),
-    ("integer_count", "overflow"): ("domain", "range_violation"),
-    ("email_string", "invalid_fmt"): ("schema", "query_param_invalid"),
-    ("email_string", "malformed"): ("schema", "query_param_invalid"),
-    ("uuid_string", "invalid_fmt"): ("schema", "query_param_invalid"),
-    ("uuid_string", "empty"): ("schema", "query_param_invalid"),
-    ("datetime_string", "invalid_fmt"): ("schema", "query_param_invalid"),
-    ("url_string", "invalid_fmt"): ("schema", "query_param_invalid"),
     ("boolean_flag", "wrong_type"): ("schema", "type_mismatch"),
 }
 
@@ -138,15 +154,12 @@ _WRONG: dict[str, Any] = {
     "object": "not_an_object",
 }
 
-# 암묵적 형변환이 가능한 wrong-type 후보
-# ex) integer <- "1", boolean <- "true"
 _COERCIBLE_WRONG: dict[str, list[Any]] = {
     "integer": ["1", "0", "-1"],
     "number": ["1.0", "0.0", "-0.1", "1e3"],
     "boolean": ["true", "false", "1", "0"],
 }
 
-# Python target fallback boundary probes
 _BOUNDARY_INT = [0, -1, 2_147_483_647]
 
 
@@ -190,10 +203,22 @@ class RuleBasedTCGenerator:
         self.enabled_rules: set[str] = set(
             rb_cfg.get(
                 "include",
-                ["positive", "missing_required", "wrong_type", "boundary", "invalid_enum", "semantic_probe"],
+                [
+                    "positive",
+                    "missing_required",
+                    "wrong_type",
+                    "boundary",
+                    "invalid_enum",
+                    "semantic_probe",
+                    "raw_image_relation",
+                ],
             )
         )
         self.error_mode: str = config.get("server", {}).get("error_response_mode", "standard")
+        self.match_threshold: float = float(
+            config.get("server", {}).get("match_threshold", 0.0)
+        )
+        self._seen_cases: set[tuple[Any, ...]] = set()
 
     # ──────────────────────────────────────────────────────────────
     # public
@@ -206,18 +231,8 @@ class RuleBasedTCGenerator:
         return self._generate_api(endpoint)
 
     # ──────────────────────────────────────────────────────────────
-    # generic helpers
+    # helpers
     # ──────────────────────────────────────────────────────────────
-
-    def _safe_json_block(self, target_var: str = "resp", out_var: str = "body") -> str:
-        return textwrap.dedent(
-            f"""\
-            try:
-                {out_var} = {target_var}.json()
-            except ValueError:
-                pytest.fail(f"Expected JSON response, got: {{{target_var}.text[:300]}}")
-        """
-        )
 
     def _schema_constraints(self, schema: dict) -> dict[str, Any]:
         return schema.get("x_constraints", {}) or {}
@@ -225,13 +240,42 @@ class RuleBasedTCGenerator:
     def _probe_policy(self, schema: dict) -> dict[str, Any]:
         return schema.get("x_probe_policy", {}) or {}
 
+    def _normalize_tag(self, schema: dict) -> str:
+        tag = schema.get("semantic_tag", "") or ""
+        return tag if tag in SUPPORTED_QFE_TAGS else "plain_string"
+
+    def _dedup_key(
+        self,
+        method: str,
+        path: str,
+        target_field: str,
+        value_repr: str,
+        reason_code: str,
+        rule_type: str,
+    ) -> tuple[Any, ...]:
+        return (method.upper(), path, target_field, value_repr, reason_code, rule_type)
+
+    def _register_case(
+        self,
+        method: str,
+        path: str,
+        target_field: str,
+        value_repr: str,
+        reason_code: str,
+        rule_type: str,
+    ) -> bool:
+        key = self._dedup_key(method, path, target_field, value_repr, reason_code, rule_type)
+        if key in self._seen_cases:
+            return False
+        self._seen_cases.add(key)
+        return True
+
     def _range_cases(self, schema: dict) -> list[dict[str, Any]]:
         cons = self._schema_constraints(schema)
         minimum = cons.get("minimum")
         maximum = cons.get("maximum")
         policy = self._probe_policy(schema).get("range_policy", "none")
 
-        # swagger의 example를 경계값으로 추출
         example = cons.get("example")
         if example is None:
             example = schema.get("example")
@@ -265,14 +309,11 @@ class RuleBasedTCGenerator:
 
         if isinstance(example, (int, float)):
             step = 1 if isinstance(example, int) else 0.1
-
-            # example 자체는 정상값 anchor
             cases.append({"value": example, "label": "example", "policy": "must_pass"})
 
             lower_example = example - step
             upper_example = example + step
 
-            # range가 있으면 안쪽에 있을 때만 must_pass, 아니면 probe_only
             if minimum is None or lower_example >= minimum:
                 cases.append({"value": lower_example, "label": "below_example", "policy": "must_pass"})
             else:
@@ -404,14 +445,12 @@ class RuleBasedTCGenerator:
         request_body: dict | None,
         expected_status_display: str,
         rule_type: str,
+        rule_subtype: str = "",
+        endpoint_profile: str = "",
+        semantic_tag: str = "",
+        policy: str = "",
+        expected_result_type: str = "",
     ) -> str:
-        """
-        Generate a complete test function with:
-          - try/except wrapping (catches RequestException for runtime diag)
-          - resp.json() parsing → body dict
-          - build_diag() + attach_diag() for structured diagnosis
-          - the actual assertion inside the try block
-        """
         indented_assert = textwrap.indent(assertion_str.rstrip("\n"), "        ")
         meta_block = (
             f"    request_query = {request_query!r}\n"
@@ -422,6 +461,11 @@ class RuleBasedTCGenerator:
             f"    request_url = f\"{{base_url}}{request_path}\"\n"
             f"    request.node.user_properties.append((\"tc_meta\", {{\n"
             f"        \"rule_type\": {rule_type!r},\n"
+            f"        \"rule_subtype\": {rule_subtype!r},\n"
+            f"        \"endpoint_profile\": {endpoint_profile!r},\n"
+            f"        \"semantic_tag\": {semantic_tag!r},\n"
+            f"        \"policy\": {policy!r},\n"
+            f"        \"expected_result_type\": {expected_result_type!r},\n"
             f"        \"target_param\": {target_field!r},\n"
             f"        \"condition\": {test_condition!r},\n"
             f"        \"request_method\": request_method,\n"
@@ -486,7 +530,7 @@ class RuleBasedTCGenerator:
 
     def _good_value(self, name: str, schema: dict) -> Any:
         cons = self._schema_constraints(schema)
-        tag = schema.get("semantic_tag", "")
+        tag = self._normalize_tag(schema)
         ftype = schema.get("type", "string")
 
         if ftype == "integer":
@@ -529,11 +573,6 @@ class RuleBasedTCGenerator:
         return _GOOD.get(ftype, "test")
 
     def _wrong_values(self, schema: dict) -> list[dict[str, Any]]:
-        """
-        wrong_type 축을 2단계로 나눈다.
-        1) strict: 명백히 잘못된 타입 (must_fail)
-        2) coercible: 서버/프레임워크가 암묵 변환할 수 있는 타입 (기본 probe_only)
-        """
         ftype = schema.get("type", "string")
         cases: list[dict[str, Any]] = []
 
@@ -559,6 +598,25 @@ class RuleBasedTCGenerator:
             )
 
         return cases
+
+    # ──────────────────────────────────────────────────────────────
+    # endpoint profile helpers
+    # ──────────────────────────────────────────────────────────────
+
+    def _is_raw_image_relation_endpoint(self, req_body: dict | None) -> bool:
+        if not req_body:
+            return False
+        props = set((req_body.get("schema") or {}).get("properties", {}).keys())
+        return _RAW_IMAGE_FIELDS.issubset(props)
+
+    def _get_endpoint_profile(self, path: str, req_body: dict | None) -> str:
+        if path in _MATCH_VERDICT_PATHS:
+            return "match_verdict"
+        if self._is_raw_image_relation_endpoint(req_body):
+            return "raw_image"
+        if path in _FACE_OPERATION_PATHS:
+            return "face_operation"
+        return "default"
 
     # ──────────────────────────────────────────────────────────────
     # API generation
@@ -589,6 +647,8 @@ class RuleBasedTCGenerator:
             blocks.extend(self._invalid_enum(op_id, method, path, params, req_body))
         if "semantic_probe" in self.enabled_rules:
             blocks.extend(self._semantic_probe(op_id, method, path, params, req_body))
+        if "raw_image_relation" in self.enabled_rules:
+            blocks.extend(self._raw_image_relation(op_id, method, path, params, req_body))
 
         return "\n\n\n".join(b for b in blocks if b)
 
@@ -696,28 +756,6 @@ class RuleBasedTCGenerator:
                         )
                     )
 
-        for p in all_params:
-            if not p.get("nullable"):
-                continue
-            fname = f"test_{op_id}_none_{_safe_name(p['name'])}"
-            args_repr = ", ".join(
-                f"{pp['name']}={repr(None) if pp['name'] == p['name'] else repr(good_val(pp))}"
-                for pp in required_params
-            )
-            blocks.append(
-                textwrap.dedent(
-                    f"""\
-                def {fname}():
-                    \"\"\"[rule:nullable] '{p['name']}' is Optional — None must be accepted.\"\"\"
-                    import {module_name}
-                    try:
-                        {module_name}.{func_name}({args_repr})
-                    except (ValueError, RuntimeError):
-                        pass
-            """
-                )
-            )
-
         if "invalid_enum" in self.enabled_rules:
             for p in all_params:
                 enum_vals = p["schema"].get("enum")
@@ -757,15 +795,21 @@ class RuleBasedTCGenerator:
         req_body: dict | None,
         success_statuses: list[int],
     ) -> str:
+        profile = self._get_endpoint_profile(path, req_body)
+        if profile == "match_verdict":
+            return self._positive_match_verdict(op_id, method, path, params, req_body, success_statuses)
+        if profile == "face_operation":
+            return self._positive_face_operation(op_id, method, path, params, req_body, success_statuses)
+        if profile == "raw_image":
+            return self._positive_raw_image(op_id, method, path, params, req_body, success_statuses)
+
         path_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "path"
+            for p in params if p["in"] == "path"
         }
         query_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "query" and p.get("required")
+            for p in params if p["in"] == "query" and p.get("required")
         }
         body = self._build_valid_body(req_body)
 
@@ -797,6 +841,182 @@ class RuleBasedTCGenerator:
             request_body=body,
             expected_status_display=f"200 / {exp_app}",
             rule_type="positive",
+            rule_subtype="positive_default",
+            endpoint_profile=profile,
+            expected_result_type="expected_pass",
+        )
+
+    def _positive_match_verdict(
+        self,
+        op_id: str,
+        method: str,
+        path: str,
+        params: list[dict],
+        req_body: dict | None,
+        success_statuses: list[int],
+    ) -> str:
+        path_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "path"
+        }
+        query_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "query" and p.get("required")
+        }
+        body = self._build_valid_body(req_body)
+        resolved_path = _build_url(path, path_params)
+        call = _render_call(method, path, path_params, query_params, body)
+
+        if "verify" in path:
+            score_field = "match_score"
+            verdict_field = "verified"
+        else:
+            score_field = "match_score"
+            verdict_field = None
+
+        assertion = self._qfe_success_assertion() + self._match_domain_assertion(
+            score_field=score_field,
+            verdict_field=verdict_field,
+        )
+
+        exp_app = f"success=true, error_code>=0, data.{score_field}=number"
+
+        if verdict_field:
+            exp_app += f", data.{verdict_field}=bool, score-threshold consistency"
+
+        return self._api_test_block(
+            fname=f"test_{op_id}_positive",
+            docstring="[rule:positive] Match/verify — execution success + domain score validation.",
+            call_str=call,
+            assertion_str=assertion,
+            axis="state",
+            reason_code="precondition_not_met",
+            target_field="",
+            test_condition=(
+                f"Happy path — valid request; expects execution success and domain validation "
+                f"for data.{score_field}"
+            ),
+            expected_http="200",
+            expected_app=exp_app,
+            error_detail="state.precondition_not_met",
+            request_method=method,
+            request_path=resolved_path,
+            request_query=query_params,
+            request_headers=None,
+            request_body=body,
+            expected_status_display=f"200 / {exp_app}",
+            rule_type="positive",
+            rule_subtype="positive_outcome",
+            endpoint_profile="match_verdict",
+            expected_result_type="expected_pass",
+        )
+
+    def _positive_face_operation(
+        self,
+        op_id: str,
+        method: str,
+        path: str,
+        params: list[dict],
+        req_body: dict | None,
+        success_statuses: list[int],
+    ) -> str:
+        path_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "path"
+        }
+        query_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "query" and p.get("required")
+        }
+        body = self._build_valid_body(req_body)
+        resolved_path = _build_url(path, path_params)
+        call = _render_call(method, path, path_params, query_params, body)
+        assertion = self._no_crash_assertion("positive_probe")
+
+        return self._api_test_block(
+            fname=f"test_{op_id}_positive",
+            docstring=(
+                "[rule:positive] Face operation — schema-valid request; probe_only "
+                "(real face image required for domain success)."
+            ),
+            call_str=call,
+            assertion_str=assertion,
+            axis="state",
+            reason_code="precondition_not_met",
+            target_field="",
+            test_condition=(
+                "Happy path (schema-valid synthetic image) — probe_only: "
+                "no crash expected; success may be false if no face detected"
+            ),
+            expected_http="200",
+            expected_app="no crash (status < 500); success may be false if no face",
+            error_detail="state.precondition_not_met",
+            request_method=method,
+            request_path=resolved_path,
+            request_query=query_params,
+            request_headers=None,
+            request_body=body,
+            expected_status_display="200 / no crash (probe_only)",
+            rule_type="positive",
+            rule_subtype="positive_schema",
+            endpoint_profile="face_operation",
+            expected_result_type="probe_only",
+        )
+
+    def _positive_raw_image(
+        self,
+        op_id: str,
+        method: str,
+        path: str,
+        params: list[dict],
+        req_body: dict | None,
+        success_statuses: list[int],
+    ) -> str:
+        path_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "path"
+        }
+        query_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "query" and p.get("required")
+        }
+        resolved_path = _build_url(path, path_params)
+        base_body = self._build_valid_body(req_body) or {}
+        valid_body = {
+            **base_body,
+            "width": _RAW_W,
+            "height": _RAW_H,
+            "channel": _RAW_C,
+            "image_data": _RAW_IMG_VALID_B64,
+        }
+        call = _render_call(method, path, path_params, query_params, valid_body)
+        assertion = self._build_policy_assertion("must_pass", "image_data", "raw_image_valid", success_statuses)
+
+        return self._api_test_block(
+            fname=f"test_{op_id}_positive",
+            docstring="[rule:positive] Raw image endpoint — relation-valid payload should pass.",
+            call_str=call,
+            assertion_str=assertion,
+            axis="domain",
+            reason_code="invalid_image_relation",
+            target_field="image_data",
+            test_condition=(
+                f"width={_RAW_W}, height={_RAW_H}, channel={_RAW_C}, "
+                f"image_data={_RAW_W * _RAW_H * _RAW_C} bytes -- relation VALID"
+            ),
+            expected_http="200",
+            expected_app="success=true, error_code>=0",
+            error_detail="domain.invalid_image_relation.image_data.valid",
+            request_method=method,
+            request_path=resolved_path,
+            request_query=query_params,
+            request_headers=None,
+            request_body=valid_body,
+            expected_status_display="200 / success=true (relation valid)",
+            rule_type="positive",
+            rule_subtype="positive_domain",
+            endpoint_profile="raw_image",
+            expected_result_type="expected_pass",
         )
 
     def _missing_required(
@@ -811,28 +1031,27 @@ class RuleBasedTCGenerator:
 
         required_query_params = [p for p in params if p.get("required") and p.get("in") == "query"]
         for target_param in required_query_params:
-            fname = f"test_{op_id}_missing_{_safe_name(target_param['name'])}"
             path_params = {
                 p["name"]: self._good_value(p["name"], p.get("schema", {}))
-                for p in params
-                if p["in"] == "path"
+                for p in params if p["in"] == "path"
             }
             query_params = {
                 p["name"]: self._good_value(p["name"], p.get("schema", {}))
-                for p in params
-                if p["in"] == "query" and p.get("required") and p["name"] != target_param["name"]
+                for p in params if p["in"] == "query" and p.get("required") and p["name"] != target_param["name"]
             }
-
             resolved_path = _build_url(path, path_params)
             body = self._build_valid_body(req_body)
             call = _render_call(method, path, path_params, query_params, body)
-            assertion = self._build_policy_assertion("must_fail", target_param["name"], "missing_required")
+
+            if not self._register_case(method, resolved_path, target_param["name"], "<missing>", "missing_required", "missing_required"):
+                continue
+
             blocks.append(
                 self._api_test_block(
-                    fname=fname,
+                    fname=f"test_{op_id}_missing_{_safe_name(target_param['name'])}",
                     docstring=f"[rule:missing_required] Omit required query param '{target_param['name']}'.",
                     call_str=call,
-                    assertion_str=assertion,
+                    assertion_str=self._build_policy_assertion("must_fail", target_param["name"], "missing_required"),
                     axis="schema",
                     reason_code="missing_required",
                     target_field=target_param["name"],
@@ -847,6 +1066,8 @@ class RuleBasedTCGenerator:
                     request_body=body,
                     expected_status_display="200 / success=false, error_code<0",
                     rule_type="missing_required",
+                    rule_subtype="required_query_missing",
+                    expected_result_type="expected_fail",
                 )
             )
 
@@ -856,27 +1077,27 @@ class RuleBasedTCGenerator:
             properties = body_schema.get("properties", {})
             path_params = {
                 p["name"]: self._good_value(p["name"], p.get("schema", {}))
-                for p in params
-                if p["in"] == "path"
+                for p in params if p["in"] == "path"
             }
             query_params = {
                 p["name"]: self._good_value(p["name"], p.get("schema", {}))
-                for p in params
-                if p["in"] == "query" and p.get("required")
+                for p in params if p["in"] == "query" and p.get("required")
             }
 
             for field in required_fields:
-                fname = f"test_{op_id}_missing_body_{_safe_name(field)}"
                 partial_body = {k: self._good_value(k, v) for k, v in properties.items() if k != field}
                 resolved_path = _build_url(path, path_params)
                 call = _render_call(method, path, path_params, query_params, partial_body)
-                assertion = self._build_policy_assertion("must_fail", field, "missing_required")
+
+                if not self._register_case(method, resolved_path, field, "<missing>", "missing_required", "missing_required"):
+                    continue
+
                 blocks.append(
                     self._api_test_block(
-                        fname=fname,
+                        fname=f"test_{op_id}_missing_body_{_safe_name(field)}",
                         docstring=f"[rule:missing_required] Omit required body field '{field}'.",
                         call_str=call,
-                        assertion_str=assertion,
+                        assertion_str=self._build_policy_assertion("must_fail", field, "missing_required"),
                         axis="schema",
                         reason_code="missing_required",
                         target_field=field,
@@ -891,6 +1112,8 @@ class RuleBasedTCGenerator:
                         request_body=partial_body,
                         expected_status_display="200 / success=false, error_code<0",
                         rule_type="missing_required",
+                        rule_subtype="required_body_missing",
+                        expected_result_type="expected_fail",
                     )
                 )
 
@@ -907,13 +1130,11 @@ class RuleBasedTCGenerator:
         blocks: list[str] = []
         path_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "path"
+            for p in params if p["in"] == "path"
         }
         query_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "query" and p.get("required")
+            for p in params if p["in"] == "query" and p.get("required")
         }
 
         for p in params:
@@ -927,7 +1148,6 @@ class RuleBasedTCGenerator:
                 reason_code = case["reason_code"]
                 policy = case["policy"]
 
-                fname = f"test_{op_id}_wrong_type_{_safe_name(p['name'])}_{label}"
                 req_query = query_params
                 req_body_payload = self._build_valid_body(req_body)
 
@@ -943,15 +1163,16 @@ class RuleBasedTCGenerator:
                 else:
                     continue
 
-                assertion = self._build_policy_assertion(policy, p["name"], f"wrong_type:{label}")
-                exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
+                if not self._register_case(method, resolved_path, p["name"], repr(wrong), reason_code, "wrong_type"):
+                    continue
 
+                exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
                 blocks.append(
                     self._api_test_block(
-                        fname=fname,
+                        fname=f"test_{op_id}_wrong_type_{_safe_name(p['name'])}_{label}",
                         docstring=f"[rule:wrong_type] Pass {label} wrong type for '{p['name']}' (expected {p.get('schema', {}).get('type', 'string')}).",
                         call_str=call,
-                        assertion_str=assertion,
+                        assertion_str=self._build_policy_assertion(policy, p["name"], f"wrong_type:{label}"),
                         axis="schema",
                         reason_code=reason_code,
                         target_field=p["name"],
@@ -966,6 +1187,8 @@ class RuleBasedTCGenerator:
                         request_body=req_body_payload,
                         expected_status_display=f"200 / {exp_app}",
                         rule_type="wrong_type",
+                        rule_subtype=label,
+                        expected_result_type="expected_fail" if policy == "must_fail" else "probe_only",
                     )
                 )
 
@@ -983,20 +1206,21 @@ class RuleBasedTCGenerator:
                     reason_code = case["reason_code"]
                     policy = case["policy"]
 
-                    fname = f"test_{op_id}_wrong_type_body_{_safe_name(field)}_{label}"
                     valid_body = self._build_valid_body(req_body) or {}
                     bad_body = {**valid_body, field: wrong}
                     resolved_path = _build_url(path, path_params)
                     call = _render_call(method, path, path_params, query_params, bad_body)
-                    assertion = self._build_policy_assertion(policy, field, f"wrong_type:{label}")
-                    exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
 
+                    if not self._register_case(method, resolved_path, field, repr(wrong), reason_code, "wrong_type"):
+                        continue
+
+                    exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
                     blocks.append(
                         self._api_test_block(
-                            fname=fname,
+                            fname=f"test_{op_id}_wrong_type_body_{_safe_name(field)}_{label}",
                             docstring=f"[rule:wrong_type] Pass {label} wrong type for body field '{field}' (expected {field_schema.get('type', 'string')}).",
                             call_str=call,
-                            assertion_str=assertion,
+                            assertion_str=self._build_policy_assertion(policy, field, f"wrong_type:{label}"),
                             axis="schema",
                             reason_code=reason_code,
                             target_field=field,
@@ -1011,6 +1235,8 @@ class RuleBasedTCGenerator:
                             request_body=bad_body,
                             expected_status_display=f"200 / {exp_app}",
                             rule_type="wrong_type",
+                            rule_subtype=label,
+                            expected_result_type="expected_fail" if policy == "must_fail" else "probe_only",
                         )
                     )
 
@@ -1025,17 +1251,19 @@ class RuleBasedTCGenerator:
         req_body: dict | None,
         success_statuses: list[int],
     ) -> list[str]:
+        # raw_image endpoint는 일반 boundary 대신 raw_image_relation rule을 사용
+        if self._get_endpoint_profile(path, req_body) == "raw_image":
+            return []
+
         blocks: list[str] = []
 
         base_path_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "path"
+            for p in params if p["in"] == "path"
         }
         base_query_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "query" and p.get("required")
+            for p in params if p["in"] == "query" and p.get("required")
         }
         base_body = self._build_valid_body(req_body) or {}
 
@@ -1049,7 +1277,6 @@ class RuleBasedTCGenerator:
                 probe = case["value"]
                 label = case["label"]
                 policy = case["policy"]
-                fname = f"test_{op_id}_boundary_{_safe_name(p['name'])}_{_safe_name(str(label))}"
 
                 req_query = base_query_params
                 req_body_payload = base_body if base_body else None
@@ -1066,7 +1293,9 @@ class RuleBasedTCGenerator:
                 else:
                     continue
 
-                assertion = self._build_policy_assertion(policy, p["name"], f"boundary:{label}", success_statuses)
+                if not self._register_case(method, resolved_path, p["name"], repr(probe), "range_violation", "boundary"):
+                    continue
+
                 exp_app = {
                     "must_pass": "success=true, error_code>=0",
                     "must_fail": "success=false, error_code<0",
@@ -1075,10 +1304,10 @@ class RuleBasedTCGenerator:
 
                 blocks.append(
                     self._api_test_block(
-                        fname=fname,
+                        fname=f"test_{op_id}_boundary_{_safe_name(p['name'])}_{_safe_name(str(label))}",
                         docstring=f"[rule:boundary] '{p['name']}' = {probe} ({label}, policy={policy}).",
                         call_str=call,
-                        assertion_str=assertion,
+                        assertion_str=self._build_policy_assertion(policy, p["name"], f"boundary:{label}", success_statuses),
                         axis="domain",
                         reason_code="range_violation",
                         target_field=p["name"],
@@ -1093,6 +1322,8 @@ class RuleBasedTCGenerator:
                         request_body=req_body_payload,
                         expected_status_display=f"200 / {exp_app}",
                         rule_type="boundary",
+                        rule_subtype=label,
+                        expected_result_type="expected_pass" if policy == "must_pass" else ("expected_fail" if policy == "must_fail" else "probe_only"),
                     )
                 )
 
@@ -1107,11 +1338,13 @@ class RuleBasedTCGenerator:
                 probe = case["value"]
                 label = case["label"]
                 policy = case["policy"]
-                fname = f"test_{op_id}_boundary_body_{_safe_name(field)}_{_safe_name(str(label))}"
                 bad_body = {**base_body, field: probe}
                 resolved_path = _build_url(path, base_path_params)
                 call = _render_call(method, path, base_path_params, base_query_params, bad_body)
-                assertion = self._build_policy_assertion(policy, field, f"boundary:{label}", success_statuses)
+
+                if not self._register_case(method, resolved_path, field, repr(probe), "range_violation", "boundary"):
+                    continue
+
                 exp_app = {
                     "must_pass": "success=true, error_code>=0",
                     "must_fail": "success=false, error_code<0",
@@ -1120,10 +1353,10 @@ class RuleBasedTCGenerator:
 
                 blocks.append(
                     self._api_test_block(
-                        fname=fname,
+                        fname=f"test_{op_id}_boundary_body_{_safe_name(field)}_{_safe_name(str(label))}",
                         docstring=f"[rule:boundary] body field '{field}' = {probe} ({label}, policy={policy}).",
                         call_str=call,
-                        assertion_str=assertion,
+                        assertion_str=self._build_policy_assertion(policy, field, f"boundary:{label}", success_statuses),
                         axis="domain",
                         reason_code="range_violation",
                         target_field=field,
@@ -1138,6 +1371,8 @@ class RuleBasedTCGenerator:
                         request_body=bad_body,
                         expected_status_display=f"200 / {exp_app}",
                         rule_type="boundary",
+                        rule_subtype=label,
+                        expected_result_type="expected_pass" if policy == "must_pass" else ("expected_fail" if policy == "must_fail" else "probe_only"),
                     )
                 )
 
@@ -1154,13 +1389,11 @@ class RuleBasedTCGenerator:
         blocks: list[str] = []
         path_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "path"
+            for p in params if p["in"] == "path"
         }
         query_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "query" and p.get("required")
+            for p in params if p["in"] == "query" and p.get("required")
         }
 
         for p in params:
@@ -1168,7 +1401,6 @@ class RuleBasedTCGenerator:
             if not enum_vals:
                 continue
 
-            fname = f"test_{op_id}_invalid_enum_{_safe_name(p['name'])}"
             invalid_val = "__INVALID_ENUM_VALUE__"
             req_query = query_params
             req_body_payload = self._build_valid_body(req_body)
@@ -1185,13 +1417,15 @@ class RuleBasedTCGenerator:
             else:
                 continue
 
-            assertion = self._build_policy_assertion("must_fail", p["name"], "invalid_enum")
+            if not self._register_case(method, resolved_path, p["name"], repr(invalid_val), "enum_violation", "invalid_enum"):
+                continue
+
             blocks.append(
                 self._api_test_block(
-                    fname=fname,
+                    fname=f"test_{op_id}_invalid_enum_{_safe_name(p['name'])}",
                     docstring=f"[rule:invalid_enum] '{p['name']}' outside allowed enum {enum_vals}.",
                     call_str=call,
-                    assertion_str=assertion,
+                    assertion_str=self._build_policy_assertion("must_fail", p["name"], "invalid_enum"),
                     axis="domain",
                     reason_code="enum_violation",
                     target_field=p["name"],
@@ -1206,6 +1440,8 @@ class RuleBasedTCGenerator:
                     request_body=req_body_payload,
                     expected_status_display="200 / success=false, error_code<0",
                     rule_type="invalid_enum",
+                    rule_subtype="enum_out_of_set",
+                    expected_result_type="expected_fail",
                 )
             )
 
@@ -1217,18 +1453,19 @@ class RuleBasedTCGenerator:
                 if not enum_vals:
                     continue
 
-                fname = f"test_{op_id}_invalid_enum_body_{_safe_name(field)}"
-                valid_body = self._build_valid_body(req_body) or {}
-                bad_body = {**valid_body, field: "__INVALID_ENUM_VALUE__"}
+                bad_body = {**(self._build_valid_body(req_body) or {}), field: "__INVALID_ENUM_VALUE__"}
                 resolved_path = _build_url(path, path_params)
                 call = _render_call(method, path, path_params, query_params, bad_body)
-                assertion = self._build_policy_assertion("must_fail", field, "invalid_enum")
+
+                if not self._register_case(method, resolved_path, field, "'__INVALID_ENUM_VALUE__'", "enum_violation", "invalid_enum"):
+                    continue
+
                 blocks.append(
                     self._api_test_block(
-                        fname=fname,
+                        fname=f"test_{op_id}_invalid_enum_body_{_safe_name(field)}",
                         docstring=f"[rule:invalid_enum] body field '{field}' outside allowed enum {enum_vals}.",
                         call_str=call,
-                        assertion_str=assertion,
+                        assertion_str=self._build_policy_assertion("must_fail", field, "invalid_enum"),
                         axis="domain",
                         reason_code="enum_violation",
                         target_field=field,
@@ -1243,6 +1480,8 @@ class RuleBasedTCGenerator:
                         request_body=bad_body,
                         expected_status_display="200 / success=false, error_code<0",
                         rule_type="invalid_enum",
+                        rule_subtype="enum_out_of_set",
+                        expected_result_type="expected_fail",
                     )
                 )
 
@@ -1260,19 +1499,19 @@ class RuleBasedTCGenerator:
 
         base_path_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "path"
+            for p in params if p["in"] == "path"
         }
         base_query_params = {
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params
-            if p["in"] == "query" and p.get("required")
+            for p in params if p["in"] == "query" and p.get("required")
         }
         base_body = self._build_valid_body(req_body) or {}
 
         for p in params:
             schema = p.get("schema", {})
-            tag = schema.get("semantic_tag", "")
+            tag = self._normalize_tag(schema)
+            if tag not in SUPPORTED_QFE_PROBE_TAGS:
+                continue
             probes = _SEMANTIC_PROBES.get(tag, [])
             if not probes:
                 continue
@@ -1281,7 +1520,6 @@ class RuleBasedTCGenerator:
                 probe_val = probe["value"]
                 probe_label = probe["label"]
                 policy = probe["policy"]
-                fname = f"test_{op_id}_semantic_{_safe_name(p['name'])}_{probe_label}"
 
                 req_query = base_query_params
                 req_body_payload = base_body if base_body else None
@@ -1298,18 +1536,20 @@ class RuleBasedTCGenerator:
                 else:
                     continue
 
-                assertion = self._build_policy_assertion(policy, p["name"], f"semantic:{probe_label}")
                 _s_axis, _s_rc = _SEMANTIC_PROBE_DIAG.get(
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
+                if not self._register_case(method, resolved_path, p["name"], repr(probe_val), _s_rc, "semantic_probe"):
+                    continue
+
                 exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
 
                 blocks.append(
                     self._api_test_block(
-                        fname=fname,
+                        fname=f"test_{op_id}_semantic_{_safe_name(p['name'])}_{probe_label}",
                         docstring=f"[rule:semantic_probe] param '{p['name']}' tag={tag} probe={probe_label} policy={policy}.",
                         call_str=call,
-                        assertion_str=assertion,
+                        assertion_str=self._build_policy_assertion(policy, p["name"], f"semantic:{probe_label}"),
                         axis=_s_axis,
                         reason_code=_s_rc,
                         target_field=p["name"],
@@ -1324,6 +1564,10 @@ class RuleBasedTCGenerator:
                         request_body=req_body_payload,
                         expected_status_display=f"200 / {exp_app}",
                         rule_type="semantic_probe",
+                        rule_subtype=probe_label,
+                        semantic_tag=tag,
+                        policy=policy,
+                        expected_result_type="expected_fail" if policy == "must_fail" else "probe_only",
                     )
                 )
 
@@ -1331,7 +1575,9 @@ class RuleBasedTCGenerator:
         properties = schema.get("properties", {})
 
         for field, field_schema in properties.items():
-            tag = field_schema.get("semantic_tag", "")
+            tag = self._normalize_tag(field_schema)
+            if tag not in SUPPORTED_QFE_PROBE_TAGS:
+                continue
             probes = _SEMANTIC_PROBES.get(tag, [])
             if not probes:
                 continue
@@ -1340,22 +1586,23 @@ class RuleBasedTCGenerator:
                 probe_val = probe["value"]
                 probe_label = probe["label"]
                 policy = probe["policy"]
-                fname = f"test_{op_id}_semantic_{_safe_name(field)}_{probe_label}"
                 bad_body = {**base_body, field: probe_val}
                 resolved_path = _build_url(path, base_path_params)
                 call = _render_call(method, path, base_path_params, base_query_params, bad_body)
-                assertion = self._build_policy_assertion(policy, field, f"semantic:{probe_label}")
                 _s_axis, _s_rc = _SEMANTIC_PROBE_DIAG.get(
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
-                exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
 
+                if not self._register_case(method, resolved_path, field, repr(probe_val), _s_rc, "semantic_probe"):
+                    continue
+
+                exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
                 blocks.append(
                     self._api_test_block(
-                        fname=fname,
+                        fname=f"test_{op_id}_semantic_{_safe_name(field)}_{probe_label}",
                         docstring=f"[rule:semantic_probe] body field '{field}' tag={tag} probe={probe_label} policy={policy}.",
                         call_str=call,
-                        assertion_str=assertion,
+                        assertion_str=self._build_policy_assertion(policy, field, f"semantic:{probe_label}"),
                         axis=_s_axis,
                         reason_code=_s_rc,
                         target_field=field,
@@ -1370,7 +1617,212 @@ class RuleBasedTCGenerator:
                         request_body=bad_body,
                         expected_status_display=f"200 / {exp_app}",
                         rule_type="semantic_probe",
+                        rule_subtype=probe_label,
+                        semantic_tag=tag,
+                        policy=policy,
+                        expected_result_type="expected_fail" if policy == "must_fail" else "probe_only",
                     )
                 )
+
+        return blocks
+
+    # ──────────────────────────────────────────────────────────────
+    # match / verify domain assertion
+    # 기존 bool 존재 여부만 확인 -> score-threshold consistency까지 보도록 변경
+    # ──────────────────────────────────────────────────────────────
+
+    def _match_domain_assertion(
+        self,
+        score_field: str,
+        verdict_field: str | None = None,
+    ) -> str:
+        return textwrap.dedent(
+            f"""\
+            _data = body.get("data") or {{}}
+
+            assert isinstance(_data.get("{score_field}"), (int, float)), (
+                f"[FAIL] domain: expected numeric '{score_field}' in data\\n"
+                f"  data      : {{_data}}\\n"
+                f"  Full body : {{resp.text[:300]}}"
+            )
+
+            _score = float(_data.get("{score_field}", 0))
+            _threshold = float({self.match_threshold!r})
+            _computed_match = _score >= _threshold
+
+            # match endpoint:
+            #   execution success와 domain match 여부는 별개다.
+            # verify endpoint:
+            #   verified bool이 있다면 score-threshold 계산 결과와 일관되어야 한다.
+            if {repr(verdict_field)}:
+                assert "{verdict_field}" in _data, (
+                    f"[FAIL] domain: missing verdict field '{verdict_field}'\\n"
+                    f"  data      : {{_data}}\\n"
+                    f"  Full body : {{resp.text[:300]}}"
+                )
+
+                _verdict = _data.get("{verdict_field}")
+                assert isinstance(_verdict, bool), (
+                    f"[FAIL] domain: expected boolean '{verdict_field}' in data\\n"
+                    f"  data      : {{_data}}\\n"
+                    f"  Full body : {{resp.text[:300]}}"
+                )
+
+                assert _verdict == _computed_match, (
+                    f"[FAIL] domain: score-threshold consistency mismatch\\n"
+                    f"  score      : {{_score}}\\n"
+                    f"  threshold  : {{_threshold}}\\n"
+                    f"  computed   : {{_computed_match}}\\n"
+                    f"  verdict    : {{_verdict}}\\n"
+                    f"  data       : {{_data}}\\n"
+                    f"  Full body  : {{resp.text[:300]}}"
+                )
+            """
+        )
+
+    # ──────────────────────────────────────────────────────────────
+    # raw image relation rule
+    # ──────────────────────────────────────────────────────────────
+
+    def _raw_image_relation(
+        self,
+        op_id: str,
+        method: str,
+        path: str,
+        params: list[dict],
+        req_body: dict | None,
+    ) -> list[str]:
+        if not self._is_raw_image_relation_endpoint(req_body):
+            return []
+
+        blocks: list[str] = []
+        path_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "path"
+        }
+        query_params = {
+            p["name"]: self._good_value(p["name"], p.get("schema", {}))
+            for p in params if p["in"] == "query" and p.get("required")
+        }
+        resolved_path = _build_url(path, path_params)
+        base_body = self._build_valid_body(req_body) or {}
+        expected_size = _RAW_W * _RAW_H * _RAW_C
+
+        # valid relation
+        valid_body = {
+            **base_body,
+            "width": _RAW_W,
+            "height": _RAW_H,
+            "channel": _RAW_C,
+            "image_data": _RAW_IMG_VALID_B64,
+        }
+        if self._register_case(method, resolved_path, "image_data", f"valid:{expected_size}", "invalid_image_relation", "raw_image_relation"):
+            blocks.append(
+                self._api_test_block(
+                    fname=f"test_{op_id}_raw_image_relation_valid",
+                    docstring=(
+                        f"[rule:raw_image_relation] w={_RAW_W}xh={_RAW_H}xc={_RAW_C}={expected_size}B "
+                        "-> image_data size matches (must_pass)."
+                    ),
+                    call_str=_render_call(method, path, path_params, query_params, valid_body),
+                    assertion_str=self._build_policy_assertion("must_pass", "image_data", "raw_image_valid"),
+                    axis="domain",
+                    reason_code="invalid_image_relation",
+                    target_field="image_data",
+                    test_condition=(
+                        f"width={_RAW_W}, height={_RAW_H}, channel={_RAW_C}, "
+                        f"image_data={expected_size} bytes -- relation VALID"
+                    ),
+                    expected_http="200",
+                    expected_app="success=true, error_code>=0",
+                    error_detail="domain.invalid_image_relation.image_data.valid",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=query_params,
+                    request_headers=None,
+                    request_body=valid_body,
+                    expected_status_display="200 / success=true (relation valid)",
+                    rule_type="raw_image_relation",
+                    rule_subtype="relation_valid",
+                    endpoint_profile="raw_image",
+                    expected_result_type="expected_pass",
+                )
+            )
+
+        # size mismatch
+        mismatch_body = {
+            **base_body,
+            "width": _RAW_W,
+            "height": _RAW_H,
+            "channel": _RAW_C,
+            "image_data": _RAW_IMG_MISMATCH_B64,
+        }
+        if self._register_case(method, resolved_path, "image_data", "mismatch:10", "invalid_image_relation", "raw_image_relation"):
+            blocks.append(
+                self._api_test_block(
+                    fname=f"test_{op_id}_raw_image_relation_mismatch",
+                    docstring=(
+                        f"[rule:raw_image_relation] w={_RAW_W}xh={_RAW_H}xc={_RAW_C}={expected_size}B "
+                        "but image_data=10B -> size mismatch (must_fail)."
+                    ),
+                    call_str=_render_call(method, path, path_params, query_params, mismatch_body),
+                    assertion_str=self._build_policy_assertion("must_fail", "image_data", "raw_image_mismatch"),
+                    axis="domain",
+                    reason_code="invalid_image_relation",
+                    target_field="image_data",
+                    test_condition=(
+                        f"width={_RAW_W}, height={_RAW_H}, channel={_RAW_C} "
+                        f"but image_data=10 bytes (expected {expected_size}B) -- relation MISMATCH"
+                    ),
+                    expected_http="200",
+                    expected_app="success=false, error_code<0",
+                    error_detail="domain.invalid_image_relation.image_data.mismatch",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=query_params,
+                    request_headers=None,
+                    request_body=mismatch_body,
+                    expected_status_display="200 / success=false (relation mismatch)",
+                    rule_type="raw_image_relation",
+                    rule_subtype="relation_mismatch",
+                    endpoint_profile="raw_image",
+                    expected_result_type="expected_fail",
+                )
+            )
+
+        # invalid channel
+        invalid_channel_body = {
+            **base_body,
+            "width": _RAW_W,
+            "height": _RAW_H,
+            "channel": 0,
+            "image_data": _RAW_IMG_VALID_B64,
+        }
+        if self._register_case(method, resolved_path, "channel", "0", "invalid_image_relation", "raw_image_relation"):
+            blocks.append(
+                self._api_test_block(
+                    fname=f"test_{op_id}_raw_image_relation_invalid_channel",
+                    docstring="[rule:raw_image_relation] channel=0 with raw image payload.",
+                    call_str=_render_call(method, path, path_params, query_params, invalid_channel_body),
+                    assertion_str=self._build_policy_assertion("probe_only", "channel", "raw_image_invalid_channel"),
+                    axis="domain",
+                    reason_code="invalid_image_relation",
+                    target_field="channel",
+                    test_condition="width/height valid but channel=0",
+                    expected_http="200",
+                    expected_app="no crash (status < 500)",
+                    error_detail="domain.invalid_image_relation.channel.zero",
+                    request_method=method,
+                    request_path=resolved_path,
+                    request_query=query_params,
+                    request_headers=None,
+                    request_body=invalid_channel_body,
+                    expected_status_display="200 / no crash (probe_only)",
+                    rule_type="raw_image_relation",
+                    rule_subtype="channel_zero",
+                    endpoint_profile="raw_image",
+                    expected_result_type="probe_only",
+                )
+            )
 
         return blocks
