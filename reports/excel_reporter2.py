@@ -81,11 +81,21 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
     if item.get("server_crashed"):
         return "서버 Crash (5xx)"
 
+    exc_type = str(item.get("exception_type") or "")
+    exc_msg = str(item.get("exception_message") or "")
+    longrepr = str(item.get("longrepr") or "")
+    blob = f"{exc_type} {exc_msg} {longrepr}".lower()
+
+    if "connection" in blob or "refused" in blob or "failed to establish a new connection" in blob:
+        return "서버 미응답"
+
     expected_result_type = str(item.get("expected_result_type") or "")
     axis = str(item.get("axis") or "")
     reason_code = str(item.get("reason_code") or "")
     response_success = item.get("response_success")
+    response_error_code = item.get("response_error_code")
 
+    # 1차: 새 메타 기반 분류
     if expected_result_type == "probe_only":
         return "Probe Only"
 
@@ -98,6 +108,18 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
         return "엔드포인트 버그 (도메인 검증 미수행)"
 
     if expected_result_type == "expected_fail":
+        return "예상된 실패"
+
+    # 2차: fallback 분류
+    if reason_code == "precondition_not_met":
+        return "상태 미충족 (DB/fixture 없음)"
+
+    if response_success is True and axis in {"schema", "domain"}:
+        if axis == "schema":
+            return "엔드포인트 버그 (Validation 미수행)"
+        return "엔드포인트 버그 (도메인 검증 미수행)"
+
+    if response_error_code not in (None, "", 0):
         return "TC 실패 (단언 오류)"
 
     return "알 수 없음"
@@ -142,6 +164,13 @@ class ExcelReportBuilder2:
         tests = self._load_test_results(
             pytest_json_path=pytest_json_path,
             allure_results_dir=allure_results_dir,
+            diag_map = self._load_diag_jsonl(pytest_json_path)
+            print(f"[Excel2] diag_map size = {len(diag_map)}")
+            if diag_map:
+                for t in tests:
+                    diag = diag_map.get(t.get("nodeid", ""))
+                    if diag:
+                        self._apply_diag(t, diag)
         )
 
         wb = Workbook()
@@ -330,7 +359,17 @@ class ExcelReportBuilder2:
         ws.freeze_panes = "A3"
 
     # ─── Sheet 3: 종합 요약 ────────────────────────────────────────────────────
-
+    for sample in tests[:5]:
+        print(
+            "[Excel2 DEBUG]",
+            sample.get("nodeid"),
+            sample.get("expected_result_type"),
+            sample.get("axis"),
+            sample.get("reason_code"),
+            sample.get("response_success"),
+            sample.get("response_error_code"),
+        )
+        
     def _build_overall_summary(
         self,
         ws,
@@ -669,7 +708,6 @@ class ExcelReportBuilder2:
                 "duration": call.get("duration", t.get("duration", 0)),
                 "longrepr": str(call.get("longrepr") or t.get("longrepr") or ""),
 
-                # tc_meta
                 "rule_type":            meta.get("rule_type", ""),
                 "rule_subtype":         meta.get("rule_subtype", ""),
                 "endpoint_profile":     meta.get("endpoint_profile", ""),
@@ -692,7 +730,6 @@ class ExcelReportBuilder2:
                 "exception_message": meta.get("exception_message", ""),
                 "server_crashed":  meta.get("server_crashed", False),
 
-                # diag merge target
                 "axis": "",
                 "reason_code": "",
                 "error_detail": "",
