@@ -12,7 +12,14 @@
       "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -m pip list)",
       "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -m py_compile C:/Users/sypark5/TestAgent/agents/tc_generator.py C:/Users/sypark5/TestAgent/agents/rule_based_generator.py C:/Users/sypark5/TestAgent/parsers/python_parser.py C:/Users/sypark5/TestAgent/main.py C:/Users/sypark5/TestAgent/runner/test_runner.py)",
       "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -c ' *)",
-      "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -m py_compile C:/Users/sypark5/TestAgent/tests/manual/test_crash_probes.py)"
+      "Bash(C:/Users/sypark5/AppData/Local/Programs/Python/Python313/python.exe -m py_compile C:/Users/sypark5/TestAgent/tests/manual/test_crash_probes.py)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import json; import re; content=open\\(r'C:\\\\Users\\\\sypark5\\\\TestAgent\\\\.github\\\\workflows\\\\crash-probe.yml',encoding='utf-8'\\).read\\(\\); print\\(f'Lines: {len\\(content.splitlines\\(\\)\\)}'\\); print\\('No obvious syntax errors detected'\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(cmd /c \"dir C:\\\\Users\\\\sypark5\\\\TestAgent\\\\scripts\")",
+      "Bash(cmd /c \"python -c \\\\\"content=open\\(r'C:/Users/sypark5/TestAgent/.github/workflows/crash-probe.yml',encoding='utf-8'\\).read\\(\\); lines=content.splitlines\\(\\); print\\('Lines:', len\\(lines\\)\\); [print\\(f'{i+1:3}: {l}'\\) for i,l in enumerate\\(lines\\) if 'run:' in l or l.strip\\(\\).startswith\\('- name:'\\)]\\\\\" 2>&1\")"
     ]
   }
 }
