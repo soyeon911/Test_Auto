@@ -58,49 +58,59 @@ def _is_alive(base_url: str, timeout: float = _HEALTH_TIMEOUT) -> bool:
 
 
 def _restart_server(base_url: str) -> bool:
-    """
-    환경변수(SERVER_DIR, SERVER_EXE_NAME 등)를 읽어 서버를 재기동한다.
-    GitHub Actions self-hosted 환경 전용. 로컬 직접 실행 시에는 skip.
-    """
     server_dir = os.environ.get("SERVER_DIR", "")
     server_exe = os.environ.get("SERVER_EXE_NAME", "qfe-server.exe")
     if not server_dir:
         print("[CrashProbe] SERVER_DIR 미설정 — 자동 재기동 불가")
         return False
 
-    exe_path  = os.path.join(server_dir, server_exe)
-    stdin_str = "\n".join([
-        os.environ.get("SERVER_LICENSE_KEY",    "1"),
-        os.environ.get("SERVER_MODE_CHOICE",    "1"),
-        os.environ.get("SERVER_INSTANCE_COUNT", "1"),
-        os.environ.get("SERVER_MODEL_PATH",     ""),
-        os.environ.get("SERVER_DB_PATH",        ""),
-        "",
-    ]).encode()
+    exe_path = os.path.join(server_dir, server_exe)
+
+    stdin_file = os.path.join(server_dir, "stdin.txt")
+    log_file   = os.path.join(server_dir, "server.log")
 
     print(f"[CrashProbe] 서버 재기동: {exe_path}")
+
     try:
-        proc = subprocess.Popen(
-            [exe_path, "-host", "0.0.0.0"],
-            cwd=server_dir,
-            stdin=subprocess.PIPE,
+        # 기존 서버 kill
+        subprocess.run(
+            ["taskkill", "/F", "/IM", server_exe],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        time.sleep(1)
+
+        # stdin 파일 생성
+        with open(stdin_file, "w", encoding="utf-8") as f:
+            f.write("\n".join([
+                os.environ.get("SERVER_LICENSE_KEY",    "1"),
+                os.environ.get("SERVER_MODE_CHOICE",    "1"),
+                os.environ.get("SERVER_INSTANCE_COUNT", "1"),
+                os.environ.get("SERVER_MODEL_PATH",     ""),
+                os.environ.get("SERVER_DB_PATH",        ""),
+                "",
+            ]))
+
+        # 서버 실행 (파일 리다이렉션)
+        subprocess.Popen(
+            f'"{exe_path}" -host 0.0.0.0 < "{stdin_file}" > "{log_file}" 2>&1',
+            cwd=server_dir,
+            shell=True,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
-        proc.stdin.write(stdin_str)
-        proc.stdin.flush()
-        proc.stdin.close()
+
     except Exception as e:
         print(f"[CrashProbe] 재기동 실패: {e}")
         return False
 
-    # 준비될 때까지 대기
+    # health check
     for _ in range(_MAX_RESTART_WAIT):
         time.sleep(1)
         if _is_alive(base_url):
             print("[CrashProbe] 서버 재기동 완료")
             return True
+
     print("[CrashProbe] 서버 재기동 타임아웃")
     return False
 
@@ -165,6 +175,8 @@ def _probe(
     if result["outcome"] is None:
         if not alive:
             result["outcome"] = CRASH_DETECTED
+        elif result["http_status"] is None:
+            result["outcome"] = CONNECTION_ERROR
         elif result["success"] is True:
             result["outcome"] = UNEXPECTED_SUCCESS
         else:
@@ -211,7 +223,7 @@ def _guard_server_restart(base_url, request):
         print(f"\n[CrashProbe] 테스트 '{request.node.name}' 후 서버 다운 감지 → 재기동 시도")
         ok = _restart_server(base_url)
         if not ok:
-            pytest.skip("서버 재기동 실패 — 이후 테스트 스킵")
+            pytest.fail("서버 재기동 실패 (CRASH 상태 유지)")
 
 
 # ─── 공통 유효하지 않은 base64 / 템플릿 입력 목록 ────────────────────────────
