@@ -153,23 +153,7 @@ jobs:
       - name: 서버 최초 기동
         id: start_server
         run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
-          $healthUrl = "$env:BASE_URL$env:HEALTH_CHECK_PATH"
-          $pid = & powershell -File "scripts\start_server.ps1" `
-            -ServerDir  $env:SERVER_DIR `
-            -ServerExe  $env:SERVER_EXE_NAME `
-            -LogDir     $env:SERVER_LOG_DIR `
-            -HealthUrl  $healthUrl `
-            -Label      "initial"
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::서버 최초 기동 실패"
-            exit 1
-          }
-
-          "SERVER_PID=$pid" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "[Server] 기동 완료 PID=$pid"
+          echo 1| echo 1| echo 1| qfe-server.exe
 
       # ─── 4. 크래시 프로브 실행 (재기동 루프 포함) ──────────────────────────
       - name: Crash Probe 실행
