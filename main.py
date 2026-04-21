@@ -5,7 +5,8 @@ Modes:
   watch   (default) — background watcher; triggers pipeline when a file is dropped
   run     <file>    — one-shot: parse given file, generate TCs, run tests, email
   parse   <file>    — parse only, print endpoint summary
-  generate <file>   — parse + generate TCs, no test run
+  generate    <file>    — parse + generate TCs, no test run
+  experiment  <file>    — Step 1/2/3 multi-provider experiment (config: experiment.*)
 
 환경변수 (서버 관리):
   SERVER_LOG_FILE       서버 stderr 로그 파일 경로 (config.server.log_file 로도 지정 가능)
@@ -210,6 +211,63 @@ def run_pipeline(source: str, config: dict) -> None:
     print(f"\n[Pipeline] Done — passed={summary['passed']} failed={summary['failed']}")
 
 
+# ─── experiment mode ──────────────────────────────────────────────────────────
+
+def run_experiment(source: str, config: dict) -> None:
+    """
+    Step 1 / 2 / 3 multi-provider experiment.
+
+    Reads `experiment` section from config:
+      experiment.step       : 1 | 2 | 3
+      experiment.providers  : list of {provider, model, api_key_env, max_tokens}
+      experiment.output_base: base dir for generated TC files
+      experiment.report_path: summary JSON path
+      experiment.tc_report_path: per-TC CSV path
+    """
+    from agents import ExperimentRunner
+
+    step = config.get("experiment", {}).get("step", 3)
+    print(f"\n{'='*60}")
+    print(f"[Experiment] Source  : {source}")
+    print(f"[Experiment] Step    : {step}")
+    print(f"{'='*60}")
+
+    endpoints = detect_source_and_parse(source, config)
+    if not endpoints:
+        print("[Experiment] No endpoints found. Aborting.")
+        return
+    print(f"[Experiment] Found {len(endpoints)} endpoint(s).")
+
+    runner = ExperimentRunner(config)
+    report = runner.run(endpoints)
+
+    # Optionally run the generated tests (each step dir is independent)
+    from runner import TestRunner
+
+    # Collect dirs that were actually written
+    exp_cfg    = config.get("experiment", {})
+    output_base = exp_cfg.get("output_base", "./tests/generated")
+    providers   = [p["provider"] for p in exp_cfg.get("providers", [])]
+    if not providers:
+        providers = [config.get("agent", {}).get("provider", "gemini")]
+
+    test_dirs = []
+    for prov in providers:
+        for layer in ("rule", "ai"):
+            d = f"{output_base}/step{step}/{prov}/{layer}"
+            if Path(d).exists():
+                test_dirs.append(d)
+
+    if test_dirs:
+        print(f"\n[Experiment] Running tests in: {test_dirs}")
+        tr      = TestRunner(config)
+        summary = tr.run(test_dirs=test_dirs)
+        print(f"[Experiment] Tests done — "
+              f"passed={summary['passed']} failed={summary['failed']} total={summary['total']}")
+    else:
+        print("[Experiment] No test dirs found — skipping test run.")
+
+
 # ─── watcher mode ─────────────────────────────────────────────────────────────
 
 def run_watch_mode(config: dict) -> None:
@@ -231,7 +289,7 @@ def main() -> None:
         epilog=__doc__,
     )
     parser.add_argument("mode", nargs="?", default="watch",
-                        choices=["watch", "run", "parse", "generate"],
+                        choices=["watch", "run", "parse", "generate", "experiment"],
                         help="Operation mode (default: watch)")
     parser.add_argument("source", nargs="?", default=None,
                         help="Swagger file / Python module / URL (required for run|parse|generate)")
@@ -268,6 +326,11 @@ def main() -> None:
         print(f"\nGenerated {len(written)} TC file(s):")
         for f in written:
             print(f"  {f}")
+
+    elif args.mode == "experiment":
+        if not args.source:
+            parser.error("'experiment' mode requires a source argument.")
+        run_experiment(args.source, config)
 
 
 if __name__ == "__main__":

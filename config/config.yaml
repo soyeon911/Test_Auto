@@ -83,3 +83,46 @@ email:
   recipients:
     - "recipient@example.com"
   attach_report: true
+
+# ─────────────────────────────────────────────
+# Experiment — Step 1 / 2 / 3 비교 실험
+# ─────────────────────────────────────────────
+#
+#  Step 1 : AI 단독 TC 생성  (rule 없음)
+#  Step 2 : Rule + AI 동시 생성, 중복 허용 → 중복 수 리포트
+#  Step 3 : Rule + AI 동시 생성, AI에서 중복 제거 후 저장
+#
+experiment:
+  step: 3                                  # 1 | 2 | 3
+
+  # max_extra_tc : AI 가 endpoint 당 최대 추가 생성할 TC 수
+  #   Step 1 → 이 값의 3배 적용  (rule 없으니 더 많이)
+  #   Step 2/3 → 그대로 적용
+  max_extra_tc: 5
+
+  # 멀티 프로바이더 비교 실험 목록
+  # 비어 있으면 agent.provider 단일 설정으로 fallback
+  providers:
+    - provider: gemini
+      model: gemini-2.0-flash
+      api_key_env: GEMINI_API_KEY
+      max_tokens: 4096
+
+    # - provider: openai
+    #   model: gpt-4o-mini
+    #   api_key_env: OPENAI_API_KEY
+    #   max_tokens: 4096
+
+    - provider: anthropic
+      model: claude-3-5-haiku-20241022
+      api_key_env: ANTHROPIC_API_KEY
+      max_tokens: 4096
+
+  # 결과 저장 루트 : tests/generated/step{N}/{provider}/rule | ai
+  output_base: "./tests/generated"
+
+  # 실험 결과 요약 리포트 경로
+  report_path: "./reports/experiment_report.json"
+
+  # TC 수준 상세 리포트 (CSV)
+  tc_report_path: "./reports/experiment_tc_report.csv"

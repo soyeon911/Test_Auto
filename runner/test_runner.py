@@ -51,6 +51,7 @@ class TestRunner:
 
         cmd = [
             sys.executable, "-m", "pytest",
+            "--import-mode=importlib",
             *[d for d in test_dirs if Path(d).exists()],
             f"--base-url={self.base_url}",
             f"--alluredir={self.allure_results}",

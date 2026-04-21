@@ -2,15 +2,14 @@
 pyyaml>=6.0
 jsonschema>=4.0
 
-# ── AI providers (install only what you need) ──────────────────────────────
-# Gemini (default / free tier)
+# ── AI providers ─────────────────────────────────────────────────────────────
+# Gemini (free tier available)
 google-generativeai>=0.8.0
 
-# Anthropic — uncomment if provider: anthropic
-# anthropic>=0.40.0
+# Anthropic (Claude)
+anthropic>=0.40.0
 
-# OpenAI — uncomment if provider: openai
-# openai>=1.0.0
+
 
 # Test framework
 pytest>=7.0
