@@ -1,0 +1,451 @@
+name: Server Crash Probe
+
+# ─── 트리거 ────────────────────────────────────────────────────────────────────
+on:
+  # 수동 실행
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: '서버 Base URL'
+        required: false
+        default: 'http://127.0.0.1:8080'
+      probe_filter:
+        description: '실행할 probe 필터 (pytest -k 값, 예: enroll or match)'
+        required: false
+        default: ''
+      max_restarts:
+        description: '크래시 후 최대 재기동 횟수'
+        required: false
+        default: '5'
+
+  # 매일 새벽 2시 (서버가 쉬는 시간에 위험한 probe 실행)
+  schedule:
+    - cron: '0 17 * * *'    # UTC 17:00 = KST 02:00
+
+defaults:
+  run:
+    shell: powershell
+
+# ─── 환경 변수 ─────────────────────────────────────────────────────────────────
+env:
+  BASE_URL:               ${{ inputs.base_url || 'http://127.0.0.1:8080' }}
+  SERVER_DIR:             C:\Users\sypark5\TestAgent\qfe-api-server-no-license
+  SERVER_EXE_NAME:        qfe-server.exe
+  SERVER_LICENSE_KEY:     1
+  SERVER_MODE_CHOICE:     1
+  SERVER_INSTANCE_COUNT:  1
+  SERVER_MODEL_PATH:      C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model
+  SERVER_DB_PATH:         C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db
+  SERVER_LOG_DIR:         server_logs
+  CRASH_LOG_DIR:          crash_logs
+  REPORT_DIR:             reports
+  PROBE_REPORT_DIR:       reports/crash_probe
+  HEALTH_CHECK_PATH:      /health
+  PYTHONIOENCODING:       utf-8
+  MAX_RESTARTS:           ${{ inputs.max_restarts || '5' }}
+
+jobs:
+  crash-probe:
+    name: Server Crash Probe
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 60
+
+    steps:
+      # ─── 1. 체크아웃 & 환경 준비 ───────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Python 환경 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 의존성 설치
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 리포트 디렉터리 생성
+        run: |
+          New-Item -ItemType Directory -Path $env:SERVER_LOG_DIR  -Force | Out-Null
+          New-Item -ItemType Directory -Path $env:CRASH_LOG_DIR   -Force | Out-Null
+          New-Item -ItemType Directory -Path $env:PROBE_REPORT_DIR -Force | Out-Null
+
+      # ─── 2. 서버 기동 헬퍼 스크립트 인라인 정의 ────────────────────────────
+      #        재기동이 여러 번 필요하므로 함수로 분리
+      - name: 서버 기동 스크립트 생성
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $script = @'
+          param(
+            [string]$ServerDir,
+            [string]$ServerExe,
+            [string]$LogDir,
+            [string]$HealthUrl,
+            [string]$Label = "server"
+          )
+
+          $exePath   = Join-Path $ServerDir $ServerExe
+          $stdoutLog = Join-Path $LogDir "${Label}_stdout.log"
+          $stderrLog = Join-Path $LogDir "${Label}_stderr.log"
+          $stdinFile = Join-Path $LogDir "${Label}_stdin.tmp"
+
+          # stdin 파일 생성
+          @(
+            $env:SERVER_LICENSE_KEY,
+            $env:SERVER_MODE_CHOICE,
+            $env:SERVER_INSTANCE_COUNT,
+            $env:SERVER_MODEL_PATH,
+            $env:SERVER_DB_PATH,
+            ""
+          ) | Set-Content -Path $stdinFile -Encoding ascii
+
+          # 기존 포트 정리
+          $lines = netstat -ano -p tcp | Select-String ":8080\s"
+          foreach ($line in $lines) {
+            if ($line.ToString() -match "LISTENING\s+(\d+)") {
+              try { Stop-Process -Id ([int]$matches[1]) -Force -ErrorAction SilentlyContinue } catch {}
+            }
+          }
+          Start-Sleep -Seconds 1
+
+          $proc = Start-Process `
+            -FilePath          $exePath `
+            -WorkingDirectory  $ServerDir `
+            -ArgumentList      "-host 0.0.0.0" `
+            -RedirectStandardInput  $stdinFile `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError  $stderrLog `
+            -PassThru `
+            -WindowStyle Hidden
+
+          Write-Host "[$Label] PID=$($proc.Id) 시작"
+
+          # 헬스 체크 대기
+          $ready = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            if ($proc.HasExited) { break }
+            try {
+              $r = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 3
+              if ($r.StatusCode -eq 200) { $ready = $true; break }
+            } catch {}
+          }
+
+          if (-not $ready) {
+            Write-Host "[$Label] 기동 실패"
+            Write-Host "stdout:"; Get-Content $stdoutLog -ErrorAction SilentlyContinue
+            Write-Host "stderr:"; Get-Content $stderrLog -ErrorAction SilentlyContinue
+            exit 1
+          }
+
+          Write-Host "[$Label] 준비 완료"
+          $proc.Id   # 반환값 = PID
+          '@
+          $script | Out-File -FilePath "scripts\start_server.ps1" -Encoding utf8 -Force
+          Write-Host "[Setup] start_server.ps1 생성 완료"
+
+      # ─── 3. 서버 최초 기동 ──────────────────────────────────────────────────
+      - name: 서버 최초 기동
+        id: start_server
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $healthUrl = "$env:BASE_URL$env:HEALTH_CHECK_PATH"
+          $pid = & powershell -File "scripts\start_server.ps1" `
+            -ServerDir  $env:SERVER_DIR `
+            -ServerExe  $env:SERVER_EXE_NAME `
+            -LogDir     $env:SERVER_LOG_DIR `
+            -HealthUrl  $healthUrl `
+            -Label      "initial"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::서버 최초 기동 실패"
+            exit 1
+          }
+
+          "SERVER_PID=$pid" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "[Server] 기동 완료 PID=$pid"
+
+      # ─── 4. 크래시 프로브 실행 (재기동 루프 포함) ──────────────────────────
+      - name: Crash Probe 실행
+        id: run_probe
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+
+          $healthUrl      = "$env:BASE_URL$env:HEALTH_CHECK_PATH"
+          $maxRestarts    = [int]$env:MAX_RESTARTS
+          $restartCount   = 0
+          $probeFilter    = "${{ inputs.probe_filter }}"
+          $probeReport    = "$env:PROBE_REPORT_DIR\probe_results.json"
+          $summaryReport  = "$env:PROBE_REPORT_DIR\crash_summary.json"
+
+          # 공통 pytest 인수
+          $baseArgs = @(
+            "-m", "pytest",
+            "tests/manual/test_crash_probes.py",
+            "--base-url", $env:BASE_URL,
+            "--import-mode=importlib",
+            "--tb=short",
+            "-v",
+            "--json-report",
+            "--json-report-file=$probeReport",
+            "-p", "no:randomly"          # 순서 고정 (재현성)
+          )
+          if ($probeFilter) {
+            $baseArgs += @("-k", $probeFilter)
+          }
+
+          # ── 라운드별 실행 ──────────────────────────────────────────────────
+          $crashEvents  = [System.Collections.Generic.List[hashtable]]::new()
+          $round        = 0
+          $allPassed    = $true
+
+          do {
+            $round++
+            Write-Host "`n[CrashProbe] ━━━ Round $round / maxRestarts=$maxRestarts ━━━"
+
+            # 서버 살아있는지 먼저 확인
+            try {
+              $r = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+              Write-Host "[CrashProbe] 서버 살아있음 (Round $round 시작)"
+            } catch {
+              Write-Host "[CrashProbe] 서버 다운 → 재기동 시도 ($restartCount/$maxRestarts)"
+              if ($restartCount -ge $maxRestarts) {
+                Write-Host "::error::최대 재기동 횟수 초과"
+                break
+              }
+              $pid = & powershell -File "scripts\start_server.ps1" `
+                -ServerDir $env:SERVER_DIR `
+                -ServerExe $env:SERVER_EXE_NAME `
+                -LogDir    $env:SERVER_LOG_DIR `
+                -HealthUrl $healthUrl `
+                -Label     "restart_$restartCount"
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "::error::재기동 실패"
+                break
+              }
+              "SERVER_PID=$pid" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              $restartCount++
+            }
+
+            # pytest 실행
+            $roundReport = "$env:PROBE_REPORT_DIR\round_${round}_report.json"
+            $roundArgs   = $baseArgs + @("--json-report-file=$roundReport")
+
+            & python @roundArgs 2>&1 | Tee-Object -FilePath "$env:PROBE_REPORT_DIR\round_${round}_output.txt"
+            $exitCode = $LASTEXITCODE
+            Write-Host "[CrashProbe] Round $round 종료 코드: $exitCode"
+
+            if ($exitCode -ne 0) { $allPassed = $false }
+
+            # 크래시 여부 확인
+            try {
+              $r = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+              Write-Host "[CrashProbe] Round $round 완료 — 서버 생존"
+              break   # 서버가 살아있으면 더 이상 재기동 루프 불필요
+            } catch {
+              $ts = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+              Write-Host "[CrashProbe] Round $round 후 서버 크래시 감지 ($ts)"
+
+              # 크래시 로그 수집
+              $crashLabel = "crash_round${round}_$(Get-Date -Format 'HHmmss')"
+              $crashDir   = "$env:CRASH_LOG_DIR\$crashLabel"
+              New-Item -ItemType Directory -Path $crashDir -Force | Out-Null
+
+              # Windows 이벤트 로그에서 크래시 정보 추출
+              try {
+                $events = Get-WinEvent -LogName Application -MaxEvents 20 -ErrorAction SilentlyContinue |
+                  Where-Object { $_.LevelDisplayName -eq 'Error' -and $_.TimeCreated -gt (Get-Date).AddMinutes(-5) }
+                $events | Select-Object TimeCreated, Id, Message |
+                  ConvertTo-Json -Depth 3 |
+                  Out-File "$crashDir\winevent.json" -Encoding utf8
+              } catch {}
+
+              # 서버 로그 복사
+              Copy-Item "$env:SERVER_LOG_DIR\*" $crashDir -Recurse -ErrorAction SilentlyContinue
+
+              $crashEvents.Add(@{
+                round      = $round
+                timestamp  = $ts
+                log_dir    = $crashDir
+              })
+
+              if ($restartCount -ge $maxRestarts) {
+                Write-Host "::warning::최대 재기동 횟수 도달 — 크래시 루프 종료"
+                break
+              }
+
+              Write-Host "[CrashProbe] 재기동 시도 ($($restartCount+1)/$maxRestarts)"
+              $pid = & powershell -File "scripts\start_server.ps1" `
+                -ServerDir $env:SERVER_DIR `
+                -ServerExe $env:SERVER_EXE_NAME `
+                -LogDir    "$env:SERVER_LOG_DIR\restart_${restartCount}" `
+                -HealthUrl $healthUrl `
+                -Label     "restart_$restartCount"
+
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "::error::재기동 실패 — 루프 종료"
+                break
+              }
+              "SERVER_PID=$pid" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              $restartCount++
+            }
+
+          } while ($restartCount -le $maxRestarts)
+
+          # ── 요약 JSON 저장 ─────────────────────────────────────────────────
+          $summary = @{
+            total_rounds    = $round
+            total_restarts  = $restartCount
+            crash_events    = $crashEvents
+            all_passed      = $allPassed
+            generated_at    = (Get-Date -Format "o")
+          } | ConvertTo-Json -Depth 5
+          $summary | Out-File -FilePath $summaryReport -Encoding utf8
+
+          Write-Host "`n[CrashProbe] 완료 — rounds=$round  restarts=$restartCount  crashes=$($crashEvents.Count)"
+
+          # restart 가 1회 이상이면 크래시가 있었다는 뜻
+          "crash_count=$($crashEvents.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "probe_exit=$( if ($allPassed) { '0' } else { '1' } )" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # ─── 5. Crash Probe 결과 요약 리포트 생성 ──────────────────────────────
+      - name: Crash Probe 리포트 생성 (Python)
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+
+          $script = @'
+import json, csv, sys, glob, os
+from pathlib import Path
+
+probe_dir   = Path(os.environ.get("PROBE_REPORT_DIR", "reports/crash_probe"))
+summary_out = probe_dir / "final_report.csv"
+
+rows = []
+for rpt_path in sorted(probe_dir.glob("round_*_report.json")):
+    try:
+        data  = json.loads(rpt_path.read_text(encoding="utf-8"))
+        tests = data.get("tests", [])
+        for t in tests:
+            call    = t.get("call", {}) or {}
+            longrepr = str(call.get("longrepr", ""))
+            # 결과 분류
+            if "CRASH_DETECTED" in longrepr:
+                classification = "CRASH_DETECTED"
+            elif "VALIDATION_GAP" in longrepr:
+                classification = "VALIDATION_GAP"
+            elif t["outcome"] == "passed":
+                classification = "GRACEFUL_REJECTION"
+            elif t["outcome"] == "skipped":
+                classification = "SKIPPED"
+            else:
+                classification = "OTHER_FAILURE"
+
+            rows.append({
+                "round":               rpt_path.stem,
+                "test_id":             t["nodeid"].split("::")[-1],
+                "nodeid":              t["nodeid"],
+                "outcome":             t["outcome"],
+                "classification":      classification,
+                "duration_s":          round(t.get("call", {}).get("duration", 0), 3),
+                "failure_reason":      longrepr[:300].replace("\n", " ") if longrepr else "",
+            })
+    except Exception as e:
+        print(f"  [WARN] {rpt_path}: {e}")
+
+if rows:
+    fields = ["round","test_id","nodeid","outcome","classification","duration_s","failure_reason"]
+    with summary_out.open("w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+
+    total     = len(rows)
+    crashes   = sum(1 for r in rows if r["classification"] == "CRASH_DETECTED")
+    gaps      = sum(1 for r in rows if r["classification"] == "VALIDATION_GAP")
+    graceful  = sum(1 for r in rows if r["classification"] == "GRACEFUL_REJECTION")
+
+    print(f"\n{'='*60}")
+    print(f"  Crash Probe Final Report")
+    print(f"{'='*60}")
+    print(f"  Total probes      : {total}")
+    print(f"  CRASH_DETECTED    : {crashes}  ← 서버가 죽은 입력")
+    print(f"  VALIDATION_GAP    : {gaps}   ← 서버가 거부해야 하는데 수락")
+    print(f"  GRACEFUL_REJECTION: {graceful}  ← 올바르게 에러 반환")
+    print(f"{'='*60}")
+    print(f"  Report → {summary_out}")
+else:
+    print("[WARN] 프로브 결과 없음")
+'@
+          $script | python 2>&1
+
+      # ─── 6. 아티팩트 업로드 ─────────────────────────────────────────────────
+      - name: Probe 리포트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-probe-reports-${{ github.run_id }}
+          path: |
+            ${{ env.PROBE_REPORT_DIR }}/
+          retention-days: 30
+
+      - name: 서버 로그 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-probe-server-logs-${{ github.run_id }}
+          path: |
+            ${{ env.SERVER_LOG_DIR }}/
+            ${{ env.CRASH_LOG_DIR }}/
+          retention-days: 30
+
+      # ─── 7. 최종 판정 ───────────────────────────────────────────────────────
+      - name: 최종 판정
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $crashCount = "${{ steps.run_probe.outputs.crash_count }}"
+          $probeExit  = "${{ steps.run_probe.outputs.probe_exit }}"
+
+          Write-Host "[Result] crash_count=$crashCount  probe_exit=$probeExit"
+
+          if ($crashCount -ne "" -and [int]$crashCount -gt 0) {
+            Write-Host "::error::크래시 감지 $crashCount 건 — C 라이브러리 입력 검증 필요"
+            Write-Host "::error::Go 핸들러에서 CGO 호출 전 base64 유효성 검사 추가 권고"
+            exit 2
+          }
+
+          if ($probeExit -ne "" -and $probeExit -ne "0") {
+            Write-Host "::warning::검증 누락(VALIDATION_GAP) 감지 — 잠재적 크래시 경로 존재"
+            exit 1
+          }
+
+          Write-Host "[Result] 모든 프로브 통과 — 서버 입력 검증 정상"
+
+      # ─── 8. 서버 종료 ───────────────────────────────────────────────────────
+      - name: 서버 종료
+        if: always()
+        run: |
+          if ($env:SERVER_PID) {
+            try {
+              Stop-Process -Id ([int]$env:SERVER_PID) -Force -ErrorAction SilentlyContinue
+              Write-Host "[Cleanup] 서버 종료 PID=$env:SERVER_PID"
+            } catch {}
+          }
+          # 혹시 남아있는 서버 프로세스 정리
+          $lines = netstat -ano -p tcp | Select-String ":8080\s"
+          foreach ($line in $lines) {
+            if ($line.ToString() -match "LISTENING\s+(\d+)") {
+              try { Stop-Process -Id ([int]$matches[1]) -Force -ErrorAction SilentlyContinue } catch {}
+            }
+          }
