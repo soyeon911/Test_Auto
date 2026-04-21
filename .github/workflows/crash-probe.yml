@@ -153,6 +153,7 @@ jobs:
       # ─── 3. Crash Probe 실행 (크래시 감지 → 재기동 → 계속 루프) ────────────
       - name: Crash Probe 실행
         id: run_probe
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -331,8 +332,15 @@ jobs:
 
           Write-Host "`n[CrashProbe] 종료 — rounds=$round crashes=$($crashEvents.Count)"
 
-          "crash_count=$($crashEvents.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "probe_exit=$( if ($allPassed) { '0' } else { '1' } )" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $crashCount = $crashEvents.Count
+          if ($allPassed) {
+            $probeExit = "0"
+          } else {
+            $probeExit = "1"
+          }
+
+          "crash_count=$crashCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "probe_exit=$probeExit"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       # ─── 4. Crash Probe 결과 요약 CSV 생성 ─────────────────────────────────
       - name: 결과 CSV 리포트 생성
@@ -426,23 +434,31 @@ jobs:
       # ─── 6. 최종 판정 ───────────────────────────────────────────────────────
       - name: 최종 판정
         if: always()
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-          $crashCount = "${{ steps.run_probe.outputs.crash_count }}"
-          $probeExit  = "${{ steps.run_probe.outputs.probe_exit }}"
+          $crashCount = "${{ steps.crash_probe.outputs.crash_count }}"
+          $probeExit  = "${{ steps.crash_probe.outputs.probe_exit }}"
 
-          Write-Host "[Result] crash_count=$crashCount  probe_exit=$probeExit"
+          Write-Host "[Result] crash_count=$crashCount probe_exit=$probeExit"
 
-          if ($crashCount -ne "" -and [int]$crashCount -gt 0) {
-            Write-Host "::error::크래시 $crashCount 건 확인 — CGO 호출 전 입력 검증 추가 필요"
-            exit 2
-          }
-          if ($probeExit -ne "" -and $probeExit -ne "0") {
-            Write-Host "::warning::VALIDATION_GAP 감지 — 잠재적 크래시 경로 존재"
+          if ([string]::IsNullOrWhiteSpace($crashCount) -or [string]::IsNullOrWhiteSpace($probeExit)) {
+            Write-Host "::error::Crash probe output이 비어 있습니다."
             exit 1
           }
-          Write-Host "[Result] 모든 프로브 통과 — 서버 입력 검증 정상"
+
+          if ($crashCount -ne "0") {
+            Write-Host "::error::서버 크래시 감지됨"
+            exit 1
+          }
+
+          if ($probeExit -ne "0") {
+            Write-Host "::warning::크래시는 없지만 probe test 실패가 있습니다."
+            exit 1
+          }
+
+          Write-Host "[Result] 모든 프로브 통과 및 서버 안정"
 
       # ─── 7. 서버 종료 (항상 실행) ───────────────────────────────────────────
       - name: 서버 종료
