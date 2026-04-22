@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from parsers import OpenAPIParser
 from agents.rule_based_generator import RuleBasedTCGenerator
-from agents.semantic_tagger import SemanticTagger
+from agents.schema_enricher import SemanticTagger
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -10,7 +10,6 @@ Supported providers
 -------------------
   gemini     → google-generativeai   (pip install google-generativeai)
   anthropic  → anthropic             (pip install anthropic)
-  openai     → openai                (pip install openai)
 
 The required API-key environment variable is declared in config:
   agent.api_key_env: GEMINI_API_KEY   # (or ANTHROPIC_API_KEY, OPENAI_API_KEY …)

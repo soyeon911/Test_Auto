@@ -1652,16 +1652,11 @@ class RuleBasedTCGenerator:
         self,
         score_field: str,
     ) -> str:
-        return textwrap.dedent(
-            f"""\
-            _data = body.get("data") or {{}}
-
-            assert isinstance(_data.get("{score_field}"), (int, float)), (
-                f"[FAIL] domain: expected numeric '{score_field}' in data\n"
-                f"  data      : {{_data}}\n"
-                f"  Full body : {{resp.text[:300]}}"
-            )
-            """
+         return (
+            '_data = body.get("data") or {}\n'
+            f'assert isinstance(_data.get("{score_field}"), (int, float)), (\n'
+            '    f"[FAIL] domain: expected numeric ..."\n'
+            ')\n'
         )
 
     def _match_status_assertion(
