@@ -173,6 +173,22 @@ def build_diag(
         "response_success":   body.get("success")    if isinstance(body, dict) else None,
         "response_error_code":body.get("error_code") if isinstance(body, dict) else None,
         "response_msg":       body.get("msg")        if isinstance(body, dict) else None,
+        "response_data":      body.get("data") if isinstance(body, dict) and isinstance(body.get("data"), dict) else None,
+        "response_data_error_code": (
+            body.get("data", {}).get("error_code")
+            if isinstance(body, dict) and isinstance(body.get("data"), dict)
+            else None
+        ),
+        "response_data_match_score": (
+            body.get("data", {}).get("match_score")
+            if isinstance(body, dict) and isinstance(body.get("data"), dict)
+            else None
+        ),
+        "response_data_status": (
+            body.get("data", {}).get("status")
+            if isinstance(body, dict) and isinstance(body.get("data"), dict)
+            else None
+        ),
 
         "exception_type":     type(exc).__name__ if exc else None,
         "exception_message":  str(exc)            if exc else None,

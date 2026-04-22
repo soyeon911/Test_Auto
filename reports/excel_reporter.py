@@ -273,15 +273,18 @@ class ExcelReportBuilder:
             "Expected",                   # 19
             "Actual",                     # 20
             "Response Msg",               # 21
-            "Exception Type",             # 22
-            "Exception Message",          # 23
-            "Server Crash",               # 24
-            "Server Log Tail",            # 25
-            "Outcome",                    # 26
-            "Failure Cause",              # 27
-            "Duration (s)",               # 28
-            "Error Detail",               # 29
-            "Failure Detail (pytest)",    # 30
+            "Data Error Code",            # 22
+            "Match Score",                # 23
+            "Match Status",               # 24
+            "Exception Type",             # 25
+            "Exception Message",          # 26
+            "Server Crash",               # 27
+            "Server Log Tail",            # 28
+            "Outcome",                    # 29
+            "Failure Cause",              # 30
+            "Duration (s)",               # 31
+            "Error Detail",               # 32
+            "Failure Detail (pytest)",    # 33
         ]
         self._header_row(ws, 2, headers)
 
@@ -291,8 +294,9 @@ class ExcelReportBuilder:
             22, 22, 18, 42,      # 12-15
             28, 28, 70,          # 16-18
             28, 28, 38,          # 19-21
-            18, 42, 12, 42,      # 22-25
-            12, 30, 12, 42, 55,  # 26-30
+            14, 14, 14, 18,      # 22-25
+            18, 42, 12, 42,      # 26-29
+            30, 12, 42, 55,      # 30-33
         ]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
@@ -367,15 +371,18 @@ class ExcelReportBuilder:
                 expected_display,                             # 19
                 actual_display,                               # 20
                 response_msg,                                 # 21
-                item.get("exception_type", ""),               # 22
-                item.get("exception_message", ""),            # 23
-                "Y" if item.get("server_crashed") else "",   # 24
-                (item.get("server_log_tail") or "")[:2000],  # 25
-                outcome.upper(),                              # 26
-                failure_cause,                                # 27
-                duration,                                     # 28
-                item.get("error_detail", ""),                 # 29
-                longrepr[:2000] if outcome in {"failed", "broken"} else "",  # 30
+                item.get("response_data_error_code", ""),     # 22
+                item.get("response_data_match_score", ""),    # 23
+                item.get("response_data_status", ""),         # 24
+                item.get("exception_type", ""),               # 25
+                item.get("exception_message", ""),            # 26
+                "Y" if item.get("server_crashed") else "",   # 27
+                (item.get("server_log_tail") or "")[:2000],  # 28
+                outcome.upper(),                              # 29
+                failure_cause,                                # 30
+                duration,                                     # 31
+                item.get("error_detail", ""),                 # 32
+                longrepr[:2000] if outcome in {"failed", "broken"} else "",  # 33
             ]
 
             r = idx + 2
@@ -389,7 +396,7 @@ class ExcelReportBuilder:
             for col in range(1, len(headers) + 1):
                 ws.cell(row=r, column=col).fill = PatternFill(fill_type="solid", fgColor=bg)
 
-            fc_cell = ws.cell(row=r, column=27)
+            fc_cell = ws.cell(row=r, column=30)
             if failure_cause not in {"PASS", "알 수 없음"}:
                 fc_cell.font = Font(bold=True)
 
@@ -525,6 +532,10 @@ class ExcelReportBuilder:
         item["response_success"]   = diag.get("response_success")
         item["response_error_code"]= diag.get("response_error_code")
         item["response_msg"]       = diag.get("response_msg")
+        item["response_data"] = diag.get("response_data")
+        item["response_data_error_code"] = diag.get("response_data_error_code")
+        item["response_data_match_score"] = diag.get("response_data_match_score")
+        item["response_data_status"] = diag.get("response_data_status")
 
     @staticmethod
     def _is_pytest_json_report(raw):
@@ -585,6 +596,10 @@ class ExcelReportBuilder:
                 "response_success": None,
                 "response_error_code": None,
                 "response_msg": None,
+                "response_data": None,
+                "response_data_error_code": None,
+                "response_data_match_score": None,
+                "response_data_status": None,
             })
         return out
 
@@ -644,6 +659,10 @@ class ExcelReportBuilder:
                 "response_success": None,
                 "response_error_code": None,
                 "response_msg": None,
+                "response_data": None,
+                "response_data_error_code": None,
+                "response_data_match_score": None,
+                "response_data_status": None,
             })
         return out
     @staticmethod

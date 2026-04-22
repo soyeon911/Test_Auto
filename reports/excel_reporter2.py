@@ -164,14 +164,16 @@ class ExcelReportBuilder2:
         tests = self._load_test_results(
             pytest_json_path=pytest_json_path,
             allure_results_dir=allure_results_dir,
-            diag_map = self._load_diag_jsonl(pytest_json_path)
-            print(f"[Excel2] diag_map size = {len(diag_map)}")
-            if diag_map:
-                for t in tests:
-                    diag = diag_map.get(t.get("nodeid", ""))
-                    if diag:
-                        self._apply_diag(t, diag)
         )
+
+        diag_map = self._load_diag_jsonl(pytest_json_path)
+        print(f"[Excel2] diag_map size = {len(diag_map)}")
+
+        if diag_map:
+            for t in tests:
+                diag = diag_map.get(t.get("nodeid", ""))
+                if diag:
+                    self._apply_diag(t, diag)
 
         wb = Workbook()
 
@@ -369,7 +371,7 @@ class ExcelReportBuilder2:
             sample.get("response_success"),
             sample.get("response_error_code"),
         )
-        
+
     def _build_overall_summary(
         self,
         ws,

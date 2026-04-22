@@ -867,22 +867,42 @@ class RuleBasedTCGenerator:
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
 
-        if "verify" in path:
-            score_field = "match_score"
-            verdict_field = "verified"
+        if path == "/api/v2/match":
+            assertion = self._qfe_success_assertion() + self._match_status_assertion(
+                score_field="match_score",
+                status_field="status",
+                data_error_code_field="error_code",
+            )
+            exp_app = (
+                "success=true, error_code>=0, "
+                "data.error_code=number, data.match_score=number, data.status in {success,fail}"
+            )
+            condition = (
+                "Happy path — valid request; expects execution success and domain validation "
+                "for data.error_code, data.match_score, data.status"
+            )
+        elif "verify" in path:
+            assertion = self._qfe_success_assertion() + self._match_domain_assertion(
+                score_field="match_score",
+                verdict_field="verified",
+            )
+            exp_app = (
+                "success=true, error_code>=0, data.match_score=number, "
+                "data.verified=bool, score-threshold consistency"
+            )
+            condition = (
+                "Happy path — valid request; expects execution success and domain validation "
+                "for data.match_score and data.verified"
+            )
         else:
-            score_field = "match_score"
-            verdict_field = None
-
-        assertion = self._qfe_success_assertion() + self._match_domain_assertion(
-            score_field=score_field,
-            verdict_field=verdict_field,
-        )
-
-        exp_app = f"success=true, error_code>=0, data.{score_field}=number"
-
-        if verdict_field:
-            exp_app += f", data.{verdict_field}=bool, score-threshold consistency"
+            assertion = self._qfe_success_assertion() + self._match_score_only_assertion(
+                score_field="match_score",
+            )
+            exp_app = "success=true, error_code>=0, data.match_score=number"
+            condition = (
+                "Happy path — valid request; expects execution success and domain validation "
+                "for data.match_score"
+            )
 
         return self._api_test_block(
             fname=f"test_{op_id}_positive",
@@ -892,10 +912,7 @@ class RuleBasedTCGenerator:
             axis="state",
             reason_code="precondition_not_met",
             target_field="",
-            test_condition=(
-                f"Happy path — valid request; expects execution success and domain validation "
-                f"for data.{score_field}"
-            ),
+            test_condition=condition,
             expected_http="200",
             expected_app=exp_app,
             error_detail="state.precondition_not_met",
@@ -1625,6 +1642,85 @@ class RuleBasedTCGenerator:
                 )
 
         return blocks
+
+    def _match_score_only_assertion(
+        self,
+        score_field: str,
+    ) -> str:
+        return textwrap.dedent(
+            f"""\
+            _data = body.get("data") or {{}}
+
+            assert isinstance(_data.get("{score_field}"), (int, float)), (
+                f"[FAIL] domain: expected numeric '{score_field}' in data\n"
+                f"  data      : {{_data}}\n"
+                f"  Full body : {{resp.text[:300]}}"
+            )
+            """
+        )
+
+    def _match_status_assertion(
+        self,
+        score_field: str = "match_score",
+        status_field: str = "status",
+        data_error_code_field: str = "error_code",
+    ) -> str:
+        return textwrap.dedent(
+            f"""\
+            _data = body.get("data") or {{}}
+
+            assert isinstance(_data, dict), (
+                f"[FAIL] domain: missing or invalid data block\n"
+                f"  data      : {{_data}}\n"
+                f"  Full body : {{resp.text[:300]}}"
+            )
+
+            assert isinstance(_data.get("{data_error_code_field}"), int), (
+                f"[FAIL] domain: expected integer '{data_error_code_field}' in data\n"
+                f"  data      : {{_data}}\n"
+                f"  Full body : {{resp.text[:300]}}"
+            )
+
+            assert isinstance(_data.get("{score_field}"), (int, float)), (
+                f"[FAIL] domain: expected numeric '{score_field}' in data\n"
+                f"  data      : {{_data}}\n"
+                f"  Full body : {{resp.text[:300]}}"
+            )
+
+            _status = _data.get("{status_field}")
+            assert isinstance(_status, str), (
+                f"[FAIL] domain: expected string '{status_field}' in data\n"
+                f"  data      : {{_data}}\n"
+                f"  Full body : {{resp.text[:300]}}"
+            )
+
+            assert _status in ("success", "fail"), (
+                f"[FAIL] domain: invalid status value\n"
+                f"  status    : {{_status}}\n"
+                f"  data      : {{_data}}\n"
+                f"  Full body : {{resp.text[:300]}}"
+            )
+
+            _score = float(_data.get("{score_field}", 0))
+
+            # TODO:
+            # threshold 연동 전까지는 status 구조만 검증.
+            # 추후 /api/v2/matching-threshold 실제 값 조회 또는 config 값 연동 시
+            # 아래 비교를 활성화한다.
+            #
+            # _threshold = ...
+            # _expected_status = "success" if _score >= _threshold else "fail"
+            # assert _status == _expected_status, (
+            #     f"[FAIL] domain: score-threshold consistency mismatch\n"
+            #     f"  score      : {_score}\n"
+            #     f"  threshold  : {_threshold}\n"
+            #     f"  expected   : {_expected_status}\n"
+            #     f"  actual     : {_status}\n"
+            #     f"  data       : {_data}\n"
+            #     f"  Full body  : {resp.text[:300]}"
+            # )
+            """
+        )
 
     # ──────────────────────────────────────────────────────────────
     # match / verify domain assertion
