@@ -1652,8 +1652,8 @@ class RuleBasedTCGenerator:
             _data = body.get("data") or {{}}
 
             assert isinstance(_data.get("{score_field}"), (int, float)), (
-                f"[FAIL] domain: expected numeric '{score_field}' in data\n"
-                f"  data      : {{_data}}\n"
+                f"[FAIL] domain: expected numeric '{score_field}' in data\\n"
+                f"  data      : {{_data}}\\n"
                 f"  Full body : {{resp.text[:300]}}"
             )
             """
