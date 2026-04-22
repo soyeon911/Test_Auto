@@ -1670,34 +1670,34 @@ class RuleBasedTCGenerator:
             _data = body.get("data") or {{}}
 
             assert isinstance(_data, dict), (
-                f"[FAIL] domain: missing or invalid data block\n"
-                f"  data      : {{_data}}\n"
+                f"[FAIL] domain: missing or invalid data block\\n"
+                f"  data      : {{_data}}\\n"
                 f"  Full body : {{resp.text[:300]}}"
             )
 
             assert isinstance(_data.get("{data_error_code_field}"), int), (
-                f"[FAIL] domain: expected integer '{data_error_code_field}' in data\n"
-                f"  data      : {{_data}}\n"
+                f"[FAIL] domain: expected integer '{data_error_code_field}' in data\\n"
+                f"  data      : {{_data}}\\n"
                 f"  Full body : {{resp.text[:300]}}"
             )
 
             assert isinstance(_data.get("{score_field}"), (int, float)), (
-                f"[FAIL] domain: expected numeric '{score_field}' in data\n"
-                f"  data      : {{_data}}\n"
+                f"[FAIL] domain: expected numeric '{score_field}' in data\\n"
+                f"  data      : {{_data}}\\n"
                 f"  Full body : {{resp.text[:300]}}"
             )
 
             _status = _data.get("{status_field}")
             assert isinstance(_status, str), (
-                f"[FAIL] domain: expected string '{status_field}' in data\n"
-                f"  data      : {{_data}}\n"
+                f"[FAIL] domain: expected string '{status_field}' in data\\n"
+                f"  data      : {{_data}}\\n"
                 f"  Full body : {{resp.text[:300]}}"
             )
 
             assert _status in ("success", "fail"), (
-                f"[FAIL] domain: invalid status value\n"
-                f"  status    : {{_status}}\n"
-                f"  data      : {{_data}}\n"
+                f"[FAIL] domain: invalid status value\\n"
+                f"  status    : {{_status}}\\n"
+                f"  data      : {{_data}}\\n"
                 f"  Full body : {{resp.text[:300]}}"
             )
 
@@ -1705,19 +1705,19 @@ class RuleBasedTCGenerator:
 
             # TODO:
             # threshold 연동 전까지는 status 구조만 검증.
-            # 추후 /api/v2/matching-threshold 실제 값 조회 또는 config 값 연동 시
-            # 아래 비교를 활성화한다.
+            # 추후 matching-threshold 실제 값 조회 또는 config 값 연동 시
+            # 아래 비교 활성화:
             #
             # _threshold = ...
             # _expected_status = "success" if _score >= _threshold else "fail"
             # assert _status == _expected_status, (
-            #     f"[FAIL] domain: score-threshold consistency mismatch\n"
-            #     f"  score      : {_score}\n"
-            #     f"  threshold  : {_threshold}\n"
-            #     f"  expected   : {_expected_status}\n"
-            #     f"  actual     : {_status}\n"
-            #     f"  data       : {_data}\n"
-            #     f"  Full body  : {resp.text[:300]}"
+            #     f"[FAIL] domain: score-threshold consistency mismatch\\n"
+            #     f"  score      : {{_score}}\\n"
+            #     f"  threshold  : {{_threshold}}\\n"
+            #     f"  expected   : {{_expected_status}}\\n"
+            #     f"  actual     : {{_status}}\\n"
+            #     f"  data       : {{_data}}\\n"
+            #     f"  Full body  : {{resp.text[:300]}}"
             # )
             """
         )
