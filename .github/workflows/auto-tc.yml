@@ -30,6 +30,15 @@ on:
         description: 'match/verify score threshold'
         required: false
         default: '0'
+      run_crash_probe:
+        description: 'Crash Probe job 강제 실행 (변경 감지와 무관하게 실행)'
+        required: false
+        default: 'false'
+        type: boolean
+      probe_filter:
+        description: 'Crash Probe pytest -k 필터 (예: enroll or match)'
+        required: false
+        default: ''
 
 defaults:
   run:
@@ -931,5 +940,306 @@ jobs:
             }
             catch {
               Write-Warning "[Test Server] failed to stop PID=$env:SERVER_PID : $($_.Exception.Message)"
+            }
+          }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 3 — Robustness Layer (B): Crash Probe
+  # 비정상 입력에 대해 서버가 5xx crash 없이 응답하는지 검증한다.
+  # ══════════════════════════════════════════════════════════════════════════
+  crash-probe:
+    name: Crash Probe (Robustness Layer B)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should_run == 'true' || inputs.run_crash_probe == 'true'
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 60
+
+    env:
+      BASE_URL:               ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
+      SERVER_DIR:             C:\Users\sypark5\TestAgent\qfe-api-server-no-license
+      SERVER_EXE_NAME:        qfe-server.exe
+      SERVER_LICENSE_KEY:     1
+      SERVER_MODE_CHOICE:     1
+      SERVER_INSTANCE_COUNT:  1
+      SERVER_MODEL_PATH:      C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model
+      SERVER_DB_PATH:         C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db
+      SERVER_LOG_DIR:         server_logs
+      PROBE_REPORT_DIR:       reports/crash_probe
+      HEALTH_CHECK_PATH:      /health
+      PYTHONIOENCODING:       utf-8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Python 환경 설정
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 의존성 설치
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 디렉터리 생성
+        run: |
+          New-Item -ItemType Directory -Path $env:SERVER_LOG_DIR   -Force | Out-Null
+          New-Item -ItemType Directory -Path $env:PROBE_REPORT_DIR -Force | Out-Null
+
+      # ─── 서버 기동 ────────────────────────────────────────────────────────────
+      - name: 서버 기동 (Crash Probe)
+        id: start_probe_server
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
+          $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
+          $logDir    = $env:SERVER_LOG_DIR
+          $stdinFile = Join-Path $logDir "probe_stdin.tmp"
+          $stdoutLog = Join-Path $logDir "probe_server_stdout.log"
+          $stderrLog = Join-Path $logDir "probe_server_stderr.log"
+          $healthUrl = "$env:BASE_URL$env:HEALTH_CHECK_PATH"
+
+          Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+
+          # 포트 8080 기존 점유 프로세스 정리
+          $lines = netstat -ano -p tcp | Select-String ":8080\s"
+          foreach ($line in $lines) {
+            if ($line.ToString() -match "LISTENING\s+(\d+)") {
+              try { Stop-Process -Id ([int]$matches[1]) -Force -ErrorAction SilentlyContinue } catch {}
+            }
+          }
+          Start-Sleep -Seconds 1
+
+          # stdin 파일 사전 작성
+          @(
+            $env:SERVER_LICENSE_KEY,
+            $env:SERVER_MODE_CHOICE,
+            $env:SERVER_INSTANCE_COUNT,
+            $env:SERVER_MODEL_PATH,
+            $env:SERVER_DB_PATH,
+            ""
+          ) | Set-Content -Path $stdinFile -Encoding ascii
+
+          $proc = Start-Process `
+            -FilePath          $serverExe `
+            -WorkingDirectory  $env:SERVER_DIR `
+            -ArgumentList      "-host 0.0.0.0" `
+            -RedirectStandardInput  $stdinFile `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError  $stderrLog `
+            -PassThru `
+            -WindowStyle Hidden
+
+          Write-Host "[Probe Server] PID=$($proc.Id)"
+          "PROBE_SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          # /health 폴링 (최대 30초)
+          $ready = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            if ($proc.HasExited) {
+              Write-Host "[Probe Server] 프로세스 조기 종료 (exit=$($proc.ExitCode))"
+              break
+            }
+            try {
+              $r = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
+              if ($r.StatusCode -eq 200) { $ready = $true; break }
+            } catch {}
+          }
+
+          if (-not $ready) {
+            Write-Host "[Probe Server] stdout:"; Get-Content $stdoutLog -ErrorAction SilentlyContinue
+            Write-Host "[Probe Server] stderr:"; Get-Content $stderrLog -ErrorAction SilentlyContinue
+            throw "[Probe Server] 서버 기동 실패 — /health 응답 없음"
+          }
+          Write-Host "[Probe Server] 준비 완료"
+
+      # ─── Crash Probe 실행 ────────────────────────────────────────────────────
+      - name: Crash Probe 실행
+        id: crash_probe
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+
+          $reportDir  = $env:PROBE_REPORT_DIR
+          $reportFile = "$reportDir\report.json"
+          $healthUrl  = "$env:BASE_URL$env:HEALTH_CHECK_PATH"
+
+          $pytestArgs = @(
+            "-m", "pytest",
+            "tests/manual/test_crash_probes.py",
+            "--base-url", $env:BASE_URL,
+            "--import-mode=importlib",
+            "--json-report",
+            "--json-report-file=$reportFile",
+            "--tb=short",
+            "-v",
+            "-p", "no:randomly"
+          )
+
+          $filter = "${{ inputs.probe_filter }}"
+          if ($filter) { $pytestArgs += @("-k", $filter) }
+
+          & python @pytestArgs 2>&1 | Tee-Object -FilePath "$reportDir\pytest_output.txt"
+          $exitCode = $LASTEXITCODE
+          Write-Host "[Probe] pytest 종료코드: $exitCode"
+
+          # 서버 생존 확인
+          $alive = $false
+          try {
+            $r = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+            $alive = ($r.StatusCode -eq 200)
+          } catch {}
+
+          $crashCount = if ($alive) { 0 } else { 1 }
+          $probeExit  = if ($exitCode -eq 0) { "0" } else { "1" }
+
+          Write-Host "[Probe] server_alive=$alive  crash_count=$crashCount"
+          "crash_count=$crashCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "probe_exit=$probeExit"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # ─── 결과 CSV 생성 ────────────────────────────────────────────────────────
+      - name: 결과 CSV 리포트 생성
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+
+          $pyCode = @'
+          import json, csv, os
+          from pathlib import Path
+
+          probe_dir   = Path(os.environ.get("PROBE_REPORT_DIR", "reports/crash_probe"))
+          report_file = probe_dir / "report.json"
+          summary_out = probe_dir / "final_report.csv"
+
+          if not report_file.exists():
+              print(f"[WARN] {report_file} 없음")
+              raise SystemExit(0)
+
+          try:
+              data = json.loads(report_file.read_text(encoding="utf-8"))
+          except Exception as e:
+              print(f"[WARN] JSON 파싱 실패: {e}")
+              raise SystemExit(0)
+
+          rows = []
+          for t in data.get("tests", []):
+              call     = t.get("call", {}) or {}
+              longrepr = str(call.get("longrepr", ""))
+              if   "CRASH_DETECTED" in longrepr:  cls = "CRASH_DETECTED"
+              elif "VALIDATION_GAP" in longrepr:  cls = "VALIDATION_GAP"
+              elif t["outcome"] == "passed":      cls = "GRACEFUL_REJECTION"
+              elif t["outcome"] == "skipped":     cls = "SKIPPED"
+              else:                               cls = "OTHER_FAILURE"
+              rows.append({
+                  "test_id":        t["nodeid"].split("::")[-1],
+                  "nodeid":         t["nodeid"],
+                  "outcome":        t["outcome"],
+                  "classification": cls,
+                  "duration_s":     round((t.get("call") or {}).get("duration", 0), 3),
+                  "failure_reason": longrepr[:300].replace("\n", " "),
+              })
+
+          if rows:
+              fields = ["test_id","nodeid","outcome","classification","duration_s","failure_reason"]
+              with summary_out.open("w", newline="", encoding="utf-8-sig") as f:
+                  w = csv.DictWriter(f, fieldnames=fields)
+                  w.writeheader()
+                  w.writerows(rows)
+
+              crashes  = sum(1 for r in rows if r["classification"] == "CRASH_DETECTED")
+              gaps     = sum(1 for r in rows if r["classification"] == "VALIDATION_GAP")
+              graceful = sum(1 for r in rows if r["classification"] == "GRACEFUL_REJECTION")
+              sep = "=" * 60
+              print(f"\n{sep}")
+              print(f"  Crash Probe 결과")
+              print(f"{sep}")
+              print(f"  전체 프로브     : {len(rows)}")
+              print(f"  CRASH_DETECTED  : {crashes}  <- 서버가 죽은 입력값")
+              print(f"  VALIDATION_GAP  : {gaps}  <- 수락하면 안 되는데 success=True")
+              print(f"  GRACEFUL_REJECT : {graceful}  <- 올바른 에러 반환 (정상)")
+              print(f"{sep}")
+              print(f"  리포트 -> {summary_out}")
+          else:
+              print("[WARN] 프로브 결과 없음")
+          '@
+
+          $tmpPy = Join-Path $env:PROBE_REPORT_DIR "_gen_csv.py"
+          $pyCode | Set-Content -Path $tmpPy -Encoding utf8
+          python $tmpPy
+          Remove-Item $tmpPy -ErrorAction SilentlyContinue
+
+      # ─── 아티팩트 업로드 ─────────────────────────────────────────────────────
+      - name: Probe 리포트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-probe-reports-${{ github.run_id }}
+          path: ${{ env.PROBE_REPORT_DIR }}/
+          retention-days: 30
+
+      - name: Probe 서버 로그 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-probe-server-logs-${{ github.run_id }}
+          path: ${{ env.SERVER_LOG_DIR }}/
+          retention-days: 30
+
+      # ─── 최종 판정 ────────────────────────────────────────────────────────────
+      - name: 최종 판정 (Crash Probe)
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $crashCount = "${{ steps.crash_probe.outputs.crash_count }}"
+          $probeExit  = "${{ steps.crash_probe.outputs.probe_exit }}"
+
+          Write-Host "[Probe Result] crash_count=$crashCount  probe_exit=$probeExit"
+
+          if ([string]::IsNullOrWhiteSpace($crashCount)) {
+            Write-Host "::error::크래시 카운트 정보 없음 (probe 단계 실패)"
+            exit 1
+          }
+
+          if ([int]$crashCount -gt 0) {
+            Write-Host "::error::서버 크래시 감지 — CGO 호출 전 입력 검증 필요"
+            exit 2
+          }
+
+          if ($probeExit -ne "0") {
+            Write-Host "::warning::VALIDATION_GAP 또는 테스트 실패 감지"
+            exit 1
+          }
+
+          Write-Host "[Probe Result] 모든 프로브 통과 ✓"
+
+      # ─── 서버 종료 (항상) ─────────────────────────────────────────────────────
+      - name: 서버 종료 (Crash Probe)
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+          if ($env:PROBE_SERVER_PID) {
+            try {
+              Stop-Process -Id ([int]$env:PROBE_SERVER_PID) -Force -ErrorAction SilentlyContinue
+              Write-Host "[Probe Server] PID=$env:PROBE_SERVER_PID 종료"
+            } catch {}
+          }
+
+          # 포트에 남아있는 프로세스 강제 정리
+          $lines = netstat -ano -p tcp | Select-String ":8080\s"
+          foreach ($line in $lines) {
+            if ($line.ToString() -match "LISTENING\s+(\d+)") {
+              try { Stop-Process -Id ([int]$matches[1]) -Force -ErrorAction SilentlyContinue } catch {}
             }
           }
