@@ -94,6 +94,7 @@ class ExcelReportBuilder:
         base_url: str = "",
         endpoints: list[dict] | None = None,
         allure_results_dir: str | Path | None = None,
+        crash_probe_json_path: str | Path | None = None,
     ) -> Path:
         normalized_tests = self._load_test_results(
             pytest_json_path=pytest_json_path,
@@ -111,6 +112,9 @@ class ExcelReportBuilder:
 
         ws3 = wb.create_sheet("TC Table")
         self._build_tc_table(ws3, normalized_tests, base_url)
+
+        ws4 = wb.create_sheet("Crash Probe")
+        self._build_crash_probe_sheet(ws4, crash_probe_json_path)
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(self.output_path)
@@ -862,3 +866,108 @@ class ExcelReportBuilder:
             if m:
                 return m.group(1)
         return ""
+
+    # ─── Crash Probe sheet ────────────────────────────────────────────────────
+
+    _PROBE_CLS_COLORS: dict[str, str] = {
+        "CRASH_DETECTED":    "F4CCCC",
+        "VALIDATION_GAP":    "FCE5CD",
+        "GRACEFUL_REJECTION": "EAF7EA",
+        "SKIPPED":           "FFF2CC",
+        "OTHER_FAILURE":     "EFEFEF",
+    }
+
+    @staticmethod
+    def _classify_probe(test: dict[str, Any]) -> str:
+        call = test.get("call") or {}
+        longrepr = str(call.get("longrepr") or test.get("longrepr") or "")
+        if "CRASH_DETECTED" in longrepr:
+            return "CRASH_DETECTED"
+        if "VALIDATION_GAP" in longrepr:
+            return "VALIDATION_GAP"
+        outcome = str(test.get("outcome", "")).lower()
+        if outcome == "passed":
+            return "GRACEFUL_REJECTION"
+        if outcome == "skipped":
+            return "SKIPPED"
+        return "OTHER_FAILURE"
+
+    def _build_crash_probe_sheet(self, ws, report_path: str | Path | None) -> None:
+        """Robustness Layer B — Crash Probe 결과 시트."""
+        self._title_banner(ws, "A1:G1", "Crash Probe — Robustness Layer (B)")
+        ws.row_dimensions[1].height = 24
+
+        tests: list[dict[str, Any]] = []
+        if report_path:
+            p = Path(report_path)
+            if p.exists():
+                try:
+                    raw = json.loads(p.read_text(encoding="utf-8"))
+                    tests = raw.get("tests", [])
+                except Exception:
+                    pass
+
+        # ── KPI 요약 (row 2-4) ──────────────────────────────────────────────
+        crash_count    = sum(1 for t in tests if self._classify_probe(t) == "CRASH_DETECTED")
+        gap_count      = sum(1 for t in tests if self._classify_probe(t) == "VALIDATION_GAP")
+        graceful_count = sum(1 for t in tests if self._classify_probe(t) == "GRACEFUL_REJECTION")
+        other_count    = len(tests) - crash_count - gap_count - graceful_count
+
+        kpi_labels  = ["전체 Probe", "CRASH_DETECTED", "VALIDATION_GAP", "GRACEFUL_REJECTION", "기타"]
+        kpi_values  = [len(tests), crash_count, gap_count, graceful_count, other_count]
+        kpi_colors  = ["BDD7EE",    "F4CCCC",        "FCE5CD",       "EAF7EA",           "EFEFEF"]
+        kpi_fonts   = ["1F497D",    "C00000",         "7F3F00",       "375623",           "404040"]
+
+        for ci, (label, value, bg, fc) in enumerate(zip(kpi_labels, kpi_values, kpi_colors, kpi_fonts), start=1):
+            lc = ws.cell(row=2, column=ci, value=label)
+            lc.font = Font(bold=True, color="FFFFFF")
+            lc.fill = PatternFill(fill_type="solid", fgColor=_BLUE_DARK)
+            lc.alignment = Alignment(horizontal="center", vertical="center")
+            vc = ws.cell(row=3, column=ci, value=value)
+            vc.font = Font(bold=True, size=14, color=fc)
+            vc.fill = PatternFill(fill_type="solid", fgColor=bg)
+            vc.alignment = Alignment(horizontal="center", vertical="center")
+
+        ws.row_dimensions[4].height = 6  # separator
+
+        # ── 결과 테이블 ─────────────────────────────────────────────────────
+        headers = ["#", "Test ID", "Outcome", "Classification", "Duration (s)", "Endpoint / Nodeid", "Failure Reason"]
+        self._header_row(ws, 5, headers)
+
+        col_widths = [5, 36, 10, 22, 12, 52, 70]
+        for i, w in enumerate(col_widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        if not tests:
+            ws.cell(row=6, column=1, value="(Crash Probe 결과 없음 — 파일 미존재 또는 job 미실행)")
+            ws.cell(row=6, column=1).font = Font(italic=True, color="888888")
+            return
+
+        for idx, t in enumerate(tests, start=1):
+            call = t.get("call") or {}
+            longrepr = str(call.get("longrepr") or t.get("longrepr") or "")
+            duration = round(float((call.get("duration") or t.get("duration") or 0)), 3)
+            outcome = str(t.get("outcome", "")).lower()
+            nodeid = t.get("nodeid", "")
+            cls = self._classify_probe(t)
+
+            row_vals = [
+                idx,
+                nodeid.split("::")[-1],
+                outcome.upper(),
+                cls,
+                duration,
+                nodeid,
+                longrepr[:300].replace("\n", " "),
+            ]
+
+            r = idx + 5
+            bg = self._PROBE_CLS_COLORS.get(cls, "EFEFEF")
+            for ci, val in enumerate(row_vals, start=1):
+                cell = ws.cell(row=r, column=ci, value=val)
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                cell.fill = PatternFill(fill_type="solid", fgColor=bg)
+
+            ws.row_dimensions[r].height = 38
+
+        ws.freeze_panes = "A6"

@@ -147,11 +147,13 @@ class ExcelReportBuilder2:
         base_url: str = "",
         endpoints: list[dict] | None = None,
         allure_results_dir: str | Path | None = None,
+        crash_probe_json_path: str | Path | None = None,
     ) -> Path:
         tests = self._load_test_results(
             pytest_json_path=pytest_json_path,
             allure_results_dir=allure_results_dir,
         )
+        probe_tests = self._load_probe_tests(crash_probe_json_path)
 
         wb = Workbook()
 
@@ -163,10 +165,14 @@ class ExcelReportBuilder2:
         self._build_endpoint_summary(ws2, tests)
 
         ws3 = wb.create_sheet("종합 요약")
-        self._build_overall_summary(ws3, runner_summary, tests, source_file, base_url)
+        self._build_overall_summary(ws3, runner_summary, tests, source_file, base_url,
+                                    probe_tests=probe_tests)
 
         ws4 = wb.create_sheet("전체 결과 상세")
         self._build_detail_table(ws4, tests, base_url)
+
+        ws5 = wb.create_sheet("Crash Probe")
+        self._build_crash_probe_sheet(ws5, probe_tests)
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(self.output_path)
@@ -328,7 +334,7 @@ class ExcelReportBuilder2:
 
         ws.freeze_panes = "A3"
 
-    def _build_overall_summary(self, ws, summary: dict[str, Any], tests: list[dict[str, Any]], source_file: str, base_url: str) -> None:
+    def _build_overall_summary(self, ws, summary: dict[str, Any], tests: list[dict[str, Any]], source_file: str, base_url: str, probe_tests: list[dict[str, Any]] | None = None) -> None:
         self._title_banner(ws, "A1:F1", "자동화 테스트 최종 리포트 — 종합 요약")
         ws.row_dimensions[1].height = 28
         for col, width in zip(["A", "B", "C", "D", "E", "F"], [22, 18, 18, 18, 18, 36]):
@@ -461,6 +467,49 @@ class ExcelReportBuilder2:
             cnt_c.border = _BORDER
 
         row_cursor = row_cursor + 2 + len(top_reasons)
+
+        # ── Robustness Layer (Crash Probe) 요약 ─────────────────────────────
+        if probe_tests:
+            self._section_header(ws, f"A{row_cursor}:F{row_cursor}", "🛡️ Robustness Layer (B) — Crash Probe 요약")
+            probe_hdr = ["전체 Probe", "CRASH_DETECTED", "VALIDATION_GAP", "GRACEFUL_REJECTION", "기타"]
+            crash_c    = sum(1 for t in probe_tests if self._classify_probe(t) == "CRASH_DETECTED")
+            gap_c      = sum(1 for t in probe_tests if self._classify_probe(t) == "VALIDATION_GAP")
+            graceful_c = sum(1 for t in probe_tests if self._classify_probe(t) == "GRACEFUL_REJECTION")
+            other_c    = len(probe_tests) - crash_c - gap_c - graceful_c
+            probe_vals = [len(probe_tests), crash_c, gap_c, graceful_c, other_c]
+            probe_bgs  = ["BDD7EE", "F4CCCC", "FCE5CD", "C6EFCE", "EFEFEF"]
+            probe_fcs  = ["1F497D", "C00000", "7F3F00", "375623", "404040"]
+
+            for ci, (label, value, bg, fc) in enumerate(zip(probe_hdr, probe_vals, probe_bgs, probe_fcs), start=1):
+                lc = ws.cell(row=row_cursor + 1, column=ci, value=label)
+                lc.font = Font(bold=True, color=_WHITE, size=9)
+                lc.fill = PatternFill("solid", start_color=_BLUE_DARK, end_color=_BLUE_DARK)
+                lc.alignment = Alignment(horizontal="center", vertical="center")
+                lc.border = _BORDER
+                vc = ws.cell(row=row_cursor + 2, column=ci, value=value)
+                vc.font = Font(bold=True, size=14, color=fc)
+                vc.fill = PatternFill("solid", start_color=bg, end_color=bg)
+                vc.alignment = Alignment(horizontal="center", vertical="center")
+                vc.border = _BORDER
+
+            # Crash probe 판정
+            verdict_row = row_cursor + 3
+            verdict_msg = (
+                f"⛔ 서버 크래시 {crash_c}건 감지 — CGO 호출 전 입력 검증 필요"
+                if crash_c > 0
+                else ("⚠️ VALIDATION_GAP 감지 — 비정상 입력 수락 여부 확인 필요" if gap_c > 0 else "✅ 모든 프로브 통과 (GRACEFUL_REJECTION)")
+            )
+            vbg = "F4CCCC" if crash_c > 0 else ("FCE5CD" if gap_c > 0 else "C6EFCE")
+            vc = ws.cell(row=verdict_row, column=1, value=verdict_msg)
+            vc.font = Font(bold=True, size=10,
+                           color=("C00000" if crash_c > 0 else ("7F3F00" if gap_c > 0 else "375623")))
+            vc.fill = PatternFill("solid", start_color=vbg, end_color=vbg)
+            vc.alignment = Alignment(horizontal="left", vertical="center")
+            vc.border = _BORDER
+            ws.merge_cells(f"A{verdict_row}:F{verdict_row}")
+
+            row_cursor = verdict_row + 2
+
         self._section_header(ws, f"A{row_cursor}:F{row_cursor}", "🖥️ 실행 환경 정보")
         env_rows = [
             ("생성일시", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
@@ -806,6 +855,118 @@ class ExcelReportBuilder2:
         if msg:
             parts.append(str(msg)[:40])
         return " / ".join(parts)
+
+    # ─── Crash Probe 지원 ─────────────────────────────────────────────────────
+
+    _PROBE_CLS_COLORS: dict[str, str] = {
+        "CRASH_DETECTED":     "F4CCCC",
+        "VALIDATION_GAP":     "FCE5CD",
+        "GRACEFUL_REJECTION": "C6EFCE",
+        "SKIPPED":            "FFF2CC",
+        "OTHER_FAILURE":      "EFEFEF",
+    }
+
+    @staticmethod
+    def _load_probe_tests(report_path: str | Path | None) -> list[dict[str, Any]]:
+        if not report_path:
+            return []
+        p = Path(report_path)
+        if not p.exists():
+            return []
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            return raw.get("tests", [])
+        except Exception:
+            return []
+
+    @staticmethod
+    def _classify_probe(test: dict[str, Any]) -> str:
+        call = test.get("call") or {}
+        longrepr = str(call.get("longrepr") or test.get("longrepr") or "")
+        if "CRASH_DETECTED" in longrepr:
+            return "CRASH_DETECTED"
+        if "VALIDATION_GAP" in longrepr:
+            return "VALIDATION_GAP"
+        outcome = str(test.get("outcome", "")).lower()
+        if outcome == "passed":
+            return "GRACEFUL_REJECTION"
+        if outcome == "skipped":
+            return "SKIPPED"
+        return "OTHER_FAILURE"
+
+    def _build_crash_probe_sheet(self, ws, probe_tests: list[dict[str, Any]]) -> None:
+        """Robustness Layer B — Crash Probe 결과 시트."""
+        self._title_banner(ws, "A1:G1", "Crash Probe — Robustness Layer (B)")
+        ws.row_dimensions[1].height = 26
+
+        # KPI 행
+        crash_c    = sum(1 for t in probe_tests if self._classify_probe(t) == "CRASH_DETECTED")
+        gap_c      = sum(1 for t in probe_tests if self._classify_probe(t) == "VALIDATION_GAP")
+        graceful_c = sum(1 for t in probe_tests if self._classify_probe(t) == "GRACEFUL_REJECTION")
+        other_c    = len(probe_tests) - crash_c - gap_c - graceful_c
+
+        kpi = [("전체 Probe", len(probe_tests), "BDD7EE", "1F497D"),
+               ("CRASH_DETECTED", crash_c, "F4CCCC", "C00000"),
+               ("VALIDATION_GAP", gap_c, "FCE5CD", "7F3F00"),
+               ("GRACEFUL_REJECTION", graceful_c, "C6EFCE", "375623"),
+               ("기타", other_c, "EFEFEF", "404040")]
+
+        for ci, (label, value, bg, fc) in enumerate(kpi, start=1):
+            lc = ws.cell(row=2, column=ci, value=label)
+            lc.font = Font(bold=True, color=_WHITE, size=9)
+            lc.fill = PatternFill("solid", start_color=_BLUE_DARK, end_color=_BLUE_DARK)
+            lc.alignment = Alignment(horizontal="center", vertical="center")
+            lc.border = _BORDER
+            vc = ws.cell(row=3, column=ci, value=value)
+            vc.font = Font(bold=True, size=14, color=fc)
+            vc.fill = PatternFill("solid", start_color=bg, end_color=bg)
+            vc.alignment = Alignment(horizontal="center", vertical="center")
+            vc.border = _BORDER
+
+        ws.row_dimensions[4].height = 6
+
+        # 결과 테이블
+        headers = ["#", "Test ID", "Outcome", "Classification", "Duration (s)", "Endpoint / Nodeid", "Failure Reason"]
+        self._header_row(ws, 5, headers)
+        for i, w in enumerate([5, 38, 10, 22, 12, 52, 70], start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        if not probe_tests:
+            ws.cell(row=6, column=1, value="(Crash Probe 결과 없음 — 파일 미존재 또는 job 미실행)")
+            ws.cell(row=6, column=1).font = Font(italic=True, color="888888")
+            return
+
+        ca = Alignment(horizontal="center", vertical="top", wrap_text=True)
+        la = Alignment(horizontal="left",  vertical="top", wrap_text=True)
+
+        for idx, t in enumerate(probe_tests, start=1):
+            call = t.get("call") or {}
+            longrepr = str(call.get("longrepr") or t.get("longrepr") or "")
+            duration = round(float(call.get("duration") or t.get("duration") or 0), 3)
+            outcome = str(t.get("outcome", "")).lower()
+            nodeid = t.get("nodeid", "")
+            cls = self._classify_probe(t)
+
+            row_vals = [
+                idx,
+                nodeid.split("::")[-1],
+                outcome.upper(),
+                cls,
+                duration,
+                nodeid,
+                longrepr[:300].replace("\n", " "),
+            ]
+            r = idx + 5
+            bg = self._PROBE_CLS_COLORS.get(cls, "EFEFEF")
+            for ci, val in enumerate(row_vals, start=1):
+                c = ws.cell(row=r, column=ci, value=val)
+                c.border = _BORDER
+                c.alignment = ca if ci in (1, 3, 4, 5) else la
+                c.fill = PatternFill("solid", start_color=bg, end_color=bg)
+            ws.row_dimensions[r].height = 38
+
+        ws.freeze_panes = "A6"
+        ws.auto_filter.ref = f"A5:G{len(probe_tests) + 5}"
 
     def _build_actual_resp(self, item: dict[str, Any]) -> str:
         parts = []

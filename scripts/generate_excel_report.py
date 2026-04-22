@@ -106,6 +106,8 @@ def main() -> int:
                         help="Swagger/OpenAPI 파일 경로 (API List 시트용)")
     parser.add_argument("--config",     default="config/config.yaml",
                         help="config.yaml 경로")
+    parser.add_argument("--probe-report-dir", default="",
+                        help="Crash Probe 리포트 디렉터리 (reports/crash_probe)")
     args = parser.parse_args()
 
     # config 로드
@@ -130,9 +132,19 @@ def main() -> int:
     swagger_source = os.getenv("SWAGGER_SOURCE", "").strip()
     display_source = swagger_source or args.swagger
 
+    # Crash Probe 리포트 경로 결정 (--probe-report-dir 우선, 없으면 환경변수, 없으면 기본값)
+    probe_report_dir = (
+        args.probe_report_dir
+        or os.getenv("PROBE_REPORT_DIR", "")
+        or "reports/crash_probe"
+    )
+    probe_json = Path(probe_report_dir) / "report.json"
+    crash_probe_json_path: Path | None = probe_json if probe_json.exists() else None
+
     print(f"[Excel] passed={summary['passed']}  failed={summary['failed']}  total={summary['total']}")
     print(f"[Excel] json_report={json_report}")
     print(f"[Excel] endpoints={len(endpoints)}")
+    print(f"[Excel] probe_json={probe_json}  (found={crash_probe_json_path is not None})")
     print(f"[Excel] output={xlsx_path}")
     print(f"[Excel] output2={xlsx_path2}")
 
@@ -147,6 +159,7 @@ def main() -> int:
             base_url=args.base_url,
             endpoints=endpoints,
             allure_results_dir=allure_dir if allure_dir.exists() else None,
+            crash_probe_json_path=crash_probe_json_path,
         )
         print(f"[Excel] 리포트1 완료: {out}")
     except Exception as e:
@@ -163,6 +176,7 @@ def main() -> int:
                 base_url=args.base_url,
                 endpoints=endpoints,
                 allure_results_dir=allure_dir if allure_dir.exists() else None,
+                crash_probe_json_path=crash_probe_json_path,
             )
             print(f"[Excel] 리포트2 완료: {out2}")
         except Exception as e:

@@ -788,37 +788,6 @@ jobs:
           "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           exit 0
 
-      - name: Excel 리포트 생성
-        if: always()
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          $env:PYTHONIOENCODING = "utf-8"
-
-          $projectRoot = (Get-Location).Path
-          $env:PYTHONPATH = $projectRoot
-          Write-Host "[Excel] PYTHONPATH=$projectRoot"
-
-          $openpyxlCheck = python -c "import openpyxl; print('openpyxl', openpyxl.__version__)" 2>&1
-          Write-Host "[Excel] $openpyxlCheck"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "[Excel] openpyxl 미설치 — pip install 시도"
-            pip install "openpyxl>=3.1" --quiet
-          }
-
-          $swaggerFile = $env:DOWNLOADED_SWAGGER
-          if (-not $swaggerFile) { $swaggerFile = "" }
-
-          python scripts\generate_excel_report.py `
-            --report-dir "$env:REPORT_DIR" `
-            --base-url   "$env:BASE_URL" `
-            --swagger    "$swaggerFile" `
-            --config     "config\config.yaml"
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::warning::Excel 리포트 생성 실패 (exit=$LASTEXITCODE). 파이프라인은 계속합니다."
-          }
-
       - name: 서버 health check (테스트 후)
         id: post_health
         if: always()
@@ -868,19 +837,17 @@ jobs:
           path: ${{ env.SERVER_LOG_DIR }}/
           retention-days: 14
 
-      - name: 테스트 레포트 업로드
+      - name: pytest 원시 결과 업로드 (generate-report 에서 xlsx 생성됨)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports-${{ github.run_id }}
+          name: pytest-raw-${{ github.run_id }}
           path: |
-            ${{ env.REPORT_DIR }}/summary.html
             ${{ env.REPORT_DIR }}/report.json
+            ${{ env.REPORT_DIR }}/pytest_report.json
+            ${{ env.REPORT_DIR }}/test_diag.jsonl
             ${{ env.REPORT_DIR }}/pytest_output.txt
-            ${{ env.REPORT_DIR }}/allure-results/
-            ${{ env.REPORT_DIR }}/test_report.xlsx
-            ${{ env.REPORT_DIR }}/test_report2.xlsx
-          retention-days: 14
+          retention-days: 3
 
       - name: 상태 캐시 업데이트
         if: steps.pre_health.outputs.server_up == 'true'
@@ -944,7 +911,86 @@ jobs:
           }
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Job 3 — Robustness Layer (B): Crash Probe
+  # Job 3 — Excel 리포트 통합 생성 (Functional + Robustness 결과 병합)
+  # run-pipeline + crash-probe 양쪽이 끝난 뒤 실행.
+  # ══════════════════════════════════════════════════════════════════════════
+  generate-report:
+    name: Excel 리포트 통합 생성
+    needs: [detect-changes, run-pipeline, crash-probe]
+    if: always() && needs.detect-changes.outputs.should_run == 'true'
+    runs-on: [self-hosted, windows]
+
+    env:
+      BASE_URL:          ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
+      REPORT_DIR:        reports
+      PROBE_REPORT_DIR:  reports/crash_probe
+      SWAGGER_SOURCE:    ${{ needs.detect-changes.outputs.swagger_source }}
+      PYTHONIOENCODING:  utf-8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Python 환경 설정
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 의존성 설치
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Excel 리포트 통합 생성
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+
+          $projectRoot = (Get-Location).Path
+          $env:PYTHONPATH = $projectRoot
+          Write-Host "[Excel] PYTHONPATH=$projectRoot"
+
+          $openpyxlCheck = python -c "import openpyxl; print('openpyxl', openpyxl.__version__)" 2>&1
+          Write-Host "[Excel] $openpyxlCheck"
+          if ($LASTEXITCODE -ne 0) {
+            pip install "openpyxl>=3.1" --quiet
+          }
+
+          $swaggerFile = $env:SWAGGER_SOURCE
+          if (-not $swaggerFile) { $swaggerFile = "" }
+
+          python scripts\generate_excel_report.py `
+            --report-dir       "$env:REPORT_DIR" `
+            --probe-report-dir "$env:PROBE_REPORT_DIR" `
+            --base-url         "$env:BASE_URL" `
+            --swagger          "$swaggerFile" `
+            --config           "config\config.yaml"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Excel 리포트 생성 실패 (exit=$LASTEXITCODE)"
+          }
+
+      - name: 통합 리포트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.run_id }}
+          path: |
+            ${{ env.REPORT_DIR }}/summary.html
+            ${{ env.REPORT_DIR }}/report.json
+            ${{ env.REPORT_DIR }}/pytest_output.txt
+            ${{ env.REPORT_DIR }}/allure-results/
+            ${{ env.REPORT_DIR }}/test_report.xlsx
+            ${{ env.REPORT_DIR }}/test_report2.xlsx
+          retention-days: 14
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 4 — Robustness Layer (B): Crash Probe
   # 비정상 입력에 대해 서버가 5xx crash 없이 응답하는지 검증한다.
   # ══════════════════════════════════════════════════════════════════════════
   crash-probe:
