@@ -56,8 +56,7 @@ tc_generation:
       - missing_required
       - wrong_type
       - boundary
-      - invalid_enum
-      - semantic_probe
+      - input_validation   # formerly semantic_probe; invalid_enum removed (no enum in QFEapi.json)
       - raw_image_relation
 
   ai_augment:

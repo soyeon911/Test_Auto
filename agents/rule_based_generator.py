@@ -7,9 +7,13 @@ For each API endpoint it generates pytest functions covering:
   missing_required   — omit each required field/param
   wrong_type         — send wrong type per param/field
   boundary           — schema/enriched min/max boundary values
-  invalid_enum       — unlisted value for enum params/body
-  semantic_probe     — semantic-tag-specific invalid / exploratory probes
+  input_validation   — semantic-tag-specific invalid / exploratory probes
+                       (formerly semantic_probe; covers base64_image, base64_template,
+                        threshold_numeric, numeric_id, boolean_flag tag-based inputs)
   raw_image_relation — cross-field relation checks for raw image endpoints
+                       (width x height x channel vs image_data size mismatch / invalid channel)
+
+Note: invalid_enum rule removed — QFEapi.json has no enum fields.
 
 The output is a plain Python code string, ready to be written to a .py file
 or fed as context to the AI augmentation step.
@@ -107,7 +111,7 @@ _FACE_OPERATION_PATHS: frozenset[str] = frozenset({
 
 _RAW_IMAGE_FIELDS: frozenset[str] = frozenset({"width", "height", "channel", "image_data"})
 
-_SEMANTIC_PROBES: dict[str, list[dict[str, Any]]] = {
+_INPUT_VALIDATION_PROBES: dict[str, list[dict[str, Any]]] = {
     "base64_image": [
         {"value": "not_base64!@#", "label": "invalid_b64", "policy": "must_fail"},
         {"value": "", "label": "empty_b64", "policy": "must_fail"},
@@ -131,7 +135,7 @@ _SEMANTIC_PROBES: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
-_SEMANTIC_PROBE_DIAG: dict[tuple[str, str], tuple[str, str]] = {
+_INPUT_VALIDATION_DIAG: dict[tuple[str, str], tuple[str, str]] = {
     ("base64_image", "invalid_b64"): ("domain", "invalid_base64"),
     ("base64_image", "empty_b64"): ("domain", "invalid_base64"),
     ("base64_image", "no_face_image"): ("domain", "no_face_detected"),
@@ -208,12 +212,15 @@ class RuleBasedTCGenerator:
                     "missing_required",
                     "wrong_type",
                     "boundary",
-                    "invalid_enum",
-                    "semantic_probe",
+                    "input_validation",
                     "raw_image_relation",
                 ],
             )
         )
+        # 하위 호환: config에 구 이름(semantic_probe)이 남아있는 경우도 input_validation으로 인식
+        if "semantic_probe" in self.enabled_rules:
+            self.enabled_rules.discard("input_validation")
+            self.enabled_rules.add("input_validation")
         self.error_mode: str = config.get("server", {}).get("error_response_mode", "standard")
         self.match_threshold: float = float(
             config.get("server", {}).get("match_threshold", 0.0)
@@ -643,10 +650,8 @@ class RuleBasedTCGenerator:
             blocks.extend(self._wrong_type(op_id, method, path, params, req_body))
         if "boundary" in self.enabled_rules:
             blocks.extend(self._boundary(op_id, method, path, params, req_body, success_statuses))
-        if "invalid_enum" in self.enabled_rules:
-            blocks.extend(self._invalid_enum(op_id, method, path, params, req_body))
-        if "semantic_probe" in self.enabled_rules:
-            blocks.extend(self._semantic_probe(op_id, method, path, params, req_body))
+        if "input_validation" in self.enabled_rules:
+            blocks.extend(self._input_validation(op_id, method, path, params, req_body))
         if "raw_image_relation" in self.enabled_rules:
             blocks.extend(self._raw_image_relation(op_id, method, path, params, req_body))
 
@@ -1504,7 +1509,7 @@ class RuleBasedTCGenerator:
 
         return blocks
 
-    def _semantic_probe(
+    def _input_validation(
         self,
         op_id: str,
         method: str,
@@ -1529,7 +1534,7 @@ class RuleBasedTCGenerator:
             tag = self._normalize_tag(schema)
             if tag not in SUPPORTED_QFE_PROBE_TAGS:
                 continue
-            probes = _SEMANTIC_PROBES.get(tag, [])
+            probes = _INPUT_VALIDATION_PROBES.get(tag, [])
             if not probes:
                 continue
 
@@ -1553,18 +1558,18 @@ class RuleBasedTCGenerator:
                 else:
                     continue
 
-                _s_axis, _s_rc = _SEMANTIC_PROBE_DIAG.get(
+                _s_axis, _s_rc = _INPUT_VALIDATION_DIAG.get(
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
-                if not self._register_case(method, resolved_path, p["name"], repr(probe_val), _s_rc, "semantic_probe"):
+                if not self._register_case(method, resolved_path, p["name"], repr(probe_val), _s_rc, "input_validation"):
                     continue
 
                 exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
 
                 blocks.append(
                     self._api_test_block(
-                        fname=f"test_{op_id}_semantic_{_safe_name(p['name'])}_{probe_label}",
-                        docstring=f"[rule:semantic_probe] param '{p['name']}' tag={tag} probe={probe_label} policy={policy}.",
+                        fname=f"test_{op_id}_input_val_{_safe_name(p['name'])}_{probe_label}",
+                        docstring=f"[rule:input_validation] param '{p['name']}' tag={tag} probe={probe_label} policy={policy}.",
                         call_str=call,
                         assertion_str=self._build_policy_assertion(policy, p["name"], f"semantic:{probe_label}"),
                         axis=_s_axis,
@@ -1580,7 +1585,7 @@ class RuleBasedTCGenerator:
                         request_headers=None,
                         request_body=req_body_payload,
                         expected_status_display=f"200 / {exp_app}",
-                        rule_type="semantic_probe",
+                        rule_type="input_validation",
                         rule_subtype=probe_label,
                         semantic_tag=tag,
                         policy=policy,
@@ -1595,7 +1600,7 @@ class RuleBasedTCGenerator:
             tag = self._normalize_tag(field_schema)
             if tag not in SUPPORTED_QFE_PROBE_TAGS:
                 continue
-            probes = _SEMANTIC_PROBES.get(tag, [])
+            probes = _INPUT_VALIDATION_PROBES.get(tag, [])
             if not probes:
                 continue
 
@@ -1606,18 +1611,18 @@ class RuleBasedTCGenerator:
                 bad_body = {**base_body, field: probe_val}
                 resolved_path = _build_url(path, base_path_params)
                 call = _render_call(method, path, base_path_params, base_query_params, bad_body)
-                _s_axis, _s_rc = _SEMANTIC_PROBE_DIAG.get(
+                _s_axis, _s_rc = _INPUT_VALIDATION_DIAG.get(
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
 
-                if not self._register_case(method, resolved_path, field, repr(probe_val), _s_rc, "semantic_probe"):
+                if not self._register_case(method, resolved_path, field, repr(probe_val), _s_rc, "input_validation"):
                     continue
 
                 exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
                 blocks.append(
                     self._api_test_block(
-                        fname=f"test_{op_id}_semantic_{_safe_name(field)}_{probe_label}",
-                        docstring=f"[rule:semantic_probe] body field '{field}' tag={tag} probe={probe_label} policy={policy}.",
+                        fname=f"test_{op_id}_input_val_{_safe_name(field)}_{probe_label}",
+                        docstring=f"[rule:input_validation] body field '{field}' tag={tag} probe={probe_label} policy={policy}.",
                         call_str=call,
                         assertion_str=self._build_policy_assertion(policy, field, f"semantic:{probe_label}"),
                         axis=_s_axis,
@@ -1633,7 +1638,7 @@ class RuleBasedTCGenerator:
                         request_headers=None,
                         request_body=bad_body,
                         expected_status_display=f"200 / {exp_app}",
-                        rule_type="semantic_probe",
+                        rule_type="input_validation",
                         rule_subtype=probe_label,
                         semantic_tag=tag,
                         policy=policy,
@@ -1652,8 +1657,8 @@ class RuleBasedTCGenerator:
             _data = body.get("data") or {{}}
 
             assert isinstance(_data.get("{score_field}"), (int, float)), (
-                f"[FAIL] domain: expected numeric '{score_field}' in data\\n"
-                f"  data      : {{_data}}\\n"
+                f"[FAIL] domain: expected numeric '{score_field}' in data\n"
+                f"  data      : {{_data}}\n"
                 f"  Full body : {{resp.text[:300]}}"
             )
             """
