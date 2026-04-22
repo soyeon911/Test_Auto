@@ -219,7 +219,7 @@ class RuleBasedTCGenerator:
         )
         # 하위 호환: config에 구 이름(semantic_probe)이 남아있는 경우도 input_validation으로 인식
         if "semantic_probe" in self.enabled_rules:
-            self.enabled_rules.discard("input_validation")
+            self.enabled_rules.discard("semantic_probe")
             self.enabled_rules.add("input_validation")
         self.error_mode: str = config.get("server", {}).get("error_response_mode", "standard")
         self.match_threshold: float = float(
@@ -760,30 +760,6 @@ class RuleBasedTCGenerator:
                     """
                         )
                     )
-
-        if "invalid_enum" in self.enabled_rules:
-            for p in all_params:
-                enum_vals = p["schema"].get("enum")
-                if not enum_vals:
-                    continue
-                fname = f"test_{op_id}_invalid_enum_{_safe_name(p['name'])}"
-                invalid_val = "__INVALID__"
-                args_repr = ", ".join(
-                    f"{pp['name']}={repr(invalid_val) if pp['name'] == p['name'] else repr(good_val(pp))}"
-                    for pp in required_params
-                )
-                blocks.append(
-                    textwrap.dedent(
-                        f"""\
-                    def {fname}():
-                        \"\"\"[rule:invalid_enum] '{p['name']}' outside {enum_vals} → ValueError.\"\"\"
-                        import {module_name}
-                        import pytest
-                        with pytest.raises((ValueError, TypeError)):
-                            {module_name}.{func_name}({args_repr})
-                """
-                    )
-                )
 
         return "\n\n\n".join(b for b in blocks if b)
 
@@ -1400,115 +1376,6 @@ class RuleBasedTCGenerator:
 
         return blocks
 
-    def _invalid_enum(
-        self,
-        op_id: str,
-        method: str,
-        path: str,
-        params: list[dict],
-        req_body: dict | None,
-    ) -> list[str]:
-        blocks: list[str] = []
-        path_params = {
-            p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params if p["in"] == "path"
-        }
-        query_params = {
-            p["name"]: self._good_value(p["name"], p.get("schema", {}))
-            for p in params if p["in"] == "query" and p.get("required")
-        }
-
-        for p in params:
-            enum_vals = p["schema"].get("enum")
-            if not enum_vals:
-                continue
-
-            invalid_val = "__INVALID_ENUM_VALUE__"
-            req_query = query_params
-            req_body_payload = self._build_valid_body(req_body)
-
-            if p["in"] == "path":
-                bad_path = {**path_params, p["name"]: invalid_val}
-                resolved_path = _build_url(path, bad_path)
-                call = _render_call(method, path, bad_path, query_params, req_body_payload)
-            elif p["in"] == "query":
-                bad_query = {**query_params, p["name"]: invalid_val}
-                resolved_path = _build_url(path, path_params)
-                req_query = bad_query
-                call = _render_call(method, path, path_params, bad_query, req_body_payload)
-            else:
-                continue
-
-            if not self._register_case(method, resolved_path, p["name"], repr(invalid_val), "enum_violation", "invalid_enum"):
-                continue
-
-            blocks.append(
-                self._api_test_block(
-                    fname=f"test_{op_id}_invalid_enum_{_safe_name(p['name'])}",
-                    docstring=f"[rule:invalid_enum] '{p['name']}' outside allowed enum {enum_vals}.",
-                    call_str=call,
-                    assertion_str=self._build_policy_assertion("must_fail", p["name"], "invalid_enum"),
-                    axis="domain",
-                    reason_code="enum_violation",
-                    target_field=p["name"],
-                    test_condition=f"'{p['name']}' = '__INVALID_ENUM_VALUE__' (allowed: {enum_vals})",
-                    expected_http="200",
-                    expected_app="success=false, error_code<0",
-                    error_detail=f"domain.enum_violation.{p['name']}",
-                    request_method=method,
-                    request_path=resolved_path,
-                    request_query=req_query,
-                    request_headers=None,
-                    request_body=req_body_payload,
-                    expected_status_display="200 / success=false, error_code<0",
-                    rule_type="invalid_enum",
-                    rule_subtype="enum_out_of_set",
-                    expected_result_type="expected_fail",
-                )
-            )
-
-        if req_body:
-            body_schema = req_body.get("schema", {})
-            properties = body_schema.get("properties", {})
-            for field, field_schema in properties.items():
-                enum_vals = field_schema.get("enum")
-                if not enum_vals:
-                    continue
-
-                bad_body = {**(self._build_valid_body(req_body) or {}), field: "__INVALID_ENUM_VALUE__"}
-                resolved_path = _build_url(path, path_params)
-                call = _render_call(method, path, path_params, query_params, bad_body)
-
-                if not self._register_case(method, resolved_path, field, "'__INVALID_ENUM_VALUE__'", "enum_violation", "invalid_enum"):
-                    continue
-
-                blocks.append(
-                    self._api_test_block(
-                        fname=f"test_{op_id}_invalid_enum_body_{_safe_name(field)}",
-                        docstring=f"[rule:invalid_enum] body field '{field}' outside allowed enum {enum_vals}.",
-                        call_str=call,
-                        assertion_str=self._build_policy_assertion("must_fail", field, "invalid_enum"),
-                        axis="domain",
-                        reason_code="enum_violation",
-                        target_field=field,
-                        test_condition=f"Body field '{field}' = '__INVALID_ENUM_VALUE__' (allowed: {enum_vals})",
-                        expected_http="200",
-                        expected_app="success=false, error_code<0",
-                        error_detail=f"domain.enum_violation.{field}",
-                        request_method=method,
-                        request_path=resolved_path,
-                        request_query=query_params,
-                        request_headers=None,
-                        request_body=bad_body,
-                        expected_status_display="200 / success=false, error_code<0",
-                        rule_type="invalid_enum",
-                        rule_subtype="enum_out_of_set",
-                        expected_result_type="expected_fail",
-                    )
-                )
-
-        return blocks
-
     def _input_validation(
         self,
         op_id: str,
@@ -1804,46 +1671,10 @@ class RuleBasedTCGenerator:
         base_body = self._build_valid_body(req_body) or {}
         expected_size = _RAW_W * _RAW_H * _RAW_C
 
-        # valid relation
-        valid_body = {
-            **base_body,
-            "width": _RAW_W,
-            "height": _RAW_H,
-            "channel": _RAW_C,
-            "image_data": _RAW_IMG_VALID_B64,
-        }
-        if self._register_case(method, resolved_path, "image_data", f"valid:{expected_size}", "invalid_image_relation", "raw_image_relation"):
-            blocks.append(
-                self._api_test_block(
-                    fname=f"test_{op_id}_raw_image_relation_valid",
-                    docstring=(
-                        f"[rule:raw_image_relation] w={_RAW_W}xh={_RAW_H}xc={_RAW_C}={expected_size}B "
-                        "-> image_data size matches (must_pass)."
-                    ),
-                    call_str=_render_call(method, path, path_params, query_params, valid_body),
-                    assertion_str=self._build_policy_assertion("must_pass", "image_data", "raw_image_valid"),
-                    axis="domain",
-                    reason_code="invalid_image_relation",
-                    target_field="image_data",
-                    test_condition=(
-                        f"width={_RAW_W}, height={_RAW_H}, channel={_RAW_C}, "
-                        f"image_data={expected_size} bytes -- relation VALID"
-                    ),
-                    expected_http="200",
-                    expected_app="success=true, error_code>=0",
-                    error_detail="domain.invalid_image_relation.image_data.valid",
-                    request_method=method,
-                    request_path=resolved_path,
-                    request_query=query_params,
-                    request_headers=None,
-                    request_body=valid_body,
-                    expected_status_display="200 / success=true (relation valid)",
-                    rule_type="raw_image_relation",
-                    rule_subtype="relation_valid",
-                    endpoint_profile="raw_image",
-                    expected_result_type="expected_pass",
-                )
-            )
+        # NOTE: raw_image_relation_valid(must_pass) is omitted —
+        # positive rule already covers it via _positive_raw_image().
+        # This rule only generates negative/boundary cases.
+
 
         # size mismatch
         mismatch_body = {

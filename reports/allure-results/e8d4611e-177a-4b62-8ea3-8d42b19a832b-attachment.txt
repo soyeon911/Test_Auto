@@ -1,0 +1,7 @@
+
+  [CONNECTION_ERROR] valid_b64_1byte | severity=HIGH
+  template_data='YQ=='  note=유효 base64지만 1바이트 → 템플릿으로 너무 짧음
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[valid_b64_1byte]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] SERVER_DIR 미설정 — 자동 재기동 불가
