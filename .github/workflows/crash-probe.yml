@@ -14,7 +14,7 @@ on:
 
   # 매일 새벽 2시 KST (UTC 17:00) 자동 실행
   schedule:
-    #- cron: '0 17 * * *'
+    - cron: '0 17 * * *'
 
 defaults:
   run:
