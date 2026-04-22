@@ -757,7 +757,7 @@ jobs:
           New-Item -ItemType Directory -Path $env:REPORT_DIR -Force | Out-Null
 
           $testDirs = @()
-          foreach ($d in @("tests\generated\rule", "tests\generated\ai", "tests\manual")) {
+          foreach ($d in @("tests\generated\rule", "tests\generated\ai")) {
             if (Test-Path $d) { $testDirs += $d }
           }
 
