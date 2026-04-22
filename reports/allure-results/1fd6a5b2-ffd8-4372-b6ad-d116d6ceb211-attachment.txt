@@ -1,0 +1,7 @@
+
+  [CONNECTION_ERROR] sql_injection | severity=MEDIUM
+  template_data="'; DROP TABLE--"  note=SQL 인젝션
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[sql_injection]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] SERVER_DIR 미설정 — 자동 재기동 불가

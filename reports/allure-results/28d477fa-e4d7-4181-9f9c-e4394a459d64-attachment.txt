@@ -1,0 +1,3 @@
+
+  [GRACEFUL_REJECTION] template1=empty_string  severity=CRITICAL
+  http=200  success=False  error_code=-1  server_alive=True

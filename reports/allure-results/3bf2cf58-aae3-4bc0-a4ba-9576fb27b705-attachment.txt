@@ -1,0 +1,4 @@
+
+  [GRACEFUL_REJECTION] null_byte_b64 | severity=HIGH
+  template_data='AA=='  note=0x00 단일 바이트
+  http=200  success=False  error_code=-50  server_alive=True

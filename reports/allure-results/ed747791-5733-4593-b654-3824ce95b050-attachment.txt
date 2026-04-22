@@ -1,0 +1,4 @@
+
+  [GRACEFUL_REJECTION] three_chars_no_pad | severity=HIGH
+  template_data='abc'  note=패딩 없는 base64
+  http=200  success=False  error_code=-50  server_alive=True

@@ -1,0 +1,3 @@
+
+  [GRACEFUL_REJECTION] user_id=string_id  note=문자열 user_id
+  http=200  error_code=-1  server_alive=True

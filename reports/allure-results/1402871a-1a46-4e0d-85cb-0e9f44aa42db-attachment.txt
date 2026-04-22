@@ -1,0 +1,4 @@
+
+  [GRACEFUL_REJECTION] valid_b64_1byte | severity=HIGH
+  template_data='YQ=='  note=유효 base64지만 1바이트 → 템플릿으로 너무 짧음
+  http=200  success=False  error_code=-50  server_alive=True

@@ -1,0 +1,7 @@
+
+  [CONNECTION_ERROR] null_byte_b64 | severity=HIGH
+  template_data='AA=='  note=0x00 단일 바이트
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[null_byte_b64]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] SERVER_DIR 미설정 — 자동 재기동 불가

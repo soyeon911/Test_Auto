@@ -1,0 +1,8 @@
+
+  [CONNECTION_ERROR] unicode_string | severity=MEDIUM
+  template_data='テンプレートデータ'  note=유니코드 (ASCII 아님)
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[unicode_string]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] 서버 재기동: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\qfe-server.exe
+[CrashProbe] 서버 재기동 완료

@@ -1,0 +1,8 @@
+
+  [CONNECTION_ERROR] single_char | severity=CRITICAL
+  template_data='a'  note=base64 패딩 불완전
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[single_char]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] 서버 재기동: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\qfe-server.exe
+[CrashProbe] 서버 재기동 완료

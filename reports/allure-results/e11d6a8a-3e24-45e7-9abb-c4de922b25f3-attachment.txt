@@ -1,0 +1,8 @@
+
+  [CONNECTION_ERROR] three_chars_no_pad | severity=HIGH
+  template_data='abc'  note=패딩 없는 base64
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[three_chars_no_pad]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] 서버 재기동: Error: Host IP address is required! Usage:   ./qfe-server -host 127.0.0.1   ./qfe-server -host 127.0.0.1 -port 9090 Environment variables:   QFE_HOST - Server host IP address   QFE_PORT - Server port (default: 8080)   QFE_MODEL_PATH - Path to QFE SDK model directory (default: ./model)   QFE_DB_PATH - Path to face database file (default: ./face_database.db)   QFE_LICENSE_KEY - SDK license key (skips interactive prompt)   QFE_CORS_ORIGINS - Allowed CORS origins, comma-separated (default: * = all)\qfe-server.exe
+[CrashProbe] 재기동 실패: [Errno 2] No such file or directory: 'Error: Host IP address is required! Usage:   ./qfe-server -host 127.0.0.1   ./qfe-server -host 127.0.0.1 -port 9090 Environment variables:   QFE_HOST - Server host IP address   QFE_PORT - Server port (default: 8080)   QFE_MODEL_PATH - Path to QFE SDK model directory (default: ./model)   QFE_DB_PATH - Path to face database file (default: ./face_database.db)   QFE_LICENSE_KEY - SDK license key (skips interactive prompt)   QFE_CORS_ORIGINS - Allowed CORS origins, comma-separated (default: * = all)\\stdin.txt'

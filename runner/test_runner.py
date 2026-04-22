@@ -106,6 +106,130 @@ class TestRunner:
         self._generate_allure_report()
         return summary
 
+    def collect_nodeids(self, test_dirs: list[str] | None = None) -> list[str]:
+        """
+        pytest --collect-only 로 전체 테스트 ID를 실행 순서대로 수집한다.
+        재기동 후 이어달리기에 사용.
+        """
+        if test_dirs is None:
+            test_dirs = self._default_test_dirs
+
+        cmd = [
+            sys.executable, "-m", "pytest",
+            "--collect-only", "-q", "--no-header",
+            "--import-mode=importlib",
+            *[d for d in test_dirs if Path(d).exists()],
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            print("[Runner] collect_nodeids timed out")
+            return []
+
+        nodeids = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            # nodeid 라인은 반드시 "::" 포함, 요약 라인("N tests collected")은 제외
+            if "::" in line and not line.startswith("<"):
+                nodeids.append(line)
+
+        print(f"[Runner] Collected {len(nodeids)} test ID(s) total.")
+        return nodeids
+
+    def run_nodeids(self, nodeids: list[str]) -> dict[str, Any]:
+        """
+        지정된 nodeid 목록만 실행한다.
+        서버 재기동 후 미완료 테스트를 이어서 실행할 때 사용.
+        결과는 별도 pytest_report_resume.json 에 저장.
+
+        Windows 커맨드라인 길이 제한(~32767자) 우회를 위해
+        nodeid 목록을 임시 argfile 에 기록하고 pytest @argfile 방식으로 전달한다.
+        """
+        import os
+        import tempfile
+
+        if not nodeids:
+            print("[Runner] 이어달릴 테스트 없음 — 건너뜀.")
+            return {"passed": 0, "failed": 0, "error": 0, "total": 0,
+                    "failed_tests": [], "collection_errors": []}
+
+        self.allure_results.mkdir(parents=True, exist_ok=True)
+        self.html_report.parent.mkdir(parents=True, exist_ok=True)
+
+        json_report = self.html_report.parent / "pytest_report_resume.json"
+
+        # ── nodeid 목록을 임시 파일에 기록 (Windows 커맨드라인 길이 제한 우회) ──
+        argfile_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as f:
+                for nid in nodeids:
+                    f.write(nid + "\n")
+                argfile_path = f.name
+
+            cmd = [
+                sys.executable, "-m", "pytest",
+                "--import-mode=importlib",
+                f"@{argfile_path}",          # ← argfile로 nodeid 전달
+                f"--base-url={self.base_url}",
+                f"--alluredir={self.allure_results}",
+                f"--html={self.html_report}",
+                "--self-contained-html",
+                "--json-report",
+                f"--json-report-file={json_report}",
+                "--tb=short",
+                "-q",
+            ]
+
+            print(f"[Runner] Resume: {len(nodeids)}개 테스트 이어서 실행 중...")
+            print(f"[Runner] argfile: {argfile_path}")
+
+            if json_report.exists():
+                json_report.unlink()
+
+            start = datetime.now()
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout,
+                )
+            except subprocess.TimeoutExpired:
+                return {"error": "pytest timed out", "passed": 0, "failed": 0, "total": 0}
+
+        finally:
+            # 임시 파일 정리
+            if argfile_path and os.path.exists(argfile_path):
+                try:
+                    os.unlink(argfile_path)
+                except Exception:
+                    pass
+
+        elapsed = (datetime.now() - start).total_seconds()
+
+        summary = self._parse_json_report(json_report)
+        summary["duration_seconds"] = round(elapsed, 1)
+        summary["stdout"] = result.stdout[-3000:]
+        summary["return_code"] = result.returncode
+        summary["pytest_json_path"] = str(json_report)
+        summary["html_report_path"] = str(self.html_report)
+
+        print(f"[Runner] Resume 완료 ({elapsed:.1f}s) — "
+              f"passed={summary['passed']} failed={summary['failed']} total={summary['total']}"
+              f"  (pytest rc={result.returncode})")
+
+        if result.returncode not in (0, 1) or summary["total"] == 0:
+            if result.stdout.strip():
+                print(f"[Runner] pytest stdout:\n{result.stdout[-2000:]}")
+            if result.stderr.strip():
+                print(f"[Runner] pytest stderr:\n{result.stderr[-2000:]}")
+
+        self._generate_allure_report()
+        return summary
+
     # ─── internal ─────────────────────────────────────────────────────────────
 
     def _parse_json_report(self, report_path: Path) -> dict[str, Any]:

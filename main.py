@@ -145,6 +145,91 @@ def _check_server_after_run(base_url: str, config: dict) -> bool:
     return ok
 
 
+def _get_skip_and_crash_nodeids(
+    json_report_path: str,
+    all_nodeids: list[str],
+) -> tuple[set[str], str | None]:
+    """
+    JSON 리포트를 분석해서 재실행 시 건너뛸 nodeid 목록과 크래시 유발 TC를 반환한다.
+
+    규칙:
+      - passed       → 건너뜀 (이미 성공)
+      - failed/error 중 all_nodeids 순서상 가장 앞에 오는 것 → 크래시 유발 TC.
+                       로그 기록 후 건너뜀.
+      - 크래시 유발 TC 이후에 나오는 failed/error → 재실행 대상
+                       (connection refused 로 실제로는 미실행)
+
+    반환: (skip_set, crash_nodeid)
+      skip_set      : 재실행에서 제외할 nodeid 집합 (passed + 크래시 유발 TC)
+      crash_nodeid  : 크래시 유발 TC의 nodeid (없으면 None)
+    """
+    import json as _json
+
+    p = Path(json_report_path)
+    if not p.exists():
+        return set(), None
+    try:
+        data = _json.loads(p.read_text(encoding="utf-8"))
+        tests = data.get("tests", [])
+
+        passed_set      = {t["nodeid"] for t in tests if t.get("outcome") == "passed"}
+        failed_error_set = {t["nodeid"] for t in tests if t.get("outcome") in ("failed", "error")}
+
+        # all_nodeids 순서 기준으로 가장 먼저 나오는 failed/error → 크래시 유발 TC
+        crash_nodeid: str | None = None
+        for nid in all_nodeids:
+            if nid in failed_error_set:
+                crash_nodeid = nid
+                break
+
+        skip_set = passed_set.copy()
+        if crash_nodeid:
+            skip_set.add(crash_nodeid)
+
+        return skip_set, crash_nodeid
+    except Exception as exc:
+        print(f"[Pipeline] JSON 리포트 파싱 실패: {exc}")
+        return set(), None
+
+
+def _log_crash_tc(crash_nodeid: str, json_report_path: str, config: dict) -> None:
+    """
+    크래시 유발 TC 정보를 서버 로그 파일과 콘솔에 기록한다.
+    """
+    import json as _json
+
+    print(f"\n[Pipeline] ━━ 서버 크래시 유발 TC ━━━━━━━━━━━━━━━━━━━━━━")
+    print(f"[Pipeline] nodeid  : {crash_nodeid}")
+
+    # JSON 리포트에서 longrepr(오류 메시지) 추출
+    longrepr = ""
+    try:
+        data = _json.loads(Path(json_report_path).read_text(encoding="utf-8"))
+        for t in data.get("tests", []):
+            if t["nodeid"] == crash_nodeid:
+                longrepr = t.get("longrepr", "")
+                break
+    except Exception:
+        pass
+
+    if longrepr:
+        print(f"[Pipeline] 오류 내용:\n{str(longrepr)[:800]}")
+    print(f"[Pipeline] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+    # 서버 로그 파일에도 기록
+    log_path = os.environ.get("SERVER_LOG_FILE", "") or \
+               config.get("server", {}).get("log_file", "")
+    if log_path:
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"\n[CRASH TC] {crash_nodeid}\n")
+                if longrepr:
+                    f.write(f"{str(longrepr)[:800]}\n")
+                f.write("─" * 60 + "\n")
+        except Exception:
+            pass
+
+
 def _print_log_tail(config: dict, n: int = 40) -> None:
     """SERVER_LOG_FILE 마지막 N줄을 출력한다 (디버깅용)."""
     log_path = os.environ.get("SERVER_LOG_FILE", "")
@@ -195,11 +280,88 @@ def run_pipeline(source: str, config: dict) -> None:
     runner = TestRunner(config)
     summary = runner.run()
 
-    # 4. 테스트 완료 후 서버 상태 점검 + 자동 재기동
+    # 4. 테스트 완료 후 서버 상태 점검 + 자동 재기동 + 테스트 재실행
     base_url = config.get("server", {}).get("base_url", "")
     if base_url:
-        server_ok = _check_server_after_run(base_url, config)
-        summary["server_alive_after_run"] = server_ok
+        try:
+            from tests.helpers.server_manager import is_alive, restart_server
+        except ImportError:
+            is_alive = lambda *a, **k: True
+            restart_server = lambda *a, **k: False
+
+        if not is_alive(base_url, timeout=3):
+            print("\n[Pipeline] ⚠ 테스트 완료 후 서버 다운 감지 → 자동 재기동 시도...")
+            server_ok = restart_server(base_url)
+            if server_ok:
+                # ── JSON 리포트 경로 ───────────────────────────────────────
+                json_report_path = str(
+                    Path(config.get("runner", {}).get(
+                        "html_report_path", "./reports/summary.html"
+                    )).parent / "pytest_report.json"
+                )
+
+                # ── 전체 테스트 ID 수집 (순서 보존) ───────────────────────
+                all_nodeids = runner.collect_nodeids()
+
+                # ── 건너뛸 TC + 크래시 유발 TC 파악 ──────────────────────
+                skip_set, crash_nodeid = _get_skip_and_crash_nodeids(
+                    json_report_path, all_nodeids
+                )
+
+                # 크래시 유발 TC 로그 기록
+                if crash_nodeid:
+                    _log_crash_tc(crash_nodeid, json_report_path, config)
+
+                # ── 재실행 대상: 건너뛸 TC 제외한 나머지 ─────────────────
+                remaining = [nid for nid in all_nodeids if nid not in skip_set]
+
+                print(
+                    f"[Pipeline] ✓ 서버 재기동 성공 — "
+                    f"passed 건너뜀: {len(skip_set) - (1 if crash_nodeid else 0)}개 / "
+                    f"크래시 TC 건너뜀: {'1개' if crash_nodeid else '없음'} / "
+                    f"재실행 대상: {len(remaining)}개"
+                )
+
+                # ── 크래시 TC를 명시적 failed 엔트리로 구성 ──────────────
+                crash_entry: list[dict] = []
+                if crash_nodeid:
+                    crash_entry = [{
+                        "nodeid":    crash_nodeid,
+                        "longrepr":  "[SERVER CRASH] 이 TC 실행 중 서버가 크래시됨",
+                        "outcome":   "error",
+                    }]
+
+                # 1차 실행에서 실제로 passed된 수 (connection refused 이전 것만 유효)
+                first_passed = summary.get("passed", 0)
+
+                if remaining:
+                    print(f"[Pipeline] 재실행 시작 TC: {remaining[0]}")
+                    resume_summary = runner.run_nodeids(remaining)
+
+                    # ── 정확한 누적 ──────────────────────────────────────
+                    # passed  : 1차 passed + resume passed
+                    # failed  : 크래시 TC(1) + resume failed
+                    # total   : 1차 passed + 크래시 TC(1) + resume total
+                    # failed_tests : 크래시 TC 엔트리 + resume failed_tests
+                    # (1차의 connection-refused failed_tests는 resume에서 재실행되므로 제외)
+                    summary["passed"]       = first_passed + resume_summary.get("passed", 0)
+                    summary["failed"]       = len(crash_entry) + resume_summary.get("failed", 0)
+                    summary["total"]        = first_passed + len(crash_entry) + resume_summary.get("total", 0)
+                    summary["stdout"]       = resume_summary.get("stdout", "")
+                    summary["failed_tests"] = crash_entry + resume_summary.get("failed_tests", [])
+                else:
+                    # remaining 없음 = 크래시 TC만 실패, 나머지 전부 passed
+                    summary["passed"]       = first_passed
+                    summary["failed"]       = len(crash_entry)
+                    summary["total"]        = first_passed + len(crash_entry)
+                    summary["failed_tests"] = crash_entry
+                    print("[Pipeline] 재실행할 TC 없음.")
+            else:
+                print("[Pipeline] ✗ 서버 재기동 실패 — 수동 확인 필요")
+                _print_log_tail(config)
+            summary["server_alive_after_run"] = server_ok
+        else:
+            summary["server_alive_after_run"] = True
     else:
         print("[Pipeline] server.base_url 미설정 — 서버 상태 점검 건너뜀")
 

@@ -1,0 +1,4 @@
+
+  [GRACEFUL_REJECTION] valid_b64_3bytes | severity=HIGH
+  template_data='AAEC'  note=유효 base64지만 3바이트
+  http=200  success=False  error_code=-50  server_alive=True

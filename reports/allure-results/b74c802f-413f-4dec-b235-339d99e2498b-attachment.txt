@@ -1,0 +1,3 @@
+
+  [GRACEFUL_REJECTION] user_id=-1  note=음수 user_id
+  http=200  error_code=-34  server_alive=True

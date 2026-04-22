@@ -1,0 +1,3 @@
+
+  [GRACEFUL_REJECTION] user_id=9223372036854775808  note=int64 최대 초과
+  http=200  error_code=-1  server_alive=True

@@ -1,0 +1,7 @@
+
+  [CONNECTION_ERROR] binary_garbage_short | severity=HIGH
+  template_data='////'  note=유효 base64 → 이진 쓰레기
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[binary_garbage_short]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] SERVER_DIR 미설정 — 자동 재기동 불가

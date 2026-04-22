@@ -1,0 +1,7 @@
+
+  [CONNECTION_ERROR] very_long_garbage | severity=MEDIUM
+  template_data='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'  note=8KB 쓰레기 (스택 오버플로우 유발 가능)
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[very_long_garbage]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] SERVER_DIR 미설정 — 자동 재기동 불가

@@ -1,0 +1,7 @@
+
+  [CONNECTION_ERROR] three_chars_no_pad | severity=HIGH
+  template_data='abc'  note=패딩 없는 base64
+  http=None  success=None  error_code=None  server_alive=False
+
+[CrashProbe] 테스트 'test_invalid_template_data[three_chars_no_pad]' 후 서버 다운 감지 → 재기동 시도
+[CrashProbe] SERVER_DIR 미설정 — 자동 재기동 불가
