@@ -1168,13 +1168,13 @@ jobs:
           summary_out = probe_dir / "final_report.csv"
 
           if not report_file.exists():
-              print(f"[WARN] {report_file} 없음")
+              print(f"[WARN] {report_file} not found")
               raise SystemExit(0)
 
           try:
               data = json.loads(report_file.read_text(encoding="utf-8"))
           except Exception as e:
-              print(f"[WARN] JSON 파싱 실패: {e}")
+              print(f"[WARN] JSON parse error: {e}")
               raise SystemExit(0)
 
           rows = []
@@ -1207,16 +1207,16 @@ jobs:
               graceful = sum(1 for r in rows if r["classification"] == "GRACEFUL_REJECTION")
               sep = "=" * 60
               print(f"\n{sep}")
-              print(f"  Crash Probe 결과")
+              print(f"  Crash Probe Results")
               print(f"{sep}")
-              print(f"  전체 프로브     : {len(rows)}")
-              print(f"  CRASH_DETECTED  : {crashes}  <- 서버가 죽은 입력값")
-              print(f"  VALIDATION_GAP  : {gaps}  <- 수락하면 안 되는데 success=True")
-              print(f"  GRACEFUL_REJECT : {graceful}  <- 올바른 에러 반환 (정상)")
+              print(f"  total probes    : {len(rows)}")
+              print(f"  CRASH_DETECTED  : {crashes}  <- server killed by input")
+              print(f"  VALIDATION_GAP  : {gaps}  <- accepted bad input (success=True)")
+              print(f"  GRACEFUL_REJECT : {graceful}  <- correct error response (OK)")
               print(f"{sep}")
-              print(f"  리포트 -> {summary_out}")
+              print(f"  report -> {summary_out}")
           else:
-              print("[WARN] 프로브 결과 없음")
+              print("[WARN] no probe results")
           '@
 
           $tmpPy = Join-Path $env:PROBE_REPORT_DIR "_gen_csv.py"
