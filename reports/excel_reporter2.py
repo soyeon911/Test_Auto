@@ -1176,6 +1176,17 @@ class ExcelReportBuilder2:
         ws.freeze_panes = "A6"
         ws.auto_filter.ref = f"A5:M{len(probe_tests) + 5}"
 
+    @staticmethod
+    def _format_value(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except Exception:
+            return repr(value)
+
     def _build_actual_resp(self, item: dict[str, Any]) -> str:
         parts = []
         rs = item.get("response_success")
@@ -1222,4 +1233,3 @@ class ExcelReportBuilder2:
             c.fill = PatternFill("solid", start_color=_BLUE_DARK, end_color=_BLUE_DARK)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.border = _BORDER
-
