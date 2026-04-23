@@ -83,55 +83,160 @@ _THIN = Side(style="thin", color="CCCCCC")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
 
+def _map_qfe_error_code(error_code: Any, msg: str) -> str | None:
+    try:
+        ec = int(error_code)
+    except Exception:
+        return None
+
+    msg = (msg or "").lower()
+
+    if ec in (-43, -28, -200):
+        return "상태 미충족 (DB/fixture 없음)"
+
+    if ec == -1:
+        if "unmarshal" in msg or "json" in msg or "type" in msg:
+            return "타입 오류 (Type Mismatch)"
+        if "base64" in msg or "decode" in msg or "padding" in msg or "encoding" in msg:
+            return "포맷 오류 (Encoding/Decode)"
+        return "정상적인 실패 응답"
+
+    return None
+
 def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
     outcome = str(item.get("outcome", "")).lower()
-    if outcome == "passed":
-        return "PASS"
+    axis = str(item.get("axis") or "")
+    reason_code = str(item.get("reason_code") or "")
+    error_detail = str(item.get("error_detail") or "")
+    expected_result_type = str(item.get("expected_result_type") or "")
 
-    if item.get("server_crashed"):
-        return "서버 Crash (5xx)"
+    response_success = item.get("response_success")
+    response_error_code = item.get("response_error_code")
+    response_data_error_code = item.get("response_data_error_code")
+    response_msg = str(item.get("response_msg") or "")
+    msg = response_msg.lower()
+    data_status = str(item.get("response_data_status") or "").lower()
+    actual_status = str(item.get("actual_status") or "")
 
     exc_type = str(item.get("exception_type") or "")
     exc_msg = str(item.get("exception_message") or "")
     longrepr = str(item.get("longrepr") or "")
-    blob = f"{exc_type} {exc_msg} {longrepr}".lower()
+    blob = f"{exc_type} {exc_msg} {longrepr} {error_detail}".lower()
 
-    if "connection" in blob or "refused" in blob or "failed to establish a new connection" in blob:
+    # 0. PASS
+    if outcome == "passed":
+        return "PASS"
+
+    # 1. 인프라 / 런타임
+    if item.get("server_crashed") or "crash_detected" in blob or actual_status.startswith("5"):
+        return "서버 Crash (5xx)"
+
+    if "connection" in blob or "refused" in blob or "timeout" in blob:
         return "서버 미응답"
 
-    expected_result_type = str(item.get("expected_result_type") or "")
-    axis = str(item.get("axis") or "")
-    reason_code = str(item.get("reason_code") or "")
-    response_success = item.get("response_success")
-    response_data_status = item.get("response_data_status")
+    # 2. 생성/문법 오류
+    if "indentationerror" in blob or "syntaxerror" in blob:
+        return "TC 생성 오류 (문법/들여쓰기)"
 
+    # 3. Crash Probe 우선 판정
+    if "validation_gap" in blob:
+        return "엔드포인트 버그 (Validation 미수행)"
+
+    # 4. 상태 미충족
+    # 사전 조건/DB fixture 문제는 msg, reason_code 둘 다 사용
+    if (
+        reason_code == "precondition_not_met"
+        or error_detail.startswith("state.")
+        or "failed to get user template" in msg
+        or "failed to delete user" in msg
+        or "template extraction failed" in msg
+        or "failed to detect face" in msg
+        or "verification failed" in msg
+    ):
+        return "상태 미충족 (DB/fixture 없음)"
+
+    # 5. response body 문구 기반 분류
+    # 5-1. 필수값/누락
+    if "missing" in msg or "required" in msg:
+        return "입력 누락 (Required Missing)"
+
+    # 5-2. 타입/직렬화 오류
+    if (
+        "cannot unmarshal" in msg
+        or "type mismatch" in msg
+        or "invalid type" in msg
+        or "wrong type" in msg
+    ):
+        return "타입 오류 (Type Mismatch)"
+
+    # 5-3. 포맷/인코딩 오류
+    if (
+        "base64" in msg
+        or "decode" in msg
+        or "padding" in msg
+        or "encoding" in msg
+        or "invalid request" in msg and "json" in msg
+    ):
+        return "포맷 오류 (Encoding/Decode)"
+
+    # 5-4. 범위 오류
+    if "range" in msg or "out of range" in msg or "must be between" in msg:
+        return "범위 오류 (Out of Range)"
+
+    # 5-5. 리소스 없음
+    if "not found" in msg or "no such" in msg or "does not exist" in msg:
+        return "리소스 없음 (Not Found)"
+
+    # 5-6. 중복
+    if "duplicate" in msg or "already exists" in msg:
+        return "중복 요청 (Duplicate)"
+
+    # 5-7. threshold / match / verify 도메인 실패
+    if "threshold" in msg:
+        return "도메인 조건 실패 (Threshold/Match)"
+
+    # 6. QFE error_code 기반 보정
+    # top-level / data-level 둘 다 본다
+    # QFE error_code 기반 보정
+    mapped = _map_qfe_error_code(response_error_code, response_msg)
+    if mapped:
+        return mapped
+
+    mapped = _map_qfe_error_code(response_data_error_code, response_msg)
+    if mapped:
+        return mapped
+
+
+    # 7. expected_result_type + success 조합
     if expected_result_type == "probe_only":
+        if "assert" in blob or "failed:" in blob:
+            return "TC 실패 (단언 오류)"
         return "Probe Only"
 
-    if expected_result_type == "expected_pass" and reason_code == "precondition_not_met":
-        return "상태 미충족 (DB/fixture 없음)"
-
-    if expected_result_type == "expected_fail" and response_success is True:
-        if axis == "schema":
-            return "엔드포인트 버그 (Validation 미수행)"
-        return "엔드포인트 버그 (도메인 검증 미수행)"
-
     if expected_result_type == "expected_fail":
-        return "예상된 실패"
+        if response_success is True:
+            if axis == "schema":
+                return "엔드포인트 버그 (Validation 미수행)"
+            return "엔드포인트 버그 (도메인 검증 미수행)"
+        if response_success is False:
+            return "정상적인 실패 응답"
 
-    if reason_code == "precondition_not_met":
-        return "상태 미충족 (DB/fixture 없음)"
+    if expected_result_type == "expected_pass":
+        if response_success is False:
+            return "예상치 못한 실패"
 
-    if response_success is True and axis in {"schema", "domain"}:
-        if axis == "schema":
-            return "엔드포인트 버그 (Validation 미수행)"
-        return "엔드포인트 버그 (도메인 검증 미수행)"
+    # 8. data.status 기반 보정
+    if data_status in {"fail", "success"}:
+        if expected_result_type == "expected_fail" and data_status == "success":
+            return "엔드포인트 버그 (도메인 검증 미수행)"
+        if expected_result_type == "expected_pass" and data_status == "fail":
+            return "도메인 조건 실패 (Threshold/Match)"
 
-    if response_data_status not in (None, "", "success", "fail"):
+    # 9. assertion/pytest failure
+    if "assert" in blob or "failed:" in blob:
         return "TC 실패 (단언 오류)"
 
     return "알 수 없음"
-
 
 class ExcelReportBuilder2:
     """excel_reporter.py 인터페이스 호환, 4-시트 한국어 워크북 생성."""
@@ -770,6 +875,7 @@ class ExcelReportBuilder2:
         item["reason_code"] = diag.get("reason_code", "")
         item["target_param"] = diag.get("target_field", item.get("target_param", ""))
         item["condition"] = diag.get("test_condition", item.get("condition", ""))
+        
         exp_http = diag.get("expected_http") or ""
         exp_app = diag.get("expected_app") or ""
         parts = [p for p in [exp_http, exp_app] if p]
@@ -793,6 +899,12 @@ class ExcelReportBuilder2:
         item["response_data_error_code"] = diag.get("response_data_error_code")
         item["response_data_match_score"] = diag.get("response_data_match_score")
         item["response_data_status"] = diag.get("response_data_status")
+        item["response_data_verified"] = diag.get("response_data_verified")
+        item["probe_endpoint"] = diag.get("probe_endpoint", item.get("probe_endpoint", ""))
+        item["probe_label"] = diag.get("probe_label", item.get("probe_label", ""))
+        item["probe_input"] = diag.get("probe_input", item.get("probe_input"))
+        item["probe_severity"] = diag.get("probe_severity", item.get("probe_severity", ""))
+        item["probe_classification"] = diag.get("probe_classification", item.get("probe_classification", ""))
 
     @staticmethod
     def _extract_tc_meta(test_obj: dict[str, Any]) -> dict[str, Any]:
@@ -802,19 +914,30 @@ class ExcelReportBuilder2:
             tc_meta = md.get("tc_meta")
             if isinstance(tc_meta, dict):
                 meta.update(tc_meta)
+
         for up in test_obj.get("user_properties", []) or []:
             if isinstance(up, dict):
-                # dict format: {"tc_meta": {...}}
                 if "tc_meta" in up and isinstance(up["tc_meta"], dict):
                     meta.update(up["tc_meta"])
                 if "diag" in up and isinstance(up["diag"], dict):
                     meta["_diag_from_up"] = up["diag"]
+
+                if "probe_meta" in up and isinstance(up["probe_meta"], dict):
+                    meta.update(up["probe_meta"])
+                if "probe_diag" in up and isinstance(up["probe_diag"], dict):
+                    meta["_probe_diag_from_up"] = up["probe_diag"]
+
             elif isinstance(up, (list, tuple)) and len(up) == 2:
-                # tuple format: ("tc_meta", {...})
                 if up[0] == "tc_meta" and isinstance(up[1], dict):
                     meta.update(up[1])
                 if up[0] == "diag" and isinstance(up[1], dict):
                     meta["_diag_from_up"] = up[1]
+
+                if up[0] == "probe_meta" and isinstance(up[1], dict):
+                    meta.update(up[1])
+                if up[0] == "probe_diag" and isinstance(up[1], dict):
+                    meta["_probe_diag_from_up"] = up[1]
+
         return meta
 
     @staticmethod
@@ -908,8 +1031,41 @@ class ExcelReportBuilder2:
         "OTHER_FAILURE":      "EFEFEF",
     }
 
-    @staticmethod
-    def _load_probe_tests(report_path: str | Path | None) -> list[dict[str, Any]]:
+    def _normalize_probe_tests(self, raw: dict[str, Any]) -> list[dict[str, Any]]:
+        out = []
+        for t in raw.get("tests", []):
+            call = t.get("call") or {}
+            meta = self._extract_tc_meta(t)
+            probe_diag = meta.pop("_probe_diag_from_up", {}) or {}
+
+            item = {
+                "nodeid": t.get("nodeid", ""),
+                "outcome": t.get("outcome", "unknown"),
+                "duration": call.get("duration", t.get("duration", 0)),
+                "longrepr": str(call.get("longrepr") or t.get("longrepr") or ""),
+                "target_param": meta.get("target_field", ""),
+                "probe_endpoint": meta.get("probe_endpoint", ""),
+                "probe_label": meta.get("probe_label", ""),
+                "probe_input": meta.get("probe_input"),
+                "probe_severity": meta.get("probe_severity", ""),
+                "expected_result_type": meta.get("expected_result_type", "probe_only"),
+                "actual_status": "",
+                "response_success": None,
+                "response_error_code": None,
+                "response_msg": None,
+                "error_detail": "",
+                "axis": "runtime",
+                "reason_code": "probe_runtime",
+                "probe_classification": meta.get("probe_classification", ""),
+            }
+
+            if probe_diag:
+                self._apply_diag(item, probe_diag)
+
+            out.append(item)
+        return out
+
+    def _load_probe_tests(self, report_path: str | Path | None) -> list[dict[str, Any]]:
         if not report_path:
             return []
         p = Path(report_path)
@@ -917,18 +1073,21 @@ class ExcelReportBuilder2:
             return []
         try:
             raw = json.loads(p.read_text(encoding="utf-8"))
-            return raw.get("tests", [])
+            return self._normalize_probe_tests(raw)
         except Exception:
             return []
 
     @staticmethod
     def _classify_probe(test: dict[str, Any]) -> str:
-        call = test.get("call") or {}
-        longrepr = str(call.get("longrepr") or test.get("longrepr") or "")
+        if test.get("probe_classification"):
+            return str(test["probe_classification"])
+
+        longrepr = str(test.get("longrepr") or "")
         if "CRASH_DETECTED" in longrepr:
             return "CRASH_DETECTED"
         if "VALIDATION_GAP" in longrepr:
             return "VALIDATION_GAP"
+
         outcome = str(test.get("outcome", "")).lower()
         if outcome == "passed":
             return "GRACEFUL_REJECTION"
@@ -937,21 +1096,21 @@ class ExcelReportBuilder2:
         return "OTHER_FAILURE"
 
     def _build_crash_probe_sheet(self, ws, probe_tests: list[dict[str, Any]]) -> None:
-        """Robustness Layer B — Crash Probe 결과 시트."""
-        self._title_banner(ws, "A1:G1", "Crash Probe — Robustness Layer (B)")
+        self._title_banner(ws, "A1:M1", "Crash Probe — Robustness Layer (B)")
         ws.row_dimensions[1].height = 26
 
-        # KPI 행
-        crash_c    = sum(1 for t in probe_tests if self._classify_probe(t) == "CRASH_DETECTED")
-        gap_c      = sum(1 for t in probe_tests if self._classify_probe(t) == "VALIDATION_GAP")
+        crash_c = sum(1 for t in probe_tests if self._classify_probe(t) == "CRASH_DETECTED")
+        gap_c = sum(1 for t in probe_tests if self._classify_probe(t) == "VALIDATION_GAP")
         graceful_c = sum(1 for t in probe_tests if self._classify_probe(t) == "GRACEFUL_REJECTION")
-        other_c    = len(probe_tests) - crash_c - gap_c - graceful_c
+        other_c = len(probe_tests) - crash_c - gap_c - graceful_c
 
-        kpi = [("전체 Probe", len(probe_tests), "BDD7EE", "1F497D"),
-               ("CRASH_DETECTED", crash_c, "F4CCCC", "C00000"),
-               ("VALIDATION_GAP", gap_c, "FCE5CD", "7F3F00"),
-               ("GRACEFUL_REJECTION", graceful_c, "C6EFCE", "375623"),
-               ("기타", other_c, "EFEFEF", "404040")]
+        kpi = [
+            ("전체 Probe", len(probe_tests), "BDD7EE", "1F497D"),
+            ("CRASH_DETECTED", crash_c, "F4CCCC", "C00000"),
+            ("VALIDATION_GAP", gap_c, "FCE5CD", "7F3F00"),
+            ("GRACEFUL_REJECTION", graceful_c, "C6EFCE", "375623"),
+            ("기타", other_c, "EFEFEF", "404040"),
+        ]
 
         for ci, (label, value, bg, fc) in enumerate(kpi, start=1):
             lc = ws.cell(row=2, column=ci, value=label)
@@ -967,48 +1126,49 @@ class ExcelReportBuilder2:
 
         ws.row_dimensions[4].height = 6
 
-        # 결과 테이블
-        headers = ["#", "Test ID", "Outcome", "Classification", "Duration (s)", "Endpoint / Nodeid", "Failure Reason"]
+        headers = [
+            "#", "Endpoint", "Target Field", "Probe Label", "Probe Input",
+            "Severity", "HTTP", "success", "error_code", "msg",
+            "Classification", "Outcome", "Failure Reason"
+        ]
         self._header_row(ws, 5, headers)
-        for i, w in enumerate([5, 38, 10, 22, 12, 52, 70], start=1):
+
+        for i, w in enumerate([5, 24, 16, 22, 42, 10, 8, 10, 12, 30, 18, 10, 40], start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
         if not probe_tests:
             ws.cell(row=6, column=1, value="(Crash Probe 결과 없음 — 파일 미존재 또는 job 미실행)")
-            ws.cell(row=6, column=1).font = Font(italic=True, color="888888")
             return
 
-        ca = Alignment(horizontal="center", vertical="top", wrap_text=True)
-        la = Alignment(horizontal="left",  vertical="top", wrap_text=True)
-
         for idx, t in enumerate(probe_tests, start=1):
-            call = t.get("call") or {}
-            longrepr = str(call.get("longrepr") or t.get("longrepr") or "")
-            duration = round(float(call.get("duration") or t.get("duration") or 0), 3)
-            outcome = str(t.get("outcome", "")).lower()
-            nodeid = t.get("nodeid", "")
-            cls = self._classify_probe(t)
+            cls = t.get("probe_classification") or self._classify_probe(t)
+            bg = self._PROBE_CLS_COLORS.get(cls, "EFEFEF")
 
             row_vals = [
                 idx,
-                nodeid.split("::")[-1],
-                outcome.upper(),
+                t.get("probe_endpoint", ""),
+                t.get("target_param", ""),
+                t.get("probe_label", ""),
+                self._format_value(t.get("probe_input")),
+                t.get("probe_severity", ""),
+                t.get("actual_status", ""),
+                t.get("response_success"),
+                t.get("response_error_code", ""),
+                t.get("response_msg", ""),
                 cls,
-                duration,
-                nodeid,
-                longrepr[:300].replace("\n", " "),
+                str(t.get("outcome", "")).upper(),
+                classify_failure_cause_from_item(t),
             ]
+
             r = idx + 5
-            bg = self._PROBE_CLS_COLORS.get(cls, "EFEFEF")
             for ci, val in enumerate(row_vals, start=1):
                 c = ws.cell(row=r, column=ci, value=val)
                 c.border = _BORDER
-                c.alignment = ca if ci in (1, 3, 4, 5) else la
+                c.alignment = Alignment(wrap_text=True, vertical="top")
                 c.fill = PatternFill("solid", start_color=bg, end_color=bg)
-            ws.row_dimensions[r].height = 38
 
         ws.freeze_panes = "A6"
-        ws.auto_filter.ref = f"A5:G{len(probe_tests) + 5}"
+        ws.auto_filter.ref = f"A5:M{len(probe_tests) + 5}"
 
     def _build_actual_resp(self, item: dict[str, Any]) -> str:
         parts = []
