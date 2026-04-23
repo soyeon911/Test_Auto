@@ -190,6 +190,15 @@ DOMAIN_FAIL_CODES = frozenset({
 REQUEST_FAIL_CODES = frozenset({
     -90,  # INVALID_PARAMETER
 })
+STATE_DEPENDENT_PATHS: frozenset[str] = frozenset({
+    "/api/v2/delete",
+    "/api/v2/enroll",
+    "/api/v2/enroll-template",
+    "/api/v2/verify",
+    "/api/v2/verify-template",
+    "/api/v2/identify",
+    "/api/v2/identify-template",
+})
 
 
 def _safe_name(text: str) -> str:
@@ -361,6 +370,7 @@ class RuleBasedTCGenerator:
             dedup[(c["value"], c["label"])] = c
         return list(dedup.values())
 
+    @staticmethod
     def _classify_qfe_error(error_code: int | None, msg: str, path: str) -> str:
         msg_l = (msg or "").lower()
 
@@ -374,16 +384,31 @@ class RuleBasedTCGenerator:
             return "schema"
 
         if error_code == -1:
+            # request/schema 계열
             if any(x in msg_l for x in ["required", "unmarshal", "json", "type", "invalid request"]):
                 return "schema"
+
+            # domain 계열
             if "failed to detect face" in msg_l or "error code: -200" in msg_l:
                 return "domain"
+            if "different face" in msg_l:
+                return "domain"
+            if "out of range" in msg_l:
+                return "domain"
+
+            # state 계열 (endpoint context 필요)
             if path in {"/api/v2/verify-template", "/api/v2/verify"} and "verification failed" in msg_l:
                 return "state"
             if path == "/api/v2/delete" and "failed to delete user" in msg_l:
                 return "state"
-            if path == "/api/v2/user/{user_id}/template" and "failed to get user template" in msg_l:
+            if "failed to get user template" in msg_l:
                 return "state"
+            if "template not found" in msg_l:
+                return "state"
+            if "user not found" in msg_l:
+                return "state"
+
+            # generic -1 fallback
             return "domain"
 
         return "unknown"
@@ -432,14 +457,13 @@ class RuleBasedTCGenerator:
         """
         )
 
-    def _qfe_state_tolerant_assertion(self) -> str:
+    def _qfe_state_tolerant_assertion(self, path: str) -> str:
         """
         State-axis positive test assertion.
 
-        상태 미충족 허용 로직:
-        - success=True,  error_code>=0                     -> 정상 성공
-        - success=False, error_code in STATE_NOT_MET_CODES -> DB/fixture 상태 미충족
-        - 그 외 응답                                       -> FAIL
+        허용:
+        - success=True, error_code>=0
+        - success=False 이지만 classify_qfe_error(...) == "state"
         """
         return textwrap.dedent(
             f"""\
@@ -452,21 +476,36 @@ class RuleBasedTCGenerator:
                 body = resp.json()
             except ValueError:
                 pytest.fail(f"Expected JSON response, got: {{resp.text[:300]}}")
+
             _success = body.get("success")
             _ec = body.get("error_code", 0)
+            _msg = str(body.get("msg") or "").lower()
+            _path = {path!r}
+
+            _state_like_minus_one = (
+                _ec == -1 and (
+                    (_path in ("/api/v2/verify-template", "/api/v2/verify") and "verification failed" in _msg)
+                    or (_path == "/api/v2/delete" and "failed to delete user" in _msg)
+                    or ("failed to get user template" in _msg)
+                    or ("template not found" in _msg)
+                    or ("user not found" in _msg)
+                )
+            )
+
+            _is_state = (_ec in {sorted(STATE_NOT_MET_CODES)}) or _state_like_minus_one
+
             assert (
                 (_success is True and _ec >= 0) or
-                (_success is False and _ec in {sorted(_STATE_NOT_MET_ERROR_CODES)})
+                (_success is False and _is_state)
             ), (
                 f"[FAIL] unexpected QFE state response\\n"
-                f"  Expected : success=true/error_code>=0 (data present)\\n"
-                f"           OR success=false/error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)} (state not met)\\n"
+                f"  path       : {{_path}}\\n"
                 f"  success    : {{_success}}\\n"
                 f"  error_code : {{_ec}}\\n"
                 f"  msg        : {{body.get('msg')}}\\n"
                 f"  Full body  : {{resp.text[:300]}}"
             )
-        """
+            """
         )
 
     def _when_success(self, assertion: str) -> str:
@@ -516,6 +555,7 @@ class RuleBasedTCGenerator:
         label: str,
         success_statuses: list[int] | None = None,
         allow_state_not_met: bool = False,
+        path: str = "",
     ) -> str:
         if policy == "must_fail":
             if self.error_mode == "qfe":
@@ -525,7 +565,7 @@ class RuleBasedTCGenerator:
         if policy == "must_pass":
             if self.error_mode == "qfe":
                 if allow_state_not_met:
-                    return self._qfe_state_tolerant_assertion()
+                    return self._qfe_state_tolerant_assertion(path)
                 return self._qfe_success_assertion()
             return self._standard_success_assertion(success_statuses or [200])
 
@@ -896,10 +936,10 @@ class RuleBasedTCGenerator:
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
 
-        allow_state_not_met = self.error_mode == "qfe" and path in _STATE_DEPENDENT_PATHS
+        allow_state_not_met = self.error_mode == "qfe" and path in STATE_DEPENDENT_PATHS
 
         assertion = (
-            self._qfe_state_tolerant_assertion()
+            self._qfe_state_tolerant_assertion(path)
             if allow_state_not_met
             else (
                 self._qfe_success_assertion()
@@ -909,13 +949,8 @@ class RuleBasedTCGenerator:
         )
 
         exp_app = (
-            f"success=true/error_code>=0 OR success=false/error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)} (state not met)"
-            if allow_state_not_met
-            else (
-                "success=true/error_code>=0"
-                if self.error_mode == "qfe"
-                else f"status in {success_statuses}"
-            )
+            f"success=true/error_code>=0 OR success=false with error_code in {sorted(STATE_NOT_MET_CODES)} "
+            f"or state-like -1 by endpoint/msg"
         )
 
         axis_value = "state" if allow_state_not_met else "domain"
@@ -975,7 +1010,7 @@ class RuleBasedTCGenerator:
         call = _render_call(method, path, path_params, query_params, body)
 
         if path == "/api/v2/match":
-            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+            assertion = self._qfe_state_tolerant_assertion(path) + self._when_success(
                 self._match_status_assertion(
                     score_field="match_score",
                     status_field="status",
@@ -992,7 +1027,7 @@ class RuleBasedTCGenerator:
                 "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
         elif "verify" in path:
-            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+            assertion = self._qfe_state_tolerant_assertion(path) + self._when_success(
                 self._match_domain_assertion(
                     score_field="match_score",
                     verdict_field="verified",
@@ -1008,7 +1043,7 @@ class RuleBasedTCGenerator:
                 "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
         else:
-            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+            assertion = self._qfe_state_tolerant_assertion(path) + self._when_success(
                 self._match_score_only_assertion(
                     score_field="match_score",
                 )
@@ -1077,8 +1112,8 @@ class RuleBasedTCGenerator:
             ),
             call_str=call,
             assertion_str=assertion,
-            axis="state",
-            reason_code="precondition_not_met",
+            axis="runtime",
+            reason_code="probe_schema_valid",
             target_field="",
             test_condition=(
                 "Happy path (schema-valid synthetic image) — probe_only: "
@@ -1086,7 +1121,7 @@ class RuleBasedTCGenerator:
             ),
             expected_http="200",
             expected_app="no crash (status < 500); success may be false if no face",
-            error_detail="state.precondition_not_met",
+            error_detail="runtime.probe_schema_valid",
             request_method=method,
             request_path=resolved_path,
             request_query=query_params,
@@ -1432,7 +1467,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, p["name"], repr(probe), "range_violation", "boundary"):
                     continue
 
-                allow_state_not_met = (policy == "must_pass" and path in _STATE_DEPENDENT_PATHS)
+                allow_state_not_met = (policy == "must_pass" and path in STATE_DEPENDENT_PATHS)
                 axis_value = "state" if allow_state_not_met else "domain"
                 reason_value = "precondition_not_met" if allow_state_not_met else "range_violation"
                 error_detail_value = (
@@ -1441,7 +1476,7 @@ class RuleBasedTCGenerator:
                     else f"domain.range_violation.{p['name']}.{label}"
                 )
                 exp_app = (
-                    f"success=true, error_code>=0 OR success=false, error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)}"
+                    f"success=true, error_code>=0 OR success=false, error_code in {sorted(STATE_NOT_MET_CODES)}"
                     if allow_state_not_met
                     else {
                         "must_pass": "success=true, error_code>=0",
@@ -1461,6 +1496,7 @@ class RuleBasedTCGenerator:
                             f"boundary:{label}",
                             success_statuses,
                             allow_state_not_met=allow_state_not_met,
+                            path=path,
                         ),
                         axis=axis_value,
                         reason_code=reason_value,
@@ -1499,7 +1535,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, field, repr(probe), "range_violation", "boundary"):
                     continue
 
-                allow_state_not_met = (policy == "must_pass" and path in _STATE_DEPENDENT_PATHS)
+                allow_state_not_met = (policy == "must_pass" and path in STATE_DEPENDENT_PATHS)
                 axis_value = "state" if allow_state_not_met else "domain"
                 reason_value = "precondition_not_met" if allow_state_not_met else "range_violation"
                 error_detail_value = (
@@ -1508,7 +1544,7 @@ class RuleBasedTCGenerator:
                     else f"domain.range_violation.{field}.{label}"
                 )
                 exp_app = (
-                    f"success=true, error_code>=0 OR success=false, error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)}"
+                    f"success=true, error_code>=0 OR success=false, error_code in {sorted(STATE_NOT_MET_CODES)}"
                     if allow_state_not_met
                     else {
                         "must_pass": "success=true, error_code>=0",
@@ -1528,6 +1564,7 @@ class RuleBasedTCGenerator:
                             f"boundary:{label}",
                             success_statuses,
                             allow_state_not_met=allow_state_not_met,
+                            path=path,
                         ),
                         axis=axis_value,
                         reason_code=reason_value,
