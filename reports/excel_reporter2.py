@@ -125,12 +125,6 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
 
     # 0. PASS
     if outcome == "passed":
-        # state-tolerant positive: success=false/error_code<0 였지만 허용된 케이스
-        if (
-            response_success is False
-            and (reason_code == "precondition_not_met" or error_detail.startswith("state."))
-        ):
-            return "PASS (상태 미충족 — 허용됨)"
         return "PASS"
 
     # 1. 인프라 / 런타임
