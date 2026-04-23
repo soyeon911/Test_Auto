@@ -380,6 +380,51 @@ class RuleBasedTCGenerator:
         """
         )
 
+    def _qfe_state_tolerant_assertion(self) -> str:
+        """
+        State-axis positive test assertion.
+
+        상태 미충족 허용 로직:
+          - success=True,  error_code>=0  -> DB 데이터 존재, 정상 성공  -> PASS
+          - success=False, error_code<0   -> DB 데이터 없음(상태 미충족), 서버가 정상 거절 -> PASS
+          - 5xx                           -> 서버 크래시  -> FAIL
+          - success=False, error_code>=0  -> 모호한 상태 (버그 의심)  -> FAIL
+        """
+        return textwrap.dedent(
+            """\
+            assert resp.status_code < 500, (
+                f"[FAIL] expected success-like response, got crash\\n"
+                f"  Status : {resp.status_code}\\n"
+                f"  Body   : {resp.text[:300]}"
+            )
+            try:
+                body = resp.json()
+            except ValueError:
+                pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+            _success = body.get("success")
+            _ec = body.get("error_code", 0)
+            assert (
+                (_success is True  and _ec >= 0) or
+                (_success is False and _ec < 0)
+            ), (
+                f"[FAIL] unexpected QFE state response\\n"
+                f"  Expected : success=true/error_code>=0 (data present)\\n"
+                f"           OR success=false/error_code<0 (state not met -- acceptable)\\n"
+                f"  success    : {{_success}}\\n"
+                f"  error_code : {{_ec}}\\n"
+                f"  msg        : {{body.get('msg')}}\\n"
+                f"  Full body  : {{resp.text[:300]}}"
+            )
+        """
+        )
+
+    def _when_success(self, assertion: str) -> str:
+        """domain assertion 블록을 success=True 조건부로 래핑.
+        state-tolerant positive 테스트에서 success=False(상태 미충족)일 때
+        domain 검증을 건너뛰기 위해 사용."""
+        indented = textwrap.indent(assertion.rstrip("\n"), "    ")
+        return 'if body.get("success") is True:\n' + indented + "\n"
+
     def _standard_error_assertion(self, field_name: str, label: str = "error") -> str:
         return textwrap.dedent(
             f"""\
@@ -797,15 +842,19 @@ class RuleBasedTCGenerator:
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
         assertion = (
-            self._qfe_success_assertion()
+            self._qfe_state_tolerant_assertion()
             if self.error_mode == "qfe"
             else self._standard_success_assertion(success_statuses)
         )
-        exp_app = "success=true, error_code>=0" if self.error_mode == "qfe" else f"status in {success_statuses}"
+        exp_app = (
+            "success=true/error_code>=0 OR success=false/error_code<0 (state not met)"
+            if self.error_mode == "qfe"
+            else f"status in {success_statuses}"
+        )
 
         return self._api_test_block(
             fname=f"test_{op_id}_positive",
-            docstring="[rule:positive] Happy-path — valid request should succeed.",
+            docstring="[rule:positive] Happy-path — valid request; success=true if data present, success=false/error_code<0 if state not met.",
             call_str=call,
             assertion_str=assertion,
             axis="state",
@@ -849,45 +898,57 @@ class RuleBasedTCGenerator:
         call = _render_call(method, path, path_params, query_params, body)
 
         if path == "/api/v2/match":
-            assertion = self._qfe_success_assertion() + self._match_status_assertion(
-                score_field="match_score",
-                status_field="status",
-                data_error_code_field="error_code",
+            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+                self._match_status_assertion(
+                    score_field="match_score",
+                    status_field="status",
+                    data_error_code_field="error_code",
+                )
             )
             exp_app = (
-                "success=true, error_code>=0, "
-                "data.error_code=number, data.match_score=number, data.status in {success,fail}"
+                "success=true/error_code>=0 (data present): domain validated; "
+                "OR success=false/error_code<0 (state not met)"
             )
             condition = (
-                "Happy path — valid request; expects execution success and domain validation "
-                "for data.error_code, data.match_score, data.status"
+                "Happy path — valid request; success=true 시 domain 검증 "
+                "(data.error_code, data.match_score, data.status); "
+                "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
         elif "verify" in path:
-            assertion = self._qfe_success_assertion() + self._match_domain_assertion(
-                score_field="match_score",
-                verdict_field="verified",
+            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+                self._match_domain_assertion(
+                    score_field="match_score",
+                    verdict_field="verified",
+                )
             )
             exp_app = (
-                "success=true, error_code>=0, data.match_score=number, "
-                "data.verified=bool, score-threshold consistency"
+                "success=true/error_code>=0 (data present): data.match_score+verified validated; "
+                "OR success=false/error_code<0 (state not met)"
             )
             condition = (
-                "Happy path — valid request; expects execution success and domain validation "
-                "for data.match_score and data.verified"
+                "Happy path — valid request; success=true 시 domain 검증 "
+                "(data.match_score, data.verified); "
+                "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
         else:
-            assertion = self._qfe_success_assertion() + self._match_score_only_assertion(
-                score_field="match_score",
+            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+                self._match_score_only_assertion(
+                    score_field="match_score",
+                )
             )
-            exp_app = "success=true, error_code>=0, data.match_score=number"
+            exp_app = (
+                "success=true/error_code>=0 (data present): data.match_score validated; "
+                "OR success=false/error_code<0 (state not met)"
+            )
             condition = (
-                "Happy path — valid request; expects execution success and domain validation "
-                "for data.match_score"
+                "Happy path — valid request; success=true 시 domain 검증 "
+                "(data.match_score); "
+                "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
 
         return self._api_test_block(
             fname=f"test_{op_id}_positive",
-            docstring="[rule:positive] Match/verify — execution success + domain score validation.",
+            docstring="[rule:positive] Match/verify — success=true 시 domain 검증; success=false/error_code<0 (state not met) 허용.",
             call_str=call,
             assertion_str=assertion,
             axis="state",
