@@ -166,6 +166,18 @@ _COERCIBLE_WRONG: dict[str, list[Any]] = {
 
 _BOUNDARY_INT = [0, -1, 2_147_483_647]
 
+_STATE_NOT_MET_ERROR_CODES: frozenset[int] = frozenset({-28, -43, -200})
+
+_STATE_DEPENDENT_PATHS: frozenset[str] = frozenset({
+    "/api/v2/delete",
+    "/api/v2/enroll",
+    "/api/v2/enroll-template",
+    "/api/v2/verify",
+    "/api/v2/verify-template",
+    "/api/v2/identify",
+    "/api/v2/identify-template",
+})
+
 
 def _safe_name(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]", "_", text).strip("_")
@@ -385,34 +397,33 @@ class RuleBasedTCGenerator:
         State-axis positive test assertion.
 
         상태 미충족 허용 로직:
-          - success=True,  error_code>=0  -> DB 데이터 존재, 정상 성공  -> PASS
-          - success=False, error_code<0   -> DB 데이터 없음(상태 미충족), 서버가 정상 거절 -> PASS
-          - 5xx                           -> 서버 크래시  -> FAIL
-          - success=False, error_code>=0  -> 모호한 상태 (버그 의심)  -> FAIL
+          - success=True,  error_code>=0                     -> 정상 성공
+          - success=False, error_code in STATE_NOT_MET_CODES -> DB/fixture 상태 미충족
+          - 그 외 응답                                       -> FAIL
         """
         return textwrap.dedent(
-            """\
+            f"""\
             assert resp.status_code < 500, (
-                f"[FAIL] expected success-like response, got crash\\n"
-                f"  Status : {resp.status_code}\\n"
-                f"  Body   : {resp.text[:300]}"
+                f"[FAIL] expected success-like response, got crash\n"
+                f"  Status : {{resp.status_code}}\n"
+                f"  Body   : {{resp.text[:300]}}"
             )
             try:
                 body = resp.json()
             except ValueError:
-                pytest.fail(f"Expected JSON response, got: {resp.text[:300]}")
+                pytest.fail(f"Expected JSON response, got: {{resp.text[:300]}}")
             _success = body.get("success")
             _ec = body.get("error_code", 0)
             assert (
-                (_success is True  and _ec >= 0) or
-                (_success is False and _ec < 0)
+                (_success is True and _ec >= 0) or
+                (_success is False and _ec in {sorted(_STATE_NOT_MET_ERROR_CODES)})
             ), (
-                f"[FAIL] unexpected QFE state response\\n"
-                f"  Expected : success=true/error_code>=0 (data present)\\n"
-                f"           OR success=false/error_code<0 (state not met -- acceptable)\\n"
-                f"  success    : {{_success}}\\n"
-                f"  error_code : {{_ec}}\\n"
-                f"  msg        : {{body.get('msg')}}\\n"
+                f"[FAIL] unexpected QFE state response\n"
+                f"  Expected : success=true/error_code>=0 (data present)\n"
+                f"           OR success=false/error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)} (state not met)\n"
+                f"  success    : {{_success}}\n"
+                f"  error_code : {{_ec}}\n"
+                f"  msg        : {{body.get('msg')}}\n"
                 f"  Full body  : {{resp.text[:300]}}"
             )
         """
@@ -464,6 +475,7 @@ class RuleBasedTCGenerator:
         field_name: str,
         label: str,
         success_statuses: list[int] | None = None,
+        allow_state_not_met: bool = False,
     ) -> str:
         if policy == "must_fail":
             if self.error_mode == "qfe":
@@ -472,6 +484,8 @@ class RuleBasedTCGenerator:
 
         if policy == "must_pass":
             if self.error_mode == "qfe":
+                if allow_state_not_met:
+                    return self._qfe_state_tolerant_assertion()
                 return self._qfe_success_assertion()
             return self._standard_success_assertion(success_statuses or [200])
 
@@ -841,15 +855,24 @@ class RuleBasedTCGenerator:
 
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
+        allow_state_not_met = self.error_mode == "qfe" and path in _STATE_DEPENDENT_PATHS
         assertion = (
             self._qfe_state_tolerant_assertion()
-            if self.error_mode == "qfe"
-            else self._standard_success_assertion(success_statuses)
+            if allow_state_not_met
+            else (
+                self._qfe_success_assertion()
+                if self.error_mode == "qfe"
+                else self._standard_success_assertion(success_statuses)
+            )
         )
         exp_app = (
-            "success=true/error_code>=0 OR success=false/error_code<0 (state not met)"
-            if self.error_mode == "qfe"
-            else f"status in {success_statuses}"
+            f"success=true/error_code>=0 OR success=false/error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)} (state not met)"
+            if allow_state_not_met
+            else (
+                "success=true/error_code>=0"
+                if self.error_mode == "qfe"
+                else f"status in {success_statuses}"
+            )
         )
 
         return self._api_test_block(
@@ -1355,25 +1378,43 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, p["name"], repr(probe), "range_violation", "boundary"):
                     continue
 
-                exp_app = {
-                    "must_pass": "success=true, error_code>=0",
-                    "must_fail": "success=false, error_code<0",
-                    "probe_only": "no crash (status < 500)",
-                }.get(policy, "no crash (status < 500)")
+                allow_state_not_met = (policy == "must_pass" and path in _STATE_DEPENDENT_PATHS)
+                axis_value = "state" if allow_state_not_met else "domain"
+                reason_value = "precondition_not_met" if allow_state_not_met else "range_violation"
+                error_detail_value = (
+                    f"state.precondition_not_met.{p['name']}.{label}"
+                    if allow_state_not_met
+                    else f"domain.range_violation.{p['name']}.{label}"
+                )
+                exp_app = (
+                    f"success=true, error_code>=0 OR success=false, error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)}"
+                    if allow_state_not_met
+                    else {
+                        "must_pass": "success=true, error_code>=0",
+                        "must_fail": "success=false, error_code<0",
+                        "probe_only": "no crash (status < 500)",
+                    }.get(policy, "no crash (status < 500)")
+                )
 
                 blocks.append(
                     self._api_test_block(
                         fname=f"test_{op_id}_boundary_{_safe_name(p['name'])}_{_safe_name(str(label))}",
                         docstring=f"[rule:boundary] '{p['name']}' = {probe} ({label}, policy={policy}).",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion(policy, p["name"], f"boundary:{label}", success_statuses),
-                        axis="domain",
-                        reason_code="range_violation",
+                        assertion_str=self._build_policy_assertion(
+                            policy,
+                            p["name"],
+                            f"boundary:{label}",
+                            success_statuses,
+                            allow_state_not_met=allow_state_not_met,
+                        ),
+                        axis=axis_value,
+                        reason_code=reason_value,
                         target_field=p["name"],
                         test_condition=f"'{p['name']}' = {probe} (boundary: {label})",
                         expected_http="200",
                         expected_app=exp_app,
-                        error_detail=f"domain.range_violation.{p['name']}.{label}",
+                        error_detail=error_detail_value,
                         request_method=method,
                         request_path=resolved_path,
                         request_query=req_query,
@@ -1404,25 +1445,43 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, field, repr(probe), "range_violation", "boundary"):
                     continue
 
-                exp_app = {
-                    "must_pass": "success=true, error_code>=0",
-                    "must_fail": "success=false, error_code<0",
-                    "probe_only": "no crash (status < 500)",
-                }.get(policy, "no crash (status < 500)")
+                allow_state_not_met = (policy == "must_pass" and path in _STATE_DEPENDENT_PATHS)
+                axis_value = "state" if allow_state_not_met else "domain"
+                reason_value = "precondition_not_met" if allow_state_not_met else "range_violation"
+                error_detail_value = (
+                    f"state.precondition_not_met.{field}.{label}"
+                    if allow_state_not_met
+                    else f"domain.range_violation.{field}.{label}"
+                )
+                exp_app = (
+                    f"success=true, error_code>=0 OR success=false, error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)}"
+                    if allow_state_not_met
+                    else {
+                        "must_pass": "success=true, error_code>=0",
+                        "must_fail": "success=false, error_code<0",
+                        "probe_only": "no crash (status < 500)",
+                    }.get(policy, "no crash (status < 500)")
+                )
 
                 blocks.append(
                     self._api_test_block(
                         fname=f"test_{op_id}_boundary_body_{_safe_name(field)}_{_safe_name(str(label))}",
                         docstring=f"[rule:boundary] body field '{field}' = {probe} ({label}, policy={policy}).",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion(policy, field, f"boundary:{label}", success_statuses),
-                        axis="domain",
-                        reason_code="range_violation",
+                        assertion_str=self._build_policy_assertion(
+                            policy,
+                            field,
+                            f"boundary:{label}",
+                            success_statuses,
+                            allow_state_not_met=allow_state_not_met,
+                        ),
+                        axis=axis_value,
+                        reason_code=reason_value,
                         target_field=field,
                         test_condition=f"Body field '{field}' = {probe} (boundary: {label})",
                         expected_http="200",
                         expected_app=exp_app,
-                        error_detail=f"domain.range_violation.{field}.{label}",
+                        error_detail=error_detail_value,
                         request_method=method,
                         request_path=resolved_path,
                         request_query=base_query_params,
