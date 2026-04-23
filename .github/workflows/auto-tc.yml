@@ -854,9 +854,9 @@ jobs:
           name: pytest-raw-${{ github.run_id }}
           path: |
             ${{ env.REPORT_DIR }}/report.json
-            ${{ env.REPORT_DIR }}/pytest_report.json
             ${{ env.REPORT_DIR }}/test_diag.jsonl
             ${{ env.REPORT_DIR }}/pytest_output.txt
+            ${{ env.REPORT_DIR }}/allure-results/
           retention-days: 3
 
       - name: 상태 캐시 업데이트

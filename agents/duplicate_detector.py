@@ -29,7 +29,7 @@ import re
 from typing import NamedTuple
 
 
-# ─── Intent key ──────────────────────────────────────────────────────────────
+# --- Intent key --------------------------------------------------------------
 
 class IntentKey(NamedTuple):
     op_id:       str    # normalised operation id fragment
@@ -46,7 +46,10 @@ _RULE_PATTERN = re.compile(
     r"|missing_(?P<mf1>\w+)"
     r"|wrong_type_body_(?P<wt2>\w+)"
     r"|wrong_type_(?P<wt1>\w+)"
-    r"|boundary_(?P<bf>\w+?)_(?:neg\d+|\d+)$"
+    r"|boundary_body_(?P<bb>\w+?)_\w+$"
+    r"|boundary_(?P<bf>\w+?)_\w+$"
+    r"|input_val_(?P<iv>\w+?)_\w+$"
+    r"|raw_image_relation_(?P<ri>\w+)"
     r"|invalid_enum_(?P<ef>\w+)"
     r"|none_(?P<nf>\w+)"
     r")$"
@@ -57,7 +60,6 @@ def _parse_intent(func_name: str) -> IntentKey:
     """Parse a test function name into a normalised IntentKey."""
     m = _RULE_PATTERN.match(func_name)
     if not m:
-        # AI-generated name that doesn't match rule pattern — use raw name as intent
         return IntentKey(op_id=func_name, intent_type="unknown", target="")
 
     op = m.group("op")
@@ -71,8 +73,14 @@ def _parse_intent(func_name: str) -> IntentKey:
         return IntentKey(op, "wrong_type", m.group("wt2"))
     if m.group("wt1"):
         return IntentKey(op, "wrong_type", m.group("wt1"))
+    if m.group("bb"):
+        return IntentKey(op, "boundary", m.group("bb"))
     if m.group("bf"):
         return IntentKey(op, "boundary", m.group("bf"))
+    if m.group("iv"):
+        return IntentKey(op, "input_validation", m.group("iv"))
+    if m.group("ri"):
+        return IntentKey(op, "raw_image_relation", m.group("ri"))
     if m.group("ef"):
         return IntentKey(op, "invalid_enum", m.group("ef"))
     if m.group("nf"):
@@ -93,15 +101,13 @@ def _extract_functions(code: str) -> dict[str, ast.FunctionDef]:
     }
 
 
-# ─── Main detector ────────────────────────────────────────────────────────────
+# --- Main detector -----------------------------------------------------------
 
 class DuplicateDetector:
     """
     Stateless helper that compares a rule-based code block against an AI-generated
     code block and identifies / filters duplicates.
     """
-
-    # ── public API ────────────────────────────────────────────────────────────
 
     @classmethod
     def find_duplicates(cls, rule_code: str, ai_code: str) -> list[str]:
@@ -149,7 +155,7 @@ class DuplicateDetector:
             return ai_code, 0
 
         lines = ai_code.splitlines(keepends=True)
-        exclude: set[int] = set()   # 0-based line indices to drop
+        exclude: set[int] = set()
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef):
@@ -161,7 +167,7 @@ class DuplicateDetector:
                 if node.decorator_list
                 else node.lineno - 1
             )
-            end = node.end_lineno  # end_lineno is 1-based, exclusive upper bound OK
+            end = node.end_lineno
             for i in range(start, end):
                 exclude.add(i)
 
@@ -207,20 +213,19 @@ class DuplicateDetector:
 
         for name, node in funcs.items():
             intent = _parse_intent(name)
-            # Extract docstring if present
             docstring = ast.get_docstring(node) or ""
             records.append({
-                "source":               source,
-                "endpoint":             f"{endpoint.get('method','').upper()} {endpoint.get('path','')}",
-                "operation_id":         endpoint.get("operation_id", ""),
-                "function_name":        name,
-                "intent_type":          intent.intent_type,
-                "target_field":         intent.target,
-                "description":          docstring,
-                "test_case_type":       intent.intent_type,
-                "execution_result":     "pending",
+                "source":                 source,
+                "endpoint":               f"{endpoint.get('method','').upper()} {endpoint.get('path','')}",
+                "operation_id":           endpoint.get("operation_id", ""),
+                "function_name":          name,
+                "intent_type":            intent.intent_type,
+                "target_field":           intent.target,
+                "description":            docstring,
+                "test_case_type":         intent.intent_type,
+                "execution_result":       "pending",
                 "failure_classification": "",
-                "is_duplicate":         name in dup_names,
+                "is_duplicate":           name in dup_names,
             })
 
         return records
