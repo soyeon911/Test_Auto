@@ -32,6 +32,36 @@ _FC_COLORS: dict[str, str] = {
     "TC 생성 오류 (문법/들여쓰기)": "F4CCCC",
     "예상치 못한 실패": "FCE5CD",
 }
+_FC_COLORS.update({
+    "입력 누락 (Required Missing)": "FCE5CD",
+    "타입 오류 (Type Mismatch)": "FCE5CD",
+    "범위 오류 (Out of Range)": "FFF2CC",
+    "포맷 오류 (Encoding/Decode)": "FFF2CC",
+    "리소스 없음 (Not Found)": "FCE5CD",
+    "중복 요청 (Duplicate)": "FCE5CD",
+    "도메인 조건 실패 (Threshold/Match)": "FFE5E5",
+    "정상적인 실패 응답": "EAF7EA",
+})
+
+def _map_qfe_error_code(error_code: Any, msg: str) -> str | None:
+    try:
+        ec = int(error_code)
+    except Exception:
+        return None
+
+    msg = (msg or "").lower()
+
+    if ec in (-43, -28, -200):
+        return "상태 미충족 (DB/fixture 없음)"
+
+    if ec == -1:
+        if "unmarshal" in msg or "json" in msg or "type" in msg:
+            return "타입 오류 (Type Mismatch)"
+        if "base64" in msg or "decode" in msg or "padding" in msg or "encoding" in msg:
+            return "포맷 오류 (Encoding/Decode)"
+        return "정상적인 실패 응답"
+
+    return None
 
 
 def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
@@ -41,36 +71,107 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
     error_detail = str(item.get("error_detail") or "")
     expected_result_type = str(item.get("expected_result_type") or "")
 
+    response_success = item.get("response_success")
+    response_error_code = item.get("response_error_code")
+    response_data_error_code = item.get("response_data_error_code")
+    response_msg = str(item.get("response_msg") or "")
+    msg = response_msg.lower()
+    data_status = str(item.get("response_data_status") or "").lower()
+    actual_status = str(item.get("actual_status") or "")
+
     exc_type = str(item.get("exception_type") or "")
     exc_msg = str(item.get("exception_message") or "")
     longrepr = str(item.get("longrepr") or "")
     blob = f"{exc_type} {exc_msg} {longrepr} {error_detail}".lower()
 
-    response_success = item.get("response_success")
-    actual_status = str(item.get("actual_status") or "")
-
+    # 0. PASS
     if outcome == "passed":
         return "PASS"
 
-    if "indentationerror" in blob or "syntaxerror" in blob:
-        return "TC 생성 오류 (문법/들여쓰기)"
-
-    if "validation_gap" in blob:
-        return "엔드포인트 버그 (Validation 미수행)"
-
-    if "crash_detected" in blob:
-        return "서버 Crash (5xx)"
-
-    if item.get("server_crashed"):
+    # 1. 인프라 / 런타임
+    if item.get("server_crashed") or "crash_detected" in blob or actual_status.startswith("5"):
         return "서버 Crash (5xx)"
 
     if "connection" in blob or "refused" in blob or "timeout" in blob:
         return "서버 미응답"
 
-    if reason_code == "precondition_not_met" or error_detail.startswith("state."):
+    # 2. 생성/문법 오류
+    if "indentationerror" in blob or "syntaxerror" in blob:
+        return "TC 생성 오류 (문법/들여쓰기)"
+
+    # 3. Crash Probe 우선 판정
+    if "validation_gap" in blob:
+        return "엔드포인트 버그 (Validation 미수행)"
+
+    # 4. 상태 미충족
+    # 사전 조건/DB fixture 문제는 msg, reason_code 둘 다 사용
+    if (
+        reason_code == "precondition_not_met"
+        or error_detail.startswith("state.")
+        or "failed to get user template" in msg
+        or "failed to delete user" in msg
+        or "template extraction failed" in msg
+        or "failed to detect face" in msg
+        or "verification failed" in msg
+    ):
         return "상태 미충족 (DB/fixture 없음)"
 
+    # 5. response body 문구 기반 분류
+    # 5-1. 필수값/누락
+    if "missing" in msg or "required" in msg:
+        return "입력 누락 (Required Missing)"
+
+    # 5-2. 타입/직렬화 오류
+    if (
+        "cannot unmarshal" in msg
+        or "type mismatch" in msg
+        or "invalid type" in msg
+        or "wrong type" in msg
+    ):
+        return "타입 오류 (Type Mismatch)"
+
+    # 5-3. 포맷/인코딩 오류
+    if (
+        "base64" in msg
+        or "decode" in msg
+        or "padding" in msg
+        or "encoding" in msg
+        or "invalid request" in msg and "json" in msg
+    ):
+        return "포맷 오류 (Encoding/Decode)"
+
+    # 5-4. 범위 오류
+    if "range" in msg or "out of range" in msg or "must be between" in msg:
+        return "범위 오류 (Out of Range)"
+
+    # 5-5. 리소스 없음
+    if "not found" in msg or "no such" in msg or "does not exist" in msg:
+        return "리소스 없음 (Not Found)"
+
+    # 5-6. 중복
+    if "duplicate" in msg or "already exists" in msg:
+        return "중복 요청 (Duplicate)"
+
+    # 5-7. threshold / match / verify 도메인 실패
+    if "threshold" in msg:
+        return "도메인 조건 실패 (Threshold/Match)"
+
+    # 6. QFE error_code 기반 보정
+    # top-level / data-level 둘 다 본다
+    # QFE error_code 기반 보정
+    mapped = _map_qfe_error_code(response_error_code, response_msg)
+    if mapped:
+        return mapped
+
+    mapped = _map_qfe_error_code(response_data_error_code, response_msg)
+    if mapped:
+        return mapped
+
+
+    # 7. expected_result_type + success 조합
     if expected_result_type == "probe_only":
+        if "assert" in blob or "failed:" in blob:
+            return "TC 실패 (단언 오류)"
         return "Probe Only"
 
     if expected_result_type == "expected_fail":
@@ -79,19 +180,20 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
                 return "엔드포인트 버그 (Validation 미수행)"
             return "엔드포인트 버그 (도메인 검증 미수행)"
         if response_success is False:
-            return "예상된 실패"
+            return "정상적인 실패 응답"
 
     if expected_result_type == "expected_pass":
         if response_success is False:
             return "예상치 못한 실패"
-        if "assert" in blob or "failed:" in blob:
-            return "TC 실패 (단언 오류)"
 
-    if actual_status.startswith("5"):
-        return "서버 Crash (5xx)"
-    if actual_status.startswith("4"):
-        return "예상된 실패"
+    # 8. data.status 기반 보정
+    if data_status in {"fail", "success"}:
+        if expected_result_type == "expected_fail" and data_status == "success":
+            return "엔드포인트 버그 (도메인 검증 미수행)"
+        if expected_result_type == "expected_pass" and data_status == "fail":
+            return "도메인 조건 실패 (Threshold/Match)"
 
+    # 9. assertion/pytest failure
     if "assert" in blob or "failed:" in blob:
         return "TC 실패 (단언 오류)"
 
@@ -765,6 +867,14 @@ class ExcelReportBuilder:
         if ds not in [None, ""]:
             tail_parts.append(f"data.status={ds}")
 
+        verified = item.get("response_data_verified")
+        if verified not in [None, ""]:
+            tail_parts.append(f"data.verified={verified}")
+
+        msg = item.get("response_msg")
+        if msg:
+            tail_parts.append(f"msg={str(msg)[:60]}")
+
         tail = ", ".join(tail_parts)
         if head and tail:
             return f"{head} / {tail}"
@@ -972,12 +1082,15 @@ class ExcelReportBuilder:
 
     @staticmethod
     def _classify_probe(test: dict[str, Any]) -> str:
-        call = test.get("call") or {}
-        longrepr = str(call.get("longrepr") or test.get("longrepr") or "")
+        if test.get("probe_classification"):
+            return str(test["probe_classification"])
+
+        longrepr = str(test.get("longrepr") or "")
         if "CRASH_DETECTED" in longrepr:
             return "CRASH_DETECTED"
         if "VALIDATION_GAP" in longrepr:
             return "VALIDATION_GAP"
+
         outcome = str(test.get("outcome", "")).lower()
         if outcome == "passed":
             return "GRACEFUL_REJECTION"
