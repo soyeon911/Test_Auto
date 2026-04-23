@@ -22,7 +22,7 @@ _FC_COLORS: dict[str, str] = {
     "PASS":                              "EAF7EA",
     "서버 Crash (5xx)":                  "F4CCCC",
     "서버 미응답":                        "F4CCCC",
-    "상태 미충족 (DB/fixture 없음)":      "FCE5CD",
+    "상태 미충족 — USER_NOT_FOUND":         "FCE5CD",
     "엔드포인트 버그 (Validation 미수행)": "FFE5E5",
     "엔드포인트 버그 (도메인 검증 미수행)": "FFE5E5",
     "예상된 실패":                        "EAF7EA",
@@ -41,7 +41,7 @@ _FC_COLORS.update({
     "중복 요청 (Duplicate)": "FCE5CD",
     "도메인 조건 실패 (Threshold/Match)": "FFE5E5",
     "정상적인 실패 응답": "EAF7EA",
-    "PASS (상태 미충족 — 허용됨)": "EAF7EA",
+    "PASS (상태 미충족)": "EAF7EA",
     "도메인 조건 실패 (No Face/Detect Fail)": "FFE5E5",
     "입력 파라미터 오류 (Invalid Parameter)": "FCE5CD",
 })
@@ -55,21 +55,26 @@ def _map_qfe_error_code(error_code: Any, msg: str, path: str = "") -> str | None
     msg_l = (msg or "").lower()
     path = path or ""
 
-    # 1) state
-    if ec in (-28, -43, -91, -29, -20):
-        return "상태 미충족 (DB/fixture 없음)"
+    # 1) state — 에러코드별 명확한 명칭
+    _STATE = {
+        -28: "USER_NOT_FOUND", -43: "TEMPLATE_NOT_FOUND",
+        -91: "FILE_NOT_FOUND", -29: "DATABASE_NOT_LOADED", -20: "DATABASE_NOT_EXIST",
+    }
+    if ec in _STATE:
+        return f"상태 미충족 — {_STATE[ec]}"
 
-    # 2) domain
-    if ec in (-33, -34, -35, -40, -50, -200):
-        if ec == -200:
-            return "도메인 조건 실패 (No Face/Detect Fail)"
-        if ec == -33:
-            return "범위 오류 (Out of Range)"
-        return "도메인 조건 실패 (Threshold/Match)"
+    # 2) domain — 에러코드별 명확한 명칭
+    _DOMAIN = {
+        -33: "SYS_PARAM_OUT_OF_RANGE", -34: "INVALID_USER_ID",
+        -35: "INVALID_SUB_ID", -40: "MAX_TEMPLATE_LIMIT",
+        -50: "ENROLL_DIFFERENT_FACE", -200: "FAILED_FACE_DETECT",
+    }
+    if ec in _DOMAIN:
+        return f"도메인 실패 — {_DOMAIN[ec]}"
 
     # 3) request/schema
     if ec == -90:
-        return "입력 파라미터 오류 (Invalid Parameter)"
+        return "요청 오류 — INVALID_PARAMETER"
 
     # 4) generic -1
     if ec == -1:
@@ -78,13 +83,13 @@ def _map_qfe_error_code(error_code: Any, msg: str, path: str = "") -> str | None
         if any(x in msg_l for x in ["base64", "decode", "padding", "encoding"]):
             return "포맷 오류 (Encoding/Decode)"
         if "failed to detect face" in msg_l or "error code: -200" in msg_l:
-            return "도메인 조건 실패 (No Face/Detect Fail)"
+            return "도메인 실패 — FAILED_FACE_DETECT"
         if path in ("/api/v2/verify-template", "/api/v2/verify") and "verification failed" in msg_l:
-            return "상태 미충족 (DB/fixture 없음)"
+            return "상태 미충족 — USER_NOT_FOUND"
         if path == "/api/v2/delete" and "failed to delete user" in msg_l:
-            return "상태 미충족 (DB/fixture 없음)"
+            return "상태 미충족 — USER_NOT_FOUND"
         if "failed to get user template" in msg_l or "template not found" in msg_l or "user not found" in msg_l:
-            return "상태 미충족 (DB/fixture 없음)"
+            return "상태 미충족 — USER_NOT_FOUND"
         return "정상적인 실패 응답"
 
     return None
@@ -116,7 +121,7 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
             response_success is False
             and (reason_code == "precondition_not_met" or error_detail.startswith("state."))
         ):
-            return "PASS (상태 미충족 — 허용됨)"
+            return "PASS (상태 미충족)"
         return "PASS"
 
     # 1. 인프라 / 런타임
@@ -144,31 +149,20 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
         return mapped
 
 
-    # 4. 상태 미충족
-    # 사전 조건/DB fixture 문제는 msg, reason_code 둘 다 사용
+    # 4. 상태 미충족 — msg/reason_code 기반 추가 분류
+    if reason_code == "precondition_not_met" or error_detail.startswith("state."):
+        return "상태 미충족 — USER_NOT_FOUND"
+    if "failed to get user template" in msg or "template not found" in msg:
+        return "상태 미충족 — TEMPLATE_NOT_FOUND"
+    if "failed to delete user" in msg or "user not found" in msg:
+        return "상태 미충족 — USER_NOT_FOUND"
+    if "template extraction failed" in msg:
+        return "상태 미충족 — TEMPLATE_NOT_FOUND"
     if (
-        reason_code == "precondition_not_met"
-        or error_detail.startswith("state.")
-        or "failed to get user template" in msg
-        or "failed to delete user" in msg
-        or "template extraction failed" in msg
-        or (
-            "failed to detect face" in msg
-            and (
-                reason_code == "precondition_not_met"
-                or error_detail.startswith("state.")
-            )
-        )
-        or (
-            "verification failed" in msg
-            and (
-                reason_code == "precondition_not_met"
-                or error_detail.startswith("state.")
-                or path in ("/api/v2/verify-template", "/api/v2/verify")
-    )
-)
+        "verification failed" in msg
+        and path in ("/api/v2/verify-template", "/api/v2/verify")
     ):
-        return "상태 미충족 (DB/fixture 없음)"
+        return "상태 미충족 — USER_NOT_FOUND"
 
     # 5. response body 문구 기반 분류
     # 5-1. 필수값/누락

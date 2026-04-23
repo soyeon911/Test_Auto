@@ -313,9 +313,9 @@ class RuleBasedTCGenerator:
 
     def _range_cases(self, schema: dict) -> list[dict[str, Any]]:
         cons = self._schema_constraints(schema)
-        minimum = cons.get("minimum")
-        maximum = cons.get("maximum")
-        policy = self._probe_policy(schema).get("range_policy", "none")
+        # x_constraints 우선, 없으면 표준 Swagger minimum/maximum 읽기 (버전 호환)
+        minimum = cons.get("minimum") if cons.get("minimum") is not None else schema.get("minimum")
+        maximum = cons.get("maximum") if cons.get("maximum") is not None else schema.get("maximum")
 
         example = cons.get("example")
         if example is None:
@@ -324,28 +324,19 @@ class RuleBasedTCGenerator:
         if minimum is None and maximum is None and not isinstance(example, (int, float)):
             return []
 
+        # minimum/maximum 이 명세에 명시되어 있으면 범위 밖 값은 반드시 reject 되어야 함
+        range_constrained = (minimum is not None or maximum is not None)
+
         cases: list[dict[str, Any]] = []
 
         if minimum is not None:
             cases.append({"value": minimum, "label": "min", "policy": "must_pass"})
-            cases.append(
-                {
-                    "value": minimum - 1,
-                    "label": "below_min",
-                    "policy": "must_fail" if policy == "explicit" else "probe_only",
-                }
-            )
+            cases.append({"value": minimum - 1, "label": "below_min", "policy": "must_fail"})
             cases.append({"value": minimum + 1, "label": "above_min", "policy": "must_pass"})
 
         if maximum is not None:
             cases.append({"value": maximum, "label": "max", "policy": "must_pass"})
-            cases.append(
-                {
-                    "value": maximum + 1,
-                    "label": "above_max",
-                    "policy": "must_fail" if policy == "explicit" else "probe_only",
-                }
-            )
+            cases.append({"value": maximum + 1, "label": "above_max", "policy": "must_fail"})
             cases.append({"value": maximum - 1, "label": "below_max", "policy": "must_pass"})
 
         if isinstance(example, (int, float)):
@@ -355,12 +346,18 @@ class RuleBasedTCGenerator:
             lower_example = example - step
             upper_example = example + step
 
-            if minimum is None or lower_example >= minimum:
+            if minimum is not None and lower_example < minimum:
+                # minimum 명시된 경우 minimum 미만 값 → must_fail
+                cases.append({"value": lower_example, "label": "below_example", "policy": "must_fail"})
+            elif minimum is None or lower_example >= minimum:
                 cases.append({"value": lower_example, "label": "below_example", "policy": "must_pass"})
             else:
                 cases.append({"value": lower_example, "label": "below_example", "policy": "probe_only"})
 
-            if maximum is None or upper_example <= maximum:
+            if maximum is not None and upper_example > maximum:
+                # maximum 명시된 경우 maximum 초과 값 → must_fail
+                cases.append({"value": upper_example, "label": "above_example", "policy": "must_fail"})
+            elif maximum is None or upper_example <= maximum:
                 cases.append({"value": upper_example, "label": "above_example", "policy": "must_pass"})
             else:
                 cases.append({"value": upper_example, "label": "above_example", "policy": "probe_only"})
