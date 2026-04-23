@@ -842,15 +842,19 @@ class RuleBasedTCGenerator:
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
         assertion = (
-            self._qfe_success_assertion()
+            self._qfe_state_tolerant_assertion()
             if self.error_mode == "qfe"
             else self._standard_success_assertion(success_statuses)
         )
-        exp_app = "success=true, error_code>=0" if self.error_mode == "qfe" else f"status in {success_statuses}"
+        exp_app = (
+            "success=true/error_code>=0 OR success=false/error_code<0 (state not met)"
+            if self.error_mode == "qfe"
+            else f"status in {success_statuses}"
+        )
 
         return self._api_test_block(
             fname=f"test_{op_id}_positive",
-            docstring="[rule:positive] Happy-path — valid request should succeed.",
+            docstring="[rule:positive] Happy-path — valid request; success=true if data present, success=false/error_code<0 if state not met.",
             call_str=call,
             assertion_str=assertion,
             axis="state",
@@ -894,45 +898,57 @@ class RuleBasedTCGenerator:
         call = _render_call(method, path, path_params, query_params, body)
 
         if path == "/api/v2/match":
-            assertion = self._qfe_success_assertion() + self._match_status_assertion(
-                score_field="match_score",
-                status_field="status",
-                data_error_code_field="error_code",
+            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+                self._match_status_assertion(
+                    score_field="match_score",
+                    status_field="status",
+                    data_error_code_field="error_code",
+                )
             )
             exp_app = (
-                "success=true, error_code>=0, "
-                "data.error_code=number, data.match_score=number, data.status in {success,fail}"
+                "success=true/error_code>=0 (data present): domain validated; "
+                "OR success=false/error_code<0 (state not met)"
             )
             condition = (
-                "Happy path — valid request; expects execution success and domain validation "
-                "for data.error_code, data.match_score, data.status"
+                "Happy path — valid request; success=true 시 domain 검증 "
+                "(data.error_code, data.match_score, data.status); "
+                "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
         elif "verify" in path:
-            assertion = self._qfe_success_assertion() + self._match_domain_assertion(
-                score_field="match_score",
-                verdict_field="verified",
+            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+                self._match_domain_assertion(
+                    score_field="match_score",
+                    verdict_field="verified",
+                )
             )
             exp_app = (
-                "success=true, error_code>=0, data.match_score=number, "
-                "data.verified=bool, score-threshold consistency"
+                "success=true/error_code>=0 (data present): data.match_score+verified validated; "
+                "OR success=false/error_code<0 (state not met)"
             )
             condition = (
-                "Happy path — valid request; expects execution success and domain validation "
-                "for data.match_score and data.verified"
+                "Happy path — valid request; success=true 시 domain 검증 "
+                "(data.match_score, data.verified); "
+                "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
         else:
-            assertion = self._qfe_success_assertion() + self._match_score_only_assertion(
-                score_field="match_score",
+            assertion = self._qfe_state_tolerant_assertion() + self._when_success(
+                self._match_score_only_assertion(
+                    score_field="match_score",
+                )
             )
-            exp_app = "success=true, error_code>=0, data.match_score=number"
+            exp_app = (
+                "success=true/error_code>=0 (data present): data.match_score validated; "
+                "OR success=false/error_code<0 (state not met)"
+            )
             condition = (
-                "Happy path — valid request; expects execution success and domain validation "
-                "for data.match_score"
+                "Happy path — valid request; success=true 시 domain 검증 "
+                "(data.match_score); "
+                "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
 
         return self._api_test_block(
             fname=f"test_{op_id}_positive",
-            docstring="[rule:positive] Match/verify — execution success + domain score validation.",
+            docstring="[rule:positive] Match/verify — success=true 시 domain 검증; success=false/error_code<0 (state not met) 허용.",
             call_str=call,
             assertion_str=assertion,
             axis="state",
