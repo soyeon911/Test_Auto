@@ -672,7 +672,8 @@ class ExcelReportBuilder2:
         for t in raw.get("tests", []):
             call = t.get("call") or {}
             meta = self._extract_tc_meta(t)
-            out.append({
+            inline_diag: dict[str, Any] = meta.pop("_diag_from_up", {}) or {}
+            item: dict[str, Any] = {
                 "nodeid": t.get("nodeid", ""),
                 "outcome": t.get("outcome", "unknown"),
                 "duration": call.get("duration", t.get("duration", 0)),
@@ -707,7 +708,10 @@ class ExcelReportBuilder2:
                 "response_data_error_code": None,
                 "response_data_match_score": None,
                 "response_data_status": None,
-            })
+            }
+            if inline_diag:
+                self._apply_diag(item, inline_diag)
+            out.append(item)
         return out
 
     def _normalize_allure(self, d: Path) -> list[dict[str, Any]]:
@@ -799,9 +803,18 @@ class ExcelReportBuilder2:
             if isinstance(tc_meta, dict):
                 meta.update(tc_meta)
         for up in test_obj.get("user_properties", []) or []:
-            if isinstance(up, (list, tuple)) and len(up) == 2 and up[0] == "tc_meta":
-                if isinstance(up[1], dict):
+            if isinstance(up, dict):
+                # dict format: {"tc_meta": {...}}
+                if "tc_meta" in up and isinstance(up["tc_meta"], dict):
+                    meta.update(up["tc_meta"])
+                if "diag" in up and isinstance(up["diag"], dict):
+                    meta["_diag_from_up"] = up["diag"]
+            elif isinstance(up, (list, tuple)) and len(up) == 2:
+                # tuple format: ("tc_meta", {...})
+                if up[0] == "tc_meta" and isinstance(up[1], dict):
                     meta.update(up[1])
+                if up[0] == "diag" and isinstance(up[1], dict):
+                    meta["_diag_from_up"] = up[1]
         return meta
 
     @staticmethod

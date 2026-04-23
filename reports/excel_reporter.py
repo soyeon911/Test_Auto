@@ -515,7 +515,10 @@ class ExcelReportBuilder:
             call = t.get("call") or {}
             meta = self._extract_tc_meta(t)
 
-            out.append({
+            # diag 가 user_properties 에 직접 포함된 경우 즉시 적용
+            inline_diag: dict[str, Any] = meta.pop("_diag_from_up", {}) or {}
+
+            item: dict[str, Any] = {
                 "nodeid": t.get("nodeid", ""),
                 "outcome": t.get("outcome", "unknown"),
                 "duration": call.get("duration", t.get("duration", 0)),
@@ -559,7 +562,11 @@ class ExcelReportBuilder:
                 "response_data_error_code": None,
                 "response_data_match_score": None,
                 "response_data_status": None,
-            })
+            }
+            # user_properties 에 diag 가 있으면 test_diag.jsonl 없이도 필드 채움
+            if inline_diag:
+                self._apply_diag(item, inline_diag)
+            out.append(item)
         return out
 
     def _normalize_allure_results_dir(self, d: Path) -> list[dict[str, Any]]:
@@ -638,16 +645,35 @@ class ExcelReportBuilder:
 
     @staticmethod
     def _extract_tc_meta(test_obj: dict[str, Any]) -> dict[str, Any]:
+        """user_properties 에서 tc_meta 와 diag 를 모두 추출한다.
+
+        pytest-json-report 는 user_properties 를 두 가지 형식으로 직렬화한다:
+          - dict 형식 (현재):  [{"tc_meta": {...}}, {"diag": {...}}]
+          - tuple 형식 (구):   [["tc_meta", {...}], ["diag", {...}]]
+        양쪽 모두 처리한다.
+        """
         meta: dict[str, Any] = {}
+        # 1) metadata 키 (일부 pytest 버전)
         md = test_obj.get("metadata") or {}
         if isinstance(md, dict):
             tc_meta = md.get("tc_meta")
             if isinstance(tc_meta, dict):
                 meta.update(tc_meta)
+        # 2) user_properties
         for up in test_obj.get("user_properties", []) or []:
-            if isinstance(up, (list, tuple)) and len(up) == 2 and up[0] == "tc_meta":
-                if isinstance(up[1], dict):
+            if isinstance(up, dict):
+                # dict 형식: {"tc_meta": {...}}
+                if "tc_meta" in up and isinstance(up["tc_meta"], dict):
+                    meta.update(up["tc_meta"])
+                # diag 도 user_properties 에 있으면 직접 흡수
+                if "diag" in up and isinstance(up["diag"], dict):
+                    meta["_diag_from_up"] = up["diag"]
+            elif isinstance(up, (list, tuple)) and len(up) == 2:
+                # tuple 형식: ("tc_meta", {...})
+                if up[0] == "tc_meta" and isinstance(up[1], dict):
                     meta.update(up[1])
+                if up[0] == "diag" and isinstance(up[1], dict):
+                    meta["_diag_from_up"] = up[1]
         return meta
 
     @staticmethod
