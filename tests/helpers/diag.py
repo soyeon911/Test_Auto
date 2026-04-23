@@ -248,6 +248,31 @@ def attach_diag(request, diag: dict) -> None:
     """pytest request fixture의 user_properties에 diag를 첨부한다."""
     request.node.user_properties.append(("diag", diag))
 
+def attach_probe_diag(request, diag: dict[str, Any]) -> None:
+    """pytest request fixture의 user_properties에 probe_diag를 첨부한다."""
+    request.node.user_properties.append(("probe_diag", diag))
+
+
+def attach_probe_meta(
+    request,
+    probe_endpoint: str,
+    target_field: str,
+    probe_label: str,
+    probe_input: Any,
+    severity: str,
+) -> None:
+    """pytest request fixture의 user_properties에 probe_meta를 첨부한다."""
+    request.node.user_properties.append((
+        "probe_meta",
+        {
+            "expected_result_type": "probe_only",
+            "probe_endpoint": probe_endpoint,
+            "target_field": target_field,
+            "probe_label": probe_label,
+            "probe_input": probe_input,
+            "probe_severity": severity,
+        },
+    ))
 
 # ─── 실패 원인 분류 ────────────────────────────────────────────────────────────
 

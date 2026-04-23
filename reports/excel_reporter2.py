@@ -284,7 +284,7 @@ class ExcelReportBuilder2:
         return self.output_path
 
     def _build_tc_spec(self, ws, tests: list[dict[str, Any]]) -> None:
-        self._title_banner(ws, "A1:P1", "TC 명세서 (현재 Rule/Diag 반영)")
+        self._title_banner(ws, "A1:Q1", "TC 명세서 (현재 Rule/Diag 반영)")
         ws.row_dimensions[1].height = 26
 
         headers = [
