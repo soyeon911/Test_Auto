@@ -83,22 +83,45 @@ _THIN = Side(style="thin", color="CCCCCC")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
 
-def _map_qfe_error_code(error_code: Any, msg: str) -> str | None:
+def _map_qfe_error_code(error_code: Any, msg: str, path: str = "") -> str | None:
     try:
         ec = int(error_code)
     except Exception:
         return None
 
-    msg = (msg or "").lower()
+    msg_l = (msg or "").lower()
+    path = path or ""
 
-    if ec in (-43, -28, -200):
+    # 1) state
+    if ec in (-28, -43, -91, -29, -20):
         return "상태 미충족 (DB/fixture 없음)"
 
+    # 2) domain
+    if ec in (-33, -34, -35, -40, -50, -200):
+        if ec == -200:
+            return "도메인 조건 실패 (No Face/Detect Fail)"
+        if ec == -33:
+            return "범위 오류 (Out of Range)"
+        return "도메인 조건 실패 (Threshold/Match)"
+
+    # 3) request/schema
+    if ec == -90:
+        return "입력 파라미터 오류 (Invalid Parameter)"
+
+    # 4) generic -1
     if ec == -1:
-        if "unmarshal" in msg or "json" in msg or "type" in msg:
+        if any(x in msg_l for x in ["required", "unmarshal", "json", "type", "invalid request"]):
             return "타입 오류 (Type Mismatch)"
-        if "base64" in msg or "decode" in msg or "padding" in msg or "encoding" in msg:
+        if any(x in msg_l for x in ["base64", "decode", "padding", "encoding"]):
             return "포맷 오류 (Encoding/Decode)"
+        if "failed to detect face" in msg_l or "error code: -200" in msg_l:
+            return "도메인 조건 실패 (No Face/Detect Fail)"
+        if path in ("/api/v2/verify-template", "/api/v2/verify") and "verification failed" in msg_l:
+            return "상태 미충족 (DB/fixture 없음)"
+        if path == "/api/v2/delete" and "failed to delete user" in msg_l:
+            return "상태 미충족 (DB/fixture 없음)"
+        if "failed to get user template" in msg_l or "template not found" in msg_l or "user not found" in msg_l:
+            return "상태 미충족 (DB/fixture 없음)"
         return "정상적인 실패 응답"
 
     return None
@@ -109,7 +132,7 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
     reason_code = str(item.get("reason_code") or "")
     error_detail = str(item.get("error_detail") or "")
     expected_result_type = str(item.get("expected_result_type") or "")
-
+    path = str(item.get("request_path") or "")
     response_success = item.get("response_success")
     response_error_code = item.get("response_error_code")
     response_data_error_code = item.get("response_data_error_code")
@@ -147,6 +170,14 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
     # 3. Crash Probe 우선 판정
     if "validation_gap" in blob:
         return "엔드포인트 버그 (Validation 미수행)"
+    
+    mapped = _map_qfe_error_code(response_error_code, response_msg, path)
+    if mapped:
+        return mapped
+
+    mapped = _map_qfe_error_code(response_data_error_code, response_msg, path)
+    if mapped:
+        return mapped
 
     # 4. 상태 미충족
     # 사전 조건/DB fixture 문제는 msg, reason_code 둘 다 사용
@@ -163,7 +194,14 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
                 or error_detail.startswith("state.")
             )
         )
-        or "verification failed" in msg
+        or (
+            "verification failed" in msg
+            and (
+                reason_code == "precondition_not_met"
+                or error_detail.startswith("state.")
+                or path in ("/api/v2/verify-template", "/api/v2/verify")
+            )
+        )
     ):
         return "상태 미충족 (DB/fixture 없음)"
 
@@ -206,17 +244,6 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
     # 5-7. threshold / match / verify 도메인 실패
     if "threshold" in msg:
         return "도메인 조건 실패 (Threshold/Match)"
-
-    # 6. QFE error_code 기반 보정
-    # top-level / data-level 둘 다 본다
-    # QFE error_code 기반 보정
-    mapped = _map_qfe_error_code(response_error_code, response_msg)
-    if mapped:
-        return mapped
-
-    mapped = _map_qfe_error_code(response_data_error_code, response_msg)
-    if mapped:
-        return mapped
 
 
     # 7. expected_result_type + success 조합

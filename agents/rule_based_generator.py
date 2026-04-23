@@ -951,6 +951,12 @@ class RuleBasedTCGenerator:
         exp_app = (
             f"success=true/error_code>=0 OR success=false with error_code in {sorted(STATE_NOT_MET_CODES)} "
             f"or state-like -1 by endpoint/msg"
+            if allow_state_not_met
+            else (
+                "success=true/error_code>=0"
+                if self.error_mode == "qfe"
+                else f"status in {success_statuses}"
+            )
         )
 
         axis_value = "state" if allow_state_not_met else "domain"
