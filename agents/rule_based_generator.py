@@ -105,8 +105,12 @@ _FACE_OPERATION_PATHS: frozenset[str] = frozenset({
     "/api/v2/extract",
     "/api/v2/fam",
     "/api/v2/enroll",
+    "/api/v2/enroll-template",
     "/api/v2/identify",
     "/api/v2/identify-template",
+    "/api/v2/validate-image",
+    "/api/v2/verify",
+    "/api/v2/verify-template",
 })
 
 _RAW_IMAGE_FIELDS: frozenset[str] = frozenset({"width", "height", "channel", "image_data"})
@@ -855,7 +859,9 @@ class RuleBasedTCGenerator:
 
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
+
         allow_state_not_met = self.error_mode == "qfe" and path in _STATE_DEPENDENT_PATHS
+
         assertion = (
             self._qfe_state_tolerant_assertion()
             if allow_state_not_met
@@ -865,6 +871,7 @@ class RuleBasedTCGenerator:
                 else self._standard_success_assertion(success_statuses)
             )
         )
+
         exp_app = (
             f"success=true/error_code>=0 OR success=false/error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)} (state not met)"
             if allow_state_not_met
@@ -875,18 +882,29 @@ class RuleBasedTCGenerator:
             )
         )
 
+        axis_value = "state" if allow_state_not_met else "domain"
+        reason_value = "precondition_not_met" if allow_state_not_met else "success_expected"
+        error_detail_value = "state.precondition_not_met" if allow_state_not_met else "domain.success_expected"
+
+        doc = (
+            "[rule:positive] Happy-path — valid request; "
+            "success=true if data present, success=false/error_code<0 if state not met."
+            if allow_state_not_met
+            else "[rule:positive] Happy-path — valid request; success expected."
+        )
+
         return self._api_test_block(
             fname=f"test_{op_id}_positive",
-            docstring="[rule:positive] Happy-path — valid request; success=true if data present, success=false/error_code<0 if state not met.",
+            docstring=doc,
             call_str=call,
             assertion_str=assertion,
-            axis="state",
-            reason_code="precondition_not_met",
+            axis=axis_value,
+            reason_code=reason_value,
             target_field="",
             test_condition="Happy path — all required fields present with valid values",
             expected_http="200",
             expected_app=exp_app,
-            error_detail="state.precondition_not_met",
+            error_detail=error_detail_value,
             request_method=method,
             request_path=resolved_path,
             request_query=query_params,

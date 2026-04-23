@@ -111,7 +111,13 @@ def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
         or "failed to get user template" in msg
         or "failed to delete user" in msg
         or "template extraction failed" in msg
-        or "failed to detect face" in msg
+        or (
+            "failed to detect face" in msg
+            and (
+                reason_code == "precondition_not_met"
+                or error_detail.startswith("state.")
+            )
+        )
         or "verification failed" in msg
     ):
         return "상태 미충족 (DB/fixture 없음)"
