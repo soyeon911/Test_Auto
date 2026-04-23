@@ -51,11 +51,14 @@ except ImportError as _e:
 
 
 def _load_runner_summary(report_dir: Path) -> dict:
-    """report.json / pytest_report.json 에서 pass/fail 집계를 읽는다."""
-    for name in ("report.json", "pytest_report.json"):
-        p = report_dir / name
-        if not p.exists():
-            continue
+    """report.json 에서 pass/fail 집계를 읽는다.
+
+    generate-report job 은 run-pipeline job 의 pytest-raw 아티팩트를
+    다운로드한 뒤 실행되므로 report.json 이 항상 최신 상태임이 보장된다.
+    pytest_report.json 은 구 버전 파이프라인이 남긴 stale 파일이므로 사용하지 않는다.
+    """
+    p = report_dir / "report.json"
+    if p.exists():
         try:
             raw = json.loads(p.read_text(encoding="utf-8"))
             s = raw.get("summary", {})
@@ -68,16 +71,19 @@ def _load_runner_summary(report_dir: Path) -> dict:
                 "return_code":      "",
             }
         except Exception as e:
-            print(f"[Excel] {name} 파싱 실패: {e}")
+            print(f"[Excel] report.json 파싱 실패: {e}")
     return {"passed": 0, "failed": 0, "error": 0, "total": 0}
 
 
 def _find_json_report(report_dir: Path) -> Path | None:
-    for name in ("report.json", "pytest_report.json"):
-        p = report_dir / name
-        if p.exists():
-            return p
-    return None
+    """report.json 경로를 반환한다.
+
+    pytest_report.json 은 구 버전 파이프라인 잔재로 사용하지 않는다.
+    generate-report job 이 pytest-raw 아티팩트를 다운로드하므로
+    report.json 은 항상 현재 실행 결과를 담고 있다.
+    """
+    p = report_dir / "report.json"
+    return p if p.exists() and p.is_file() else None
 
 
 def _parse_endpoints(swagger: str, config: dict) -> list[dict]:

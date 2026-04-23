@@ -756,6 +756,15 @@ jobs:
 
           New-Item -ItemType Directory -Path $env:REPORT_DIR -Force | Out-Null
 
+          # allure-results 초기화 — 이전 실행 결과가 섞이지 않도록 매 실행 전 비움
+          $allureDir = "$env:REPORT_DIR\allure-results"
+          if (Test-Path $allureDir) {
+            Remove-Item "$allureDir\*" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "[Pytest] allure-results 초기화 완료: $allureDir"
+          } else {
+            New-Item -ItemType Directory -Path $allureDir -Force | Out-Null
+          }
+
           $testDirs = @()
           foreach ($d in @("tests\generated\rule", "tests\generated\ai")) {
             if (Test-Path $d) { $testDirs += $d }
@@ -777,6 +786,7 @@ jobs:
             "--self-contained-html",
             "--json-report",
             "--json-report-file=$env:REPORT_DIR\report.json",
+            "--alluredir=$allureDir",
             "-v",
             "--tb=short"
           )
@@ -944,6 +954,23 @@ jobs:
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      # ── pytest 결과 다운로드 ─────────────────────────────────────────────────
+      # run-pipeline / crash-probe 가 다른 runner에서 실행될 수 있으므로
+      # 아티팩트를 명시적으로 내려받아 report.json, test_diag.jsonl,
+      # allure-results, crash probe report.json 을 항상 최신 상태로 보장한다.
+      - name: pytest 결과 다운로드 (pytest-raw)
+        uses: actions/download-artifact@v4
+        with:
+          name: pytest-raw-${{ github.run_id }}
+          path: ${{ env.REPORT_DIR }}
+
+      - name: crash-probe 결과 다운로드
+        uses: actions/download-artifact@v4
+        with:
+          name: crash-probe-reports-${{ github.run_id }}
+          path: ${{ env.PROBE_REPORT_DIR }}
+        continue-on-error: true   # crash-probe job이 skip 됐을 수도 있음
 
       - name: Excel 리포트 통합 생성
         run: |

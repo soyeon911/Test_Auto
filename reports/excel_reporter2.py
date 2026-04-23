@@ -613,6 +613,16 @@ class ExcelReportBuilder2:
         ws.auto_filter.ref = f"A2:S{len(tests) + 2}"
 
     def _load_test_results(self, pytest_json_path: str | Path | None, allure_results_dir: str | Path | None) -> list[dict[str, Any]]:
+        """테스트 결과를 로드한다.
+
+        우선순위:
+          1. report.json (pytest-json-report) — run-pipeline 아티팩트에서 다운로드된 최신 파일
+          2. allure-results/ — report.json 이 없거나 전체가 인프라 실패(서버 미구동)인 경우 fallback
+
+        pytest_report.json 은 구 버전 파이프라인 잔재이므로 절대 사용하지 않는다.
+        generate-report job 이 pytest-raw 아티팩트를 먼저 다운로드하므로
+        report.json 은 항상 현재 실행 결과를 담고 있다.
+        """
         tests: list[dict[str, Any]] = []
         if pytest_json_path:
             p = Path(pytest_json_path)
@@ -624,10 +634,17 @@ class ExcelReportBuilder2:
                 except Exception:
                     pass
 
-        if not tests and allure_results_dir:
+        # allure-results fallback:
+        #   - report.json 이 없거나 테스트가 0건인 경우
+        #   - 또는 모든 테스트가 서버 미구동(ConnectionError)으로 인한 인프라 실패인 경우
+        #   (allure-results 는 --alluredir 옵션으로 매 실행 전 초기화 후 생성됨)
+        if allure_results_dir and self._should_fallback_to_allure(tests):
             d = Path(allure_results_dir)
             if d.exists() and d.is_dir():
-                tests = self._normalize_allure(d)
+                allure_tests = self._normalize_allure(d)
+                if allure_tests:
+                    print(f"[ExcelReporter2] allure fallback: {len(tests)} pytest → {len(allure_tests)} allure")
+                    tests = allure_tests
 
         diag_map = self._load_diag_jsonl(pytest_json_path)
         if diag_map:
@@ -637,6 +654,18 @@ class ExcelReportBuilder2:
                     self._apply_diag(t, diag)
 
         return tests
+
+    @staticmethod
+    def _should_fallback_to_allure(tests: list[dict[str, Any]]) -> bool:
+        """report.json 결과가 없거나 전부 인프라 실패(서버 미구동)이면 True."""
+        if not tests:
+            return True
+        infra_types = {"ConnectionError", "ConnectionRefusedError", "NewConnectionError", "MaxRetryError"}
+        return all(
+            (t.get("exception_type") or "") in infra_types
+            or "connection_refused" in (t.get("reason_code") or t.get("error_detail") or "").lower()
+            for t in tests
+        )
 
     def _normalize_pytest_json(self, raw: dict) -> list[dict[str, Any]]:
         out = []
@@ -987,7 +1016,7 @@ class ExcelReportBuilder2:
             parts.append(f"data.status={ds}")
         msg = item.get("response_msg") or ""
         if msg:
-            parts.append(str(msg)[:60])
+            parts.append(str(msg)[:40])
         return " / ".join(parts)
 
     def _title_banner(self, ws, cell_range: str, text: str) -> None:
