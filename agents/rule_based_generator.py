@@ -397,15 +397,15 @@ class RuleBasedTCGenerator:
         State-axis positive test assertion.
 
         상태 미충족 허용 로직:
-          - success=True,  error_code>=0                     -> 정상 성공
-          - success=False, error_code in STATE_NOT_MET_CODES -> DB/fixture 상태 미충족
-          - 그 외 응답                                       -> FAIL
+        - success=True,  error_code>=0                     -> 정상 성공
+        - success=False, error_code in STATE_NOT_MET_CODES -> DB/fixture 상태 미충족
+        - 그 외 응답                                       -> FAIL
         """
         return textwrap.dedent(
             f"""\
             assert resp.status_code < 500, (
-                f"[FAIL] expected success-like response, got crash\n"
-                f"  Status : {{resp.status_code}}\n"
+                f"[FAIL] expected success-like response, got crash\\n"
+                f"  Status : {{resp.status_code}}\\n"
                 f"  Body   : {{resp.text[:300]}}"
             )
             try:
@@ -418,12 +418,12 @@ class RuleBasedTCGenerator:
                 (_success is True and _ec >= 0) or
                 (_success is False and _ec in {sorted(_STATE_NOT_MET_ERROR_CODES)})
             ), (
-                f"[FAIL] unexpected QFE state response\n"
-                f"  Expected : success=true/error_code>=0 (data present)\n"
-                f"           OR success=false/error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)} (state not met)\n"
-                f"  success    : {{_success}}\n"
-                f"  error_code : {{_ec}}\n"
-                f"  msg        : {{body.get('msg')}}\n"
+                f"[FAIL] unexpected QFE state response\\n"
+                f"  Expected : success=true/error_code>=0 (data present)\\n"
+                f"           OR success=false/error_code in {sorted(_STATE_NOT_MET_ERROR_CODES)} (state not met)\\n"
+                f"  success    : {{_success}}\\n"
+                f"  error_code : {{_ec}}\\n"
+                f"  msg        : {{body.get('msg')}}\\n"
                 f"  Full body  : {{resp.text[:300]}}"
             )
         """
