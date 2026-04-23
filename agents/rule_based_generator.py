@@ -170,16 +170,25 @@ _COERCIBLE_WRONG: dict[str, list[Any]] = {
 
 _BOUNDARY_INT = [0, -1, 2_147_483_647]
 
-_STATE_NOT_MET_ERROR_CODES: frozenset[int] = frozenset({-28, -43, -200})
+STATE_NOT_MET_CODES = frozenset({
+    -28,  # USER_NOT_FOUND
+    -43,  # TEMPLATE_NOT_FOUND
+    -91,  # FILE_NOT_FOUND
+    -29,  # DATABASE_NOT_LOADED
+    -20,  # DATABASE_NOT_EXIST
+})
 
-_STATE_DEPENDENT_PATHS: frozenset[str] = frozenset({
-    "/api/v2/delete",
-    "/api/v2/enroll",
-    "/api/v2/enroll-template",
-    "/api/v2/verify",
-    "/api/v2/verify-template",
-    "/api/v2/identify",
-    "/api/v2/identify-template",
+DOMAIN_FAIL_CODES = frozenset({
+    -33,  # SYS_PARAM_OUT_OF_RANGE
+    -34,  # INVALID_USER_ID
+    -35,  # INVALID_SUB_ID
+    -40,  # MAX_TEMPLATE_LIMIT
+    -50,  # ENROLL_DIFFERENT_FACE
+    -200, # FAILED_FACE_DETECT
+})
+
+REQUEST_FAIL_CODES = frozenset({
+    -90,  # INVALID_PARAMETER
 })
 
 
@@ -351,6 +360,33 @@ class RuleBasedTCGenerator:
         for c in cases:
             dedup[(c["value"], c["label"])] = c
         return list(dedup.values())
+
+    def _classify_qfe_error(error_code: int | None, msg: str, path: str) -> str:
+        msg_l = (msg or "").lower()
+
+        if error_code in STATE_NOT_MET_CODES:
+            return "state"
+
+        if error_code in DOMAIN_FAIL_CODES:
+            return "domain"
+
+        if error_code in REQUEST_FAIL_CODES:
+            return "schema"
+
+        if error_code == -1:
+            if any(x in msg_l for x in ["required", "unmarshal", "json", "type", "invalid request"]):
+                return "schema"
+            if "failed to detect face" in msg_l or "error code: -200" in msg_l:
+                return "domain"
+            if path in {"/api/v2/verify-template", "/api/v2/verify"} and "verification failed" in msg_l:
+                return "state"
+            if path == "/api/v2/delete" and "failed to delete user" in msg_l:
+                return "state"
+            if path == "/api/v2/user/{user_id}/template" and "failed to get user template" in msg_l:
+                return "state"
+            return "domain"
+
+        return "unknown"
 
     def _qfe_error_assertion(self, field_name: str, label: str = "error") -> str:
         return textwrap.dedent(
