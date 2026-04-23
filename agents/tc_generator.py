@@ -64,8 +64,7 @@ RULE_BASED_ALREADY:
 - missing_required
 - wrong_type
 - boundary
-- invalid_enum
-- semantic_probe
+- input_validation  (base64 invalid/empty, threshold range/type, numeric_id negative/zero, boolean wrong_type)
 → DO NOT DUPLICATE
 
 TASK:
@@ -223,13 +222,17 @@ def _build_rule_test_summary(rule_code: str) -> str:
 
     cats: dict[str, list[str]] = {}
     for n in names:
-        if "_semantic_" in n:
-            # extract field+probe: semantic_{field}_{probe}
+        if "_input_val_" in n:
+            # extract field+probe: input_val_{field}_{probe_label}
+            detail = n.split("_input_val_", 1)[-1]
+            cats.setdefault("input_validation", []).append(detail)
+        elif "_semantic_" in n:
+            # legacy name — treat as input_validation
             detail = n.split("_semantic_", 1)[-1]
-            cats.setdefault("semantic_probe", []).append(detail)
+            cats.setdefault("input_validation", []).append(detail)
         elif n.endswith("_positive"):
             cats.setdefault("positive", []).append("")
-        elif "_missing_required_" in n:
+        elif "_missing_required_" in n or "_missing_body_" in n or re.search(r"_missing_[a-z]", n):
             cats.setdefault("missing_req", []).append("")
         elif "_wrong_type_" in n:
             cats.setdefault("wrong_type", []).append("")
@@ -237,16 +240,16 @@ def _build_rule_test_summary(rule_code: str) -> str:
             cats.setdefault("boundary", []).append("")
         elif "_invalid_enum_" in n:
             cats.setdefault("invalid_enum", []).append("")
+        elif "_raw_image_relation" in n:
+            cats.setdefault("raw_image_relation", []).append("")
         else:
             cats.setdefault("other", []).append(n.rsplit("_", 1)[-1])
 
     lines = []
     for cat, items in cats.items():
-        if cat == "semantic_probe":
+        if cat in ("input_validation", "other"):
             probes = ", ".join(items[:6]) + ("…" if len(items) > 6 else "")
             lines.append(f"{cat}({len(items)}): {probes}")
-        elif cat == "other":
-            lines.append(f"{cat}({len(items)}): {', '.join(items[:4])}")
         else:
             lines.append(f"{cat}({len(items)})")
     return "; ".join(lines)

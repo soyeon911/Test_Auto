@@ -29,42 +29,73 @@ _FC_COLORS: dict[str, str] = {
     "Probe Only":                        "FFF2CC",
     "TC 실패 (단언 오류)":               "FFF2CC",
     "알 수 없음":                         "EFEFEF",
+    "TC 생성 오류 (문법/들여쓰기)": "F4CCCC",
+    "예상치 못한 실패": "FCE5CD",
 }
 
 
 def classify_failure_cause_from_item(item: dict[str, Any]) -> str:
     outcome = str(item.get("outcome", "")).lower()
+    axis = str(item.get("axis") or "")
+    reason_code = str(item.get("reason_code") or "")
+    error_detail = str(item.get("error_detail") or "")
+    expected_result_type = str(item.get("expected_result_type") or "")
+
+    exc_type = str(item.get("exception_type") or "")
+    exc_msg = str(item.get("exception_message") or "")
+    longrepr = str(item.get("longrepr") or "")
+    blob = f"{exc_type} {exc_msg} {longrepr} {error_detail}".lower()
+
+    response_success = item.get("response_success")
+    actual_status = str(item.get("actual_status") or "")
+
     if outcome == "passed":
         return "PASS"
+
+    if "indentationerror" in blob or "syntaxerror" in blob:
+        return "TC 생성 오류 (문법/들여쓰기)"
+
+    if "validation_gap" in blob:
+        return "엔드포인트 버그 (Validation 미수행)"
+
+    if "crash_detected" in blob:
+        return "서버 Crash (5xx)"
 
     if item.get("server_crashed"):
         return "서버 Crash (5xx)"
 
-    exc_type = str(item.get("exception_type") or "")
-    if "Connection" in exc_type or "Connect" in exc_type:
+    if "connection" in blob or "refused" in blob or "timeout" in blob:
         return "서버 미응답"
 
-    expected_result_type = str(item.get("expected_result_type") or "")
-    axis = str(item.get("axis") or "")
-    reason_code = str(item.get("reason_code") or "")
-    response_success = item.get("response_success")
+    if reason_code == "precondition_not_met" or error_detail.startswith("state."):
+        return "상태 미충족 (DB/fixture 없음)"
 
     if expected_result_type == "probe_only":
         return "Probe Only"
 
-    if expected_result_type == "expected_pass" and reason_code == "precondition_not_met":
-        return "상태 미충족 (DB/fixture 없음)"
-
-    if expected_result_type == "expected_fail" and response_success is True:
-        if axis == "schema":
-            return "엔드포인트 버그 (Validation 미수행)"
-        return "엔드포인트 버그 (도메인 검증 미수행)"
-
     if expected_result_type == "expected_fail":
+        if response_success is True:
+            if axis == "schema":
+                return "엔드포인트 버그 (Validation 미수행)"
+            return "엔드포인트 버그 (도메인 검증 미수행)"
+        if response_success is False:
+            return "예상된 실패"
+
+    if expected_result_type == "expected_pass":
+        if response_success is False:
+            return "예상치 못한 실패"
+        if "assert" in blob or "failed:" in blob:
+            return "TC 실패 (단언 오류)"
+
+    if actual_status.startswith("5"):
+        return "서버 Crash (5xx)"
+    if actual_status.startswith("4"):
+        return "예상된 실패"
+
+    if "assert" in blob or "failed:" in blob:
         return "TC 실패 (단언 오류)"
 
     return "알 수 없음"
-
 
 _AXIS_LABEL: dict[str, str] = {
     "schema":  "schema (구조 검증)",
@@ -504,6 +535,12 @@ class ExcelReportBuilder:
         item["response_data_error_code"] = diag.get("response_data_error_code")
         item["response_data_match_score"] = diag.get("response_data_match_score")
         item["response_data_status"] = diag.get("response_data_status")
+        item["response_data_verified"] = diag.get("response_data_verified")
+        item["probe_endpoint"] = diag.get("probe_endpoint", item.get("probe_endpoint", ""))
+        item["probe_label"] = diag.get("probe_label", item.get("probe_label", ""))
+        item["probe_input"] = diag.get("probe_input", item.get("probe_input"))
+        item["probe_severity"] = diag.get("probe_severity", item.get("probe_severity", ""))
+        item["probe_classification"] = diag.get("probe_classification", item.get("probe_classification", ""))
 
     @staticmethod
     def _is_pytest_json_report(raw):
@@ -645,35 +682,36 @@ class ExcelReportBuilder:
 
     @staticmethod
     def _extract_tc_meta(test_obj: dict[str, Any]) -> dict[str, Any]:
-        """user_properties 에서 tc_meta 와 diag 를 모두 추출한다.
-
-        pytest-json-report 는 user_properties 를 두 가지 형식으로 직렬화한다:
-          - dict 형식 (현재):  [{"tc_meta": {...}}, {"diag": {...}}]
-          - tuple 형식 (구):   [["tc_meta", {...}], ["diag", {...}]]
-        양쪽 모두 처리한다.
-        """
         meta: dict[str, Any] = {}
-        # 1) metadata 키 (일부 pytest 버전)
         md = test_obj.get("metadata") or {}
         if isinstance(md, dict):
             tc_meta = md.get("tc_meta")
             if isinstance(tc_meta, dict):
                 meta.update(tc_meta)
-        # 2) user_properties
+
         for up in test_obj.get("user_properties", []) or []:
             if isinstance(up, dict):
-                # dict 형식: {"tc_meta": {...}}
                 if "tc_meta" in up and isinstance(up["tc_meta"], dict):
                     meta.update(up["tc_meta"])
-                # diag 도 user_properties 에 있으면 직접 흡수
                 if "diag" in up and isinstance(up["diag"], dict):
                     meta["_diag_from_up"] = up["diag"]
+
+                if "probe_meta" in up and isinstance(up["probe_meta"], dict):
+                    meta.update(up["probe_meta"])
+                if "probe_diag" in up and isinstance(up["probe_diag"], dict):
+                    meta["_probe_diag_from_up"] = up["probe_diag"]
+
             elif isinstance(up, (list, tuple)) and len(up) == 2:
-                # tuple 형식: ("tc_meta", {...})
                 if up[0] == "tc_meta" and isinstance(up[1], dict):
                     meta.update(up[1])
                 if up[0] == "diag" and isinstance(up[1], dict):
                     meta["_diag_from_up"] = up[1]
+
+                if up[0] == "probe_meta" and isinstance(up[1], dict):
+                    meta.update(up[1])
+                if up[0] == "probe_diag" and isinstance(up[1], dict):
+                    meta["_probe_diag_from_up"] = up[1]
+
         return meta
 
     @staticmethod
@@ -946,10 +984,45 @@ class ExcelReportBuilder:
         if outcome == "skipped":
             return "SKIPPED"
         return "OTHER_FAILURE"
+    
+    
+    def _normalize_probe_tests(self, raw: dict[str, Any]) -> list[dict[str, Any]]:
+        out = []
+        for t in raw.get("tests", []):
+            call = t.get("call") or {}
+            meta = self._extract_tc_meta(t)
+            probe_diag = meta.pop("_probe_diag_from_up", {}) or {}
+
+            item = {
+                "nodeid": t.get("nodeid", ""),
+                "outcome": t.get("outcome", "unknown"),
+                "duration": call.get("duration", t.get("duration", 0)),
+                "longrepr": str(call.get("longrepr") or t.get("longrepr") or ""),
+                "target_param": meta.get("target_field", ""),
+                "probe_endpoint": meta.get("probe_endpoint", ""),
+                "probe_label": meta.get("probe_label", ""),
+                "probe_input": meta.get("probe_input"),
+                "probe_severity": meta.get("probe_severity", ""),
+                "expected_result_type": meta.get("expected_result_type", "probe_only"),
+                "actual_status": "",
+                "response_success": None,
+                "response_error_code": None,
+                "response_msg": None,
+                "error_detail": "",
+                "axis": "runtime",
+                "reason_code": "probe_runtime",
+                "probe_classification": meta.get("probe_classification", ""),
+            }
+
+            if probe_diag:
+                self._apply_diag(item, probe_diag)
+
+            out.append(item)
+        return out
 
     def _build_crash_probe_sheet(self, ws, report_path: str | Path | None) -> None:
         """Robustness Layer B — Crash Probe 결과 시트."""
-        self._title_banner(ws, "A1:G1", "Crash Probe — Robustness Layer (B)")
+        self._title_banner(ws, "A1:M1", "Crash Probe — Robustness Layer (B)")
         ws.row_dimensions[1].height = 24
 
         tests: list[dict[str, Any]] = []
@@ -958,7 +1031,7 @@ class ExcelReportBuilder:
             if p.exists():
                 try:
                     raw = json.loads(p.read_text(encoding="utf-8"))
-                    tests = raw.get("tests", [])
+                    tests = self._normalize_probe_tests(raw)
                 except Exception:
                     pass
 
@@ -986,43 +1059,46 @@ class ExcelReportBuilder:
         ws.row_dimensions[4].height = 6  # separator
 
         # ── 결과 테이블 ─────────────────────────────────────────────────────
-        headers = ["#", "Test ID", "Outcome", "Classification", "Duration (s)", "Endpoint / Nodeid", "Failure Reason"]
+        headers = [
+            "#", "Endpoint", "Target Field", "Probe Label", "Probe Input",
+            "Severity", "HTTP", "success", "error_code", "msg",
+            "Classification", "Outcome", "Failure Reason"
+        ]
         self._header_row(ws, 5, headers)
 
-        col_widths = [5, 36, 10, 22, 12, 52, 70]
+        col_widths = [5, 24, 16, 22, 42, 10, 8, 10, 12, 30, 18, 10, 45]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
         if not tests:
             ws.cell(row=6, column=1, value="(Crash Probe 결과 없음 — 파일 미존재 또는 job 미실행)")
-            ws.cell(row=6, column=1).font = Font(italic=True, color="888888")
             return
 
         for idx, t in enumerate(tests, start=1):
-            call = t.get("call") or {}
-            longrepr = str(call.get("longrepr") or t.get("longrepr") or "")
-            duration = round(float((call.get("duration") or t.get("duration") or 0)), 3)
-            outcome = str(t.get("outcome", "")).lower()
-            nodeid = t.get("nodeid", "")
-            cls = self._classify_probe(t)
+            cls = t.get("probe_classification") or self._classify_probe(t)
+            bg = self._PROBE_CLS_COLORS.get(cls, "EFEFEF")
 
             row_vals = [
                 idx,
-                nodeid.split("::")[-1],
-                outcome.upper(),
+                t.get("probe_endpoint", ""),
+                t.get("target_param", ""),
+                t.get("probe_label", ""),
+                self._format_value(t.get("probe_input")),
+                t.get("probe_severity", ""),
+                t.get("actual_status", ""),
+                t.get("response_success"),
+                t.get("response_error_code", ""),
+                t.get("response_msg", ""),
                 cls,
-                duration,
-                nodeid,
-                longrepr[:300].replace("\n", " "),
+                str(t.get("outcome", "")).upper(),
+                classify_failure_cause_from_item(t),
             ]
 
             r = idx + 5
-            bg = self._PROBE_CLS_COLORS.get(cls, "EFEFEF")
             for ci, val in enumerate(row_vals, start=1):
                 cell = ws.cell(row=r, column=ci, value=val)
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
                 cell.fill = PatternFill(fill_type="solid", fgColor=bg)
 
-            ws.row_dimensions[r].height = 38
-
         ws.freeze_panes = "A6"
+

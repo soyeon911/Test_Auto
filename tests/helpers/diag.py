@@ -197,7 +197,51 @@ def build_diag(
         "server_log_tail":    server_log_tail,
 
         "error_detail":       error_detail or f"{axis}.{reason_code}",
+
+        "response_data_verified": (
+            body.get("data", {}).get("verified")
+            if isinstance(body, dict) and isinstance(body.get("data"), dict)
+            else None
+        ),
     }
+
+def build_probe_diag(
+    probe_endpoint: str,
+    target_field: str,
+    probe_label: str,
+    probe_input: Any,
+    severity: str,
+    classification: str,
+    expected_behavior: str,
+    resp=None,
+    body=None,
+    exc=None,
+    server_crash=False,
+    server_log_tail=None,
+    error_detail=None,
+):
+    diag = build_diag(
+        axis="runtime",
+        reason_code="probe_runtime",
+        target_field=target_field,
+        test_condition=f"Crash probe: {probe_label}",
+        expected_http="<500",
+        expected_app=expected_behavior,
+        resp=resp,
+        body=body,
+        exc=exc,
+        server_crash=server_crash,
+        server_log_tail=server_log_tail,
+        error_detail=error_detail or f"runtime.probe.{probe_label}",
+    )
+    diag.update({
+        "probe_endpoint": probe_endpoint,
+        "probe_label": probe_label,
+        "probe_input": probe_input,
+        "probe_severity": severity,
+        "probe_classification": classification,
+    })
+    return diag
 
 
 def attach_diag(request, diag: dict) -> None:
@@ -271,3 +315,5 @@ def classify_failure_cause(
         return "서버 Crash (5xx)"
 
     return "알 수 없음"
+
+
