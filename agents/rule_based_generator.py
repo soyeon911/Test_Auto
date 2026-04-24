@@ -187,24 +187,87 @@ _COERCIBLE_WRONG: dict[str, list[Any]] = {
 _BOUNDARY_INT = [0, -1, 2_147_483_647]
 
 STATE_NOT_MET_CODES = frozenset({
+    # ── DB 존재/로드 상태 ───────────────────────────────────────────────────
+    -20,  # DATABASE_NOT_EXIST
+    -29,  # DATABASE_NOT_LOADED
+    # ── DB 운영 실패 (insert/delete/create 등 내부 오류) ──────────────────
+    -21,  # FAILED_FILE_ALREADY_EXIST
+    -22,  # FAILED_CREATE_DATABASE_FILE
+    -23,  # FAILED_CREATE_TABLE
+    -24,  # FAILED_SET_OPTIONS
+    -25,  # FAILED_INSERT_USER
+    -26,  # FAILED_DELETE_USER
+    -27,  # FAILED_CLEAR_DATABASE
+    # ── 리소스 없음 ─────────────────────────────────────────────────────────
     -28,  # USER_NOT_FOUND
     -43,  # TEMPLATE_NOT_FOUND
     -91,  # FILE_NOT_FOUND
-    -29,  # DATABASE_NOT_LOADED
-    -20,  # DATABASE_NOT_EXIST
+    # ── 설정 없음 ───────────────────────────────────────────────────────────
+    -30,  # CONFIG_NOT_EXIST
+    -31,  # FAILED_CONFIG_CREATE
 })
 
 DOMAIN_FAIL_CODES = frozenset({
+    # ── 파라미터 / ID 검증 ──────────────────────────────────────────────────
+    -32,  # SYS_PARAM_NOT_SUPPORT
     -33,  # SYS_PARAM_OUT_OF_RANGE
     -34,  # INVALID_USER_ID
     -35,  # INVALID_SUB_ID
+    # ── Template 한도 / 작업 실패 ───────────────────────────────────────────
     -40,  # MAX_TEMPLATE_LIMIT
+    -41,  # ADD_TEMPLATE (enroll 중 template 추가 실패)
+    -42,  # UPDATE_TEMPLATE (enroll 중 template 업데이트 실패)
+    # ── 등록/인증 도메인 ────────────────────────────────────────────────────
     -50,  # ENROLL_DIFFERENT_FACE
+    # ── 얼굴 / 이미지 알고리즘 ─────────────────────────────────────────────
     -200, # FAILED_FACE_DETECT
+    -201, # INVALID_ROI_COORDINATE
+    -202, # ROI_OUT_OF_IMAGE_BOUNDARY
+    -300, # FAILED_CHECK_REAL_FACE
+    -400, # FAILED_ESTIMATE_HEAD_POSE
+    -401, # FAILED_OUT_OF_RANGE (head pose)
+    -500, # FAILED_MASK_SEGMENTATION
+    -600, # FAILED_ESTIMATE_FACE_ATTR
+    -700, # FAILED_EXTRACT_TEMPLATE
+    -800, # FAILED_GET_THRESHOLD
 })
 
 REQUEST_FAIL_CODES = frozenset({
     -90,  # INVALID_PARAMETER
+})
+
+# SDK / 시스템 수준 오류 — 테스트에서 인프라 문제로 처리
+SYSTEM_ERROR_CODES = frozenset({
+    # ── SDK 런타임 ───────────────────────────────────────────────────────────
+    -1,   # FAILED (generic)
+    -2,   # MEM_ALLOC
+    -3,   # CAPTURE_FRAME
+    -4,   # INSTANCE_NOT_EXIST
+    -5,   # LICENSE
+    -6,   # BUSY
+    -7,   # THREAD_INSUFFICIENT
+    -8,   # INVALID_POINTER
+    -9,   # SDK_INSTANCE_BUSY
+    # ── 카메라 ──────────────────────────────────────────────────────────────
+    -10,  # CAMERA_NOT_EXIST
+    -11,  # FAILED_SET_CAMERA
+    -12,  # FAILED_UNSET_CAMERA
+    # ── 라이선스 ────────────────────────────────────────────────────────────
+    -60,  # LICENSE_EXPIRED
+    -61,  # LICENSE_SUSPENDED
+    -62,  # LICENSE_INVALID_PRODUCT
+    -63,  # LICENSE_ACCESS_NO_PERMISSION
+    -64,  # LICENSE_TIME_SYNC
+    -65,  # LICENSE_INVALID_KEY
+    -66,  # LICENSE_INVALID_FILE
+    -67,  # LICENSE_MACHINE_CHANGED
+    -68,  # LICENSE_TIME_MODIFIED
+    -69,  # LICENSE_METADATA
+    # ── 모델 / GPU ──────────────────────────────────────────────────────────
+    -100, # FAILED_LOAD_MODEL
+    -101, # FAILED_GPU_SET
+    # ── 기타 ────────────────────────────────────────────────────────────────
+    -9999, # UNKNOWN
 })
 STATE_DEPENDENT_PATHS: frozenset[str] = frozenset({
     "/api/v2/delete",

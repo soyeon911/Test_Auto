@@ -57,19 +57,46 @@ def _map_qfe_error_code(error_code: Any, msg: str, path: str = "") -> str | None
     msg_l = (msg or "").lower()
     path = path or ""
 
-    # 1) state — 에러코드별 명확한 명칭
+    # 1) state — DB/리소스/설정 없음
     _STATE = {
-        -28: "USER_NOT_FOUND", -43: "TEMPLATE_NOT_FOUND",
-        -91: "FILE_NOT_FOUND", -29: "DATABASE_NOT_LOADED", -20: "DATABASE_NOT_EXIST",
+        -20: "DATABASE_NOT_EXIST",
+        -21: "FAILED_FILE_ALREADY_EXIST",
+        -22: "FAILED_CREATE_DATABASE_FILE",
+        -23: "FAILED_CREATE_TABLE",
+        -24: "FAILED_SET_OPTIONS",
+        -25: "FAILED_INSERT_USER",
+        -26: "FAILED_DELETE_USER",
+        -27: "FAILED_CLEAR_DATABASE",
+        -28: "USER_NOT_FOUND",
+        -29: "DATABASE_NOT_LOADED",
+        -30: "CONFIG_NOT_EXIST",
+        -31: "FAILED_CONFIG_CREATE",
+        -43: "TEMPLATE_NOT_FOUND",
+        -91: "FILE_NOT_FOUND",
     }
     if ec in _STATE:
         return f"상태 미충족 — {_STATE[ec]}"
 
-    # 2) domain — 에러코드별 명확한 명칭
+    # 2) domain — 알고리즘/비즈니스 로직 실패
     _DOMAIN = {
-        -33: "SYS_PARAM_OUT_OF_RANGE", -34: "INVALID_USER_ID",
-        -35: "INVALID_SUB_ID", -40: "MAX_TEMPLATE_LIMIT",
-        -50: "ENROLL_DIFFERENT_FACE", -200: "FAILED_FACE_DETECT",
+        -32: "SYS_PARAM_NOT_SUPPORT",
+        -33: "SYS_PARAM_OUT_OF_RANGE",
+        -34: "INVALID_USER_ID",
+        -35: "INVALID_SUB_ID",
+        -40: "MAX_TEMPLATE_LIMIT",
+        -41: "ADD_TEMPLATE",
+        -42: "UPDATE_TEMPLATE",
+        -50: "ENROLL_DIFFERENT_FACE",
+        -200: "FAILED_FACE_DETECT",
+        -201: "INVALID_ROI_COORDINATE",
+        -202: "ROI_OUT_OF_IMAGE_BOUNDARY",
+        -300: "FAILED_CHECK_REAL_FACE",
+        -400: "FAILED_ESTIMATE_HEAD_POSE",
+        -401: "FAILED_OUT_OF_RANGE",
+        -500: "FAILED_MASK_SEGMENTATION",
+        -600: "FAILED_ESTIMATE_FACE_ATTR",
+        -700: "FAILED_EXTRACT_TEMPLATE",
+        -800: "FAILED_GET_THRESHOLD",
     }
     if ec in _DOMAIN:
         return f"도메인 실패 — {_DOMAIN[ec]}"
@@ -78,7 +105,23 @@ def _map_qfe_error_code(error_code: Any, msg: str, path: str = "") -> str | None
     if ec == -90:
         return "요청 오류 — INVALID_PARAMETER"
 
-    # 4) generic -1
+    # 4) system — SDK/라이선스/모델
+    _SYSTEM = {
+        -2: "MEM_ALLOC", -3: "CAPTURE_FRAME", -4: "INSTANCE_NOT_EXIST",
+        -5: "LICENSE", -6: "BUSY", -7: "THREAD_INSUFFICIENT",
+        -8: "INVALID_POINTER", -9: "SDK_INSTANCE_BUSY",
+        -10: "CAMERA_NOT_EXIST", -11: "FAILED_SET_CAMERA", -12: "FAILED_UNSET_CAMERA",
+        -60: "LICENSE_EXPIRED", -61: "LICENSE_SUSPENDED", -62: "LICENSE_INVALID_PRODUCT",
+        -63: "LICENSE_ACCESS_NO_PERMISSION", -64: "LICENSE_TIME_SYNC",
+        -65: "LICENSE_INVALID_KEY", -66: "LICENSE_INVALID_FILE",
+        -67: "LICENSE_MACHINE_CHANGED", -68: "LICENSE_TIME_MODIFIED", -69: "LICENSE_METADATA",
+        -100: "FAILED_LOAD_MODEL", -101: "FAILED_GPU_SET",
+        -9999: "UNKNOWN",
+    }
+    if ec in _SYSTEM:
+        return f"시스템 오류 — {_SYSTEM[ec]}"
+
+    # 5) generic -1
     if ec == -1:
         if any(x in msg_l for x in ["required", "unmarshal", "json", "type", "invalid request"]):
             return "타입 오류 (Type Mismatch)"
@@ -1128,11 +1171,26 @@ class ExcelReportBuilder:
         ec = t.get("response_error_code")
         msg = str(t.get("response_msg") or "")
         outcome = str(t.get("outcome", "")).lower()
-        _STATE = {-28: "USER_NOT_FOUND", -43: "TEMPLATE_NOT_FOUND",
-                  -91: "FILE_NOT_FOUND", -29: "DATABASE_NOT_LOADED", -20: "DATABASE_NOT_EXIST"}
-        _DOMAIN = {-33: "SYS_PARAM_OUT_OF_RANGE", -34: "INVALID_USER_ID",
-                   -35: "INVALID_SUB_ID", -40: "MAX_TEMPLATE_LIMIT",
-                   -50: "ENROLL_DIFFERENT_FACE", -200: "FAILED_FACE_DETECT"}
+        _STATE = {
+            -20: "DATABASE_NOT_EXIST", -21: "FAILED_FILE_ALREADY_EXIST",
+            -22: "FAILED_CREATE_DATABASE_FILE", -23: "FAILED_CREATE_TABLE",
+            -24: "FAILED_SET_OPTIONS", -25: "FAILED_INSERT_USER",
+            -26: "FAILED_DELETE_USER", -27: "FAILED_CLEAR_DATABASE",
+            -28: "USER_NOT_FOUND", -29: "DATABASE_NOT_LOADED",
+            -30: "CONFIG_NOT_EXIST", -31: "FAILED_CONFIG_CREATE",
+            -43: "TEMPLATE_NOT_FOUND", -91: "FILE_NOT_FOUND",
+        }
+        _DOMAIN = {
+            -32: "SYS_PARAM_NOT_SUPPORT", -33: "SYS_PARAM_OUT_OF_RANGE",
+            -34: "INVALID_USER_ID", -35: "INVALID_SUB_ID",
+            -40: "MAX_TEMPLATE_LIMIT", -41: "ADD_TEMPLATE", -42: "UPDATE_TEMPLATE",
+            -50: "ENROLL_DIFFERENT_FACE",
+            -200: "FAILED_FACE_DETECT", -201: "INVALID_ROI_COORDINATE",
+            -202: "ROI_OUT_OF_IMAGE_BOUNDARY", -300: "FAILED_CHECK_REAL_FACE",
+            -400: "FAILED_ESTIMATE_HEAD_POSE", -401: "FAILED_OUT_OF_RANGE",
+            -500: "FAILED_MASK_SEGMENTATION", -600: "FAILED_ESTIMATE_FACE_ATTR",
+            -700: "FAILED_EXTRACT_TEMPLATE", -800: "FAILED_GET_THRESHOLD",
+        }
         try:
             ec_int = int(ec)
             if ec_int in _STATE:
