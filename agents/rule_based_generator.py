@@ -2055,23 +2055,23 @@ class RuleBasedTCGenerator:
             # 음수 score는 항상 fail이어야 함
             if _score < 0:
                 assert _status == "fail", (
-                    f"[FAIL] match_score={_score} (음수) 인데 status='{_status}' — 'fail' 이어야 함\\n"
-                    f"  score     : {_score}\\n"
-                    f"  threshold : {_threshold}\\n"
-                    f"  status    : {_status}\\n"
-                    f"  data      : {_data}\\n"
-                    f"  Full body : {resp.text[:300]}"
+                    f"[FAIL] match_score={{_score}} (음수) 인데 status='{{_status}}' — 'fail' 이어야 함\\n"
+                    f"  score     : {{_score}}\\n"
+                    f"  threshold : {{_threshold}}\\n"
+                    f"  status    : {{_status}}\\n"
+                    f"  data      : {{_data}}\\n"
+                    f"  Full body : {{resp.text[:300]}}"
                 )
             elif _threshold > 0:
                 _expected_status = "success" if _score >= _threshold else "fail"
                 assert _status == _expected_status, (
                     f"[FAIL] score-threshold consistency mismatch\\n"
-                    f"  score     : {_score}\\n"
-                    f"  threshold : {_threshold}\\n"
-                    f"  expected  : {_expected_status}\\n"
-                    f"  actual    : {_status}\\n"
-                    f"  data      : {_data}\\n"
-                    f"  Full body : {resp.text[:300]}"
+                    f"  score     : {{_score}}\\n"
+                    f"  threshold : {{_threshold}}\\n"
+                    f"  expected  : {{_expected_status}}\\n"
+                    f"  actual    : {{_status}}\\n"
+                    f"  data      : {{_data}}\\n"
+                    f"  Full body : {{resp.text[:300]}}"
                 )
             # threshold=0.0 이면 구조 검증만 수행 (위에서 string+범위 이미 확인됨)
             """
