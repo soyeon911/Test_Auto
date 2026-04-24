@@ -1154,7 +1154,6 @@ class ExcelReportBuilder2:
             return []
 
     @staticmethod
-    @staticmethod
     def _probe_failure_reason(t: dict, cls: str) -> str:
         """Crash Probe 행의 Failure Reason 컬럼 — 분류 기반 의미있는 설명."""
         ec = t.get("response_error_code")
@@ -1206,6 +1205,7 @@ class ExcelReportBuilder2:
             return "정상 처리됨"
         return "알 수 없음"
 
+    @staticmethod
     def _classify_probe(test: dict[str, Any]) -> str:
         if test.get("probe_classification"):
             cls = str(test["probe_classification"])
