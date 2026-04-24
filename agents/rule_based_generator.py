@@ -1818,7 +1818,7 @@ class RuleBasedTCGenerator:
                     if allow_state_not_met
                     else {
                         "must_pass": "success=true, error_code>=0",
-                        "must_fail": _exp_app_fail("domain", "range_violation", p["name"]),
+                        "must_fail": _exp_app_fail("domain", "range_violation", field),
                         "probe_only": "no crash (status < 500)",
                     }.get(policy, "no crash (status < 500)")
                 )
