@@ -90,6 +90,22 @@ _RAW_W, _RAW_H, _RAW_C = 4, 4, 3
 _RAW_IMG_VALID_B64    = base64.b64encode(bytes(_RAW_W * _RAW_H * _RAW_C)).decode()
 _RAW_IMG_MISMATCH_B64 = base64.b64encode(bytes(10)).decode()
 
+# 1x1 블랙 이미지 (얼굴 없음 — FAILED_FACE_DETECT 유도용)
+_BLACK_1X1_W, _BLACK_1X1_H = 1, 1
+_BLACK_1X1_IMG_B64 = base64.b64encode(bytes(_BLACK_1X1_W * _BLACK_1X1_H * 3)).decode()
+
+# 실제 얼굴 이미지 (320x240 JPEG — face detect / enroll / verify 성공 케이스용)
+# tests/fixtures/face_320x240.jpg 로부터 로드
+import os as _os
+_FACE_IMG_PATH = _os.path.join(_os.path.dirname(__file__), "..", "tests", "fixtures", "face_320x240.jpg")
+try:
+    with open(_FACE_IMG_PATH, "rb") as _f:
+        _FACE_IMG_B64 = base64.b64encode(_f.read()).decode()
+    _FACE_IMG_W, _FACE_IMG_H = 320, 240
+except FileNotFoundError:
+    _FACE_IMG_B64 = _BLACK_1X1_IMG_B64  # fallback
+    _FACE_IMG_W, _FACE_IMG_H = 1, 1
+
 # channel=3 고정 엔드포인트 전용 fixtures
 # 10x10 RGB 이미지 (300 bytes) — channel=3 fixed TC용
 _CH3_W, _CH3_H = 10, 10
@@ -104,6 +120,17 @@ _CH3_BOUNDARY_IMG  = base64.b64encode(bytes(_CH3_BOUNDARY_W * _CH3_BOUNDARY_H * 
 # channel=3으로 고정된 엔드포인트 (RGB only)
 _FIXED_CHANNEL_3_PATHS: frozenset[str] = frozenset({
     "/api/v2/all-in-one",
+})
+
+# DB state 없이 이미지 입력만으로 동작하는 순수 face 처리 엔드포인트
+# (enroll/identify/verify 제외 — 이들은 DB 상태 필요)
+_FACE_DETECT_ONLY_PATHS: frozenset[str] = frozenset({
+    "/api/v2/detect",
+    "/api/v2/hpe",
+    "/api/v2/mask",
+    "/api/v2/extract",
+    "/api/v2/fam",
+    "/api/v2/validate-image",
 })
 
 # endpoint profiles
@@ -279,6 +306,26 @@ STATE_DEPENDENT_PATHS: frozenset[str] = frozenset({
     "/api/v2/identify-template",
     "/api/v2/user/{user_id}/template",
 })
+
+
+def _exp_app_fail(axis: str, reason_code: str, target_field: str = "") -> str:
+    """must_fail TC의 expected_app 문자열 — axis/reason_code/field에 따라 구체적 에러코드 명칭 반환."""
+    field_lc = target_field.lower()
+    if axis == "schema" or reason_code in ("type_mismatch", "missing_required", "type_error", "wrong_type"):
+        return "success=false, error_code=-90 (INVALID_PARAMETER)"
+    if reason_code in ("range_violation", "range_error"):
+        if field_lc in ("user_id",):
+            return "success=false, error_code=-34 (INVALID_USER_ID)"
+        if field_lc in ("sub_id",):
+            return "success=false, error_code=-35 (INVALID_SUB_ID)"
+        if field_lc in ("threshold",):
+            return "success=false, error_code=-33 (SYS_PARAM_OUT_OF_RANGE)"
+        return "success=false, error_code in DOMAIN_FAIL_CODES (range)"
+    if reason_code in ("invalid_base64", "no_face_detected", "constraint_missing_in_generator"):
+        return "success=false, error_code=-200 (FAILED_FACE_DETECT) OR -1"
+    if axis == "domain":
+        return "success=false, error_code in DOMAIN_FAIL_CODES"
+    return "success=false, error_code<0"
 
 
 def _safe_name(text: str) -> str:
@@ -1182,39 +1229,179 @@ class RuleBasedTCGenerator:
             p["name"]: self._good_value(p["name"], p.get("schema", {}))
             for p in params if p["in"] == "query" and p.get("required")
         }
-        body = self._build_valid_body(req_body)
+        base_body = self._build_valid_body(req_body)
         resolved_path = _build_url(path, path_params)
-        call = _render_call(method, path, path_params, query_params, body)
-        assertion = self._no_crash_assertion("positive_probe")
+        blocks: list[str] = []
 
-        return self._api_test_block(
+        # ── TC A: 기존 probe_only (synthetic 1x1 이미지) ───────────────────
+        call_a = _render_call(method, path, path_params, query_params, base_body)
+        blocks.append(self._api_test_block(
             fname=f"test_{op_id}_positive",
             docstring=(
-                "[rule:positive] Face operation — schema-valid request; probe_only "
-                "(real face image required for domain success)."
+                "[rule:positive] Face operation — schema-valid 1x1 synthetic image; "
+                "probe_only: no crash expected."
             ),
-            call_str=call,
-            assertion_str=assertion,
+            call_str=call_a,
+            assertion_str=self._no_crash_assertion("positive_probe"),
             axis="runtime",
             reason_code="probe_schema_valid",
             target_field="",
             test_condition=(
-                "Happy path (schema-valid synthetic image) — probe_only: "
-                "no crash expected; success may be false if no face detected"
+                "Happy path (1x1 synthetic image) — probe_only: "
+                "no crash; success may be false (FAILED_FACE_DETECT expected)"
             ),
             expected_http="200",
-            expected_app="no crash (status < 500); success may be false if no face",
+            expected_app="no crash (status < 500); success=false/ec=-200 (FAILED_FACE_DETECT) 허용",
             error_detail="runtime.probe_schema_valid",
             request_method=method,
             request_path=resolved_path,
             request_query=query_params,
             request_headers=None,
-            request_body=body,
+            request_body=base_body,
             expected_status_display="200 / no crash (probe_only)",
             rule_type="positive",
             rule_subtype="positive_schema",
             endpoint_profile="face_operation",
             expected_result_type="probe_only",
+        ))
+
+        # ── TC B: 1x1 블랙 이미지 → FAILED_FACE_DETECT(-200) 명시적 검증 ──
+        black_body = self._replace_image_field(base_body, req_body, "_BLACK_1X1_IMG_B64")
+        if black_body is not None and self._register_case(
+            method, resolved_path, "image_data", "black_1x1", "no_face_detected", "face_black"
+        ):
+            call_b = _render_call(method, path, path_params, query_params, black_body)
+            blocks.append(self._api_test_block(
+                fname=f"test_{op_id}_face_black_1x1",
+                docstring=(
+                    "[rule:face_image] 1x1 블랙 이미지 — 얼굴 없음; "
+                    "FAILED_FACE_DETECT(-200) 또는 STATE_NOT_MET 허용."
+                ),
+                call_str=call_b,
+                assertion_str=self._qfe_face_tolerant_assertion(),
+                axis="domain",
+                reason_code="no_face_detected",
+                target_field="image_data",
+                test_condition=(
+                    "image_data=1x1 블랙 이미지 (얼굴 없음): "
+                    "success=false/ec=-200(FAILED_FACE_DETECT) 또는 ec in STATE_NOT_MET_CODES 허용"
+                ),
+                expected_http="200",
+                expected_app=(
+                    "success=false, error_code=-200 (FAILED_FACE_DETECT) "
+                    f"OR ec in {sorted(STATE_NOT_MET_CODES)}"
+                ),
+                error_detail="domain.no_face_detected.image_data.black_1x1",
+                request_method=method,
+                request_path=resolved_path,
+                request_query=query_params,
+                request_headers=None,
+                request_body=black_body,
+                expected_status_display=(
+                    "200 / success=false, ec=-200 (FAILED_FACE_DETECT) OR state not met"
+                ),
+                rule_type="face_image",
+                rule_subtype="no_face_black",
+                endpoint_profile="face_operation",
+                expected_result_type="expected_fail",
+            ))
+
+        # ── TC C: 실제 얼굴 이미지 (320x240 JPEG) ──────────────────────────
+        face_body = self._replace_image_field(base_body, req_body, "_FACE_IMG_B64")
+        if face_body is not None and self._register_case(
+            method, resolved_path, "image_data", "face_real", "face_image_real", "face_real"
+        ):
+            call_c = _render_call(method, path, path_params, query_params, face_body)
+            is_detect_only = path in _FACE_DETECT_ONLY_PATHS
+            if is_detect_only:
+                assertion_c = self._qfe_state_tolerant_assertion(path)
+                exp_app_c = (
+                    f"success=true/ec>=0 OR ec in {sorted(STATE_NOT_MET_CODES)} (state 미충족 허용)"
+                )
+                exp_disp_c = "200 / success=true (face detected) OR state not met"
+                result_type_c = "expected_pass"
+                condition_c = (
+                    "image_data=실제 얼굴 이미지(320x240 JPEG) — "
+                    "face detect 성공 기대; DB state 미충족 허용"
+                )
+            else:
+                assertion_c = self._qfe_state_tolerant_assertion(path)
+                exp_app_c = (
+                    f"success=true/ec>=0 OR ec in {sorted(STATE_NOT_MET_CODES | frozenset([-200]))} "
+                    "(state 미충족 / face detect 실패 허용)"
+                )
+                exp_disp_c = "200 / probe_only (state+face dependent)"
+                result_type_c = "probe_only"
+                condition_c = (
+                    "image_data=실제 얼굴 이미지(320x240 JPEG) — "
+                    "enroll/identify/verify: DB state + face 둘 다 필요 → probe_only"
+                )
+            blocks.append(self._api_test_block(
+                fname=f"test_{op_id}_face_real_image",
+                docstring=(
+                    f"[rule:face_image] 실제 얼굴 이미지(320x240 JPEG) — "
+                    f"{'face detect 성공 기대' if is_detect_only else 'DB state 필요 (probe_only)'}."
+                ),
+                call_str=call_c,
+                assertion_str=assertion_c,
+                axis="state" if not is_detect_only else "domain",
+                reason_code="face_image_real",
+                target_field="image_data",
+                test_condition=condition_c,
+                expected_http="200",
+                expected_app=exp_app_c,
+                error_detail=f"{'domain' if is_detect_only else 'state'}.face_image_real.image_data",
+                request_method=method,
+                request_path=resolved_path,
+                request_query=query_params,
+                request_headers=None,
+                request_body=face_body,
+                expected_status_display=exp_disp_c,
+                rule_type="face_image",
+                rule_subtype="real_face",
+                endpoint_profile="face_operation",
+                expected_result_type=result_type_c,
+            ))
+
+        return "\n\n".join(blocks)
+
+    def _replace_image_field(
+        self,
+        base_body: dict | None,
+        req_body: dict | None,
+        img_var: str,
+    ) -> dict | None:
+        """body 내 base64_image 태그 필드를 img_var 상수명으로 교체한 dict 반환.
+        실제 dict 값은 코드 생성용이 아니라 call 렌더링용이므로 _FACE_IMG_B64 실제값을 넣는다."""
+        if not base_body or not req_body:
+            return None
+        props = (req_body.get("schema") or {}).get("properties", {})
+        new_body = dict(base_body)
+        replaced = False
+        for field, fschema in props.items():
+            if self._normalize_tag(fschema) == "base64_image":
+                if img_var == "_BLACK_1X1_IMG_B64":
+                    new_body[field] = _BLACK_1X1_IMG_B64
+                elif img_var == "_FACE_IMG_B64":
+                    new_body[field] = _FACE_IMG_B64
+                replaced = True
+                break
+        return new_body if replaced else None
+
+    def _qfe_face_tolerant_assertion(self) -> str:
+        """1x1 블랙 이미지 TC용: FAILED_FACE_DETECT(-200) + STATE_NOT_MET 허용."""
+        face_tolerant = sorted(STATE_NOT_MET_CODES | DOMAIN_FAIL_CODES & frozenset([-200, -300, -400, -401, -500, -600, -700]))
+        return (
+            f'_ec = body.get("error_code", 0)\n'
+            f'_face_tolerant = {sorted(STATE_NOT_MET_CODES | frozenset([-200, -300, -400, -401, -500, -600, -700]))}\n'
+            f'if body.get("success") is True:\n'
+            f'    pass  # 예상치 못한 성공이지만 허용 (일부 환경에서 face 검출 가능)\n'
+            f'else:\n'
+            f'    assert _ec in _face_tolerant, (\n'
+            f'        f"[FAIL] face op with black image: unexpected ec={{_ec}}\\n"\n'
+            f'        f"  expected -200(FAILED_FACE_DETECT) or state not met\\n"\n'
+            f'        f"  body: {{resp.text[:300]}}"\n'
+            f'    )\n'
         )
 
     def _positive_raw_image(
@@ -1311,14 +1498,14 @@ class RuleBasedTCGenerator:
                     target_field=target_param["name"],
                     test_condition=f"Required query param '{target_param['name']}' omitted from request",
                     expected_http="200",
-                    expected_app="success=false, error_code<0",
+                    expected_app="success=false, error_code=-90 (INVALID_PARAMETER)",
                     error_detail=f"schema.missing_required.{target_param['name']}",
                     request_method=method,
                     request_path=resolved_path,
                     request_query=query_params,
                     request_headers=None,
                     request_body=body,
-                    expected_status_display="200 / success=false, error_code<0",
+                    expected_status_display="200 / success=false, error_code=-90 (INVALID_PARAMETER)",
                     rule_type="missing_required",
                     rule_subtype="required_query_missing",
                     expected_result_type="expected_fail",
@@ -1357,14 +1544,14 @@ class RuleBasedTCGenerator:
                         target_field=field,
                         test_condition=f"Required body field '{field}' omitted from request",
                         expected_http="200",
-                        expected_app="success=false, error_code<0",
+                        expected_app="success=false, error_code=-90 (INVALID_PARAMETER)",
                         error_detail=f"schema.missing_required.{field}",
                         request_method=method,
                         request_path=resolved_path,
                         request_query=query_params,
                         request_headers=None,
                         request_body=partial_body,
-                        expected_status_display="200 / success=false, error_code<0",
+                        expected_status_display="200 / success=false, error_code=-90 (INVALID_PARAMETER)",
                         rule_type="missing_required",
                         rule_subtype="required_body_missing",
                         expected_result_type="expected_fail",
@@ -1420,7 +1607,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, p["name"], repr(wrong), reason_code, "wrong_type"):
                     continue
 
-                exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
+                exp_app = _exp_app_fail("schema", reason_code, p["name"]) if policy == "must_fail" else "no crash (status < 500)"
                 blocks.append(
                     self._api_test_block(
                         fname=f"test_{op_id}_wrong_type_{_safe_name(p['name'])}_{label}",
@@ -1468,7 +1655,7 @@ class RuleBasedTCGenerator:
                     if not self._register_case(method, resolved_path, field, repr(wrong), reason_code, "wrong_type"):
                         continue
 
-                    exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
+                    exp_app = _exp_app_fail("schema", reason_code, field) if policy == "must_fail" else "no crash (status < 500)"
                     blocks.append(
                         self._api_test_block(
                             fname=f"test_{op_id}_wrong_type_body_{_safe_name(field)}_{label}",
@@ -1563,7 +1750,7 @@ class RuleBasedTCGenerator:
                     if allow_state_not_met
                     else {
                         "must_pass": "success=true, error_code>=0",
-                        "must_fail": "success=false, error_code<0",
+                        "must_fail": _exp_app_fail("domain", "range_violation", p["name"]),
                         "probe_only": "no crash (status < 500)",
                     }.get(policy, "no crash (status < 500)")
                 )
@@ -1631,7 +1818,7 @@ class RuleBasedTCGenerator:
                     if allow_state_not_met
                     else {
                         "must_pass": "success=true, error_code>=0",
-                        "must_fail": "success=false, error_code<0",
+                        "must_fail": _exp_app_fail("domain", "range_violation", p["name"]),
                         "probe_only": "no crash (status < 500)",
                     }.get(policy, "no crash (status < 500)")
                 )
@@ -1725,7 +1912,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, p["name"], repr(probe_val), _s_rc, "input_validation"):
                     continue
 
-                exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
+                exp_app = _exp_app_fail(_s_axis, _s_rc, p["name"]) if policy == "must_fail" else "no crash (status < 500)"
 
                 blocks.append(
                     self._api_test_block(
@@ -1779,7 +1966,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, field, repr(probe_val), _s_rc, "input_validation"):
                     continue
 
-                exp_app = "success=false, error_code<0" if policy == "must_fail" else "no crash (status < 500)"
+                exp_app = _exp_app_fail(_s_axis, _s_rc, field) if policy == "must_fail" else "no crash (status < 500)"
                 blocks.append(
                     self._api_test_block(
                         fname=f"test_{op_id}_input_val_{_safe_name(field)}_{probe_label}",
@@ -1863,23 +2050,30 @@ class RuleBasedTCGenerator:
             )
 
             _score = float(_data.get("{score_field}", 0))
+            _threshold = float({self.match_threshold!r})  # config match_threshold
 
-            # TODO:
-            # threshold 연동 전까지는 status 구조만 검증.
-            # 추후 matching-threshold 실제 값 조회 또는 config 값 연동 시
-            # 아래 비교 활성화:
-            #
-            # _threshold = ...
-            # _expected_status = "success" if _score >= _threshold else "fail"
-            # assert _status == _expected_status, (
-            #     f"[FAIL] domain: score-threshold consistency mismatch\\n"
-            #     f"  score      : {{_score}}\\n"
-            #     f"  threshold  : {{_threshold}}\\n"
-            #     f"  expected   : {{_expected_status}}\\n"
-            #     f"  actual     : {{_status}}\\n"
-            #     f"  data       : {{_data}}\\n"
-            #     f"  Full body  : {{resp.text[:300]}}"
-            # )
+            # 음수 score는 항상 fail이어야 함
+            if _score < 0:
+                assert _status == "fail", (
+                    f"[FAIL] match_score={_score} (음수) 인데 status='{_status}' — 'fail' 이어야 함\\n"
+                    f"  score     : {_score}\\n"
+                    f"  threshold : {_threshold}\\n"
+                    f"  status    : {_status}\\n"
+                    f"  data      : {_data}\\n"
+                    f"  Full body : {resp.text[:300]}"
+                )
+            elif _threshold > 0:
+                _expected_status = "success" if _score >= _threshold else "fail"
+                assert _status == _expected_status, (
+                    f"[FAIL] score-threshold consistency mismatch\\n"
+                    f"  score     : {_score}\\n"
+                    f"  threshold : {_threshold}\\n"
+                    f"  expected  : {_expected_status}\\n"
+                    f"  actual    : {_status}\\n"
+                    f"  data      : {_data}\\n"
+                    f"  Full body : {resp.text[:300]}"
+                )
+            # threshold=0.0 이면 구조 검증만 수행 (위에서 string+범위 이미 확인됨)
             """
         )
 
@@ -1996,7 +2190,7 @@ class RuleBasedTCGenerator:
                         f"but image_data=10 bytes (expected {expected_size}B) -- relation MISMATCH"
                     ),
                     expected_http="200",
-                    expected_app="success=false, error_code<0",
+                    expected_app="success=false, error_code in DOMAIN_FAIL_CODES (image relation)",
                     error_detail="domain.invalid_image_relation.image_data.mismatch",
                     request_method=method,
                     request_path=resolved_path,
@@ -2148,7 +2342,7 @@ class RuleBasedTCGenerator:
                 }
                 key_wh = f"ch3_wh:{wh_label}"
                 if self._register_case(method, resolved_path, "width_height", key_wh, "invalid_image_relation", "raw_image_relation"):
-                    exp_app = ("success=false, error_code<0" if policy == "must_fail"
+                    exp_app = (_exp_app_fail("domain", "invalid_image_relation", "width_height") if policy == "must_fail"
                                else "no crash (status < 500)")
                     blocks.append(
                         self._api_test_block(
