@@ -87,8 +87,24 @@ _TINY_WHITE_IMAGE_B64 = (
 
 # raw image fixtures
 _RAW_W, _RAW_H, _RAW_C = 4, 4, 3
-_RAW_IMG_VALID_B64 = base64.b64encode(bytes(_RAW_W * _RAW_H * _RAW_C)).decode()
+_RAW_IMG_VALID_B64    = base64.b64encode(bytes(_RAW_W * _RAW_H * _RAW_C)).decode()
 _RAW_IMG_MISMATCH_B64 = base64.b64encode(bytes(10)).decode()
+
+# channel=3 고정 엔드포인트 전용 fixtures
+# 10x10 RGB 이미지 (300 bytes) — channel=3 fixed TC용
+_CH3_W, _CH3_H = 10, 10
+_CH3_IMG_VALID_B64 = base64.b64encode(bytes(_CH3_W * _CH3_H * 3)).decode()   # 300B, channel=3 valid
+_CH1_IMG_B64       = base64.b64encode(bytes(_CH3_W * _CH3_H * 1)).decode()   # 100B, channel=1(grayscale)
+_CH4_IMG_B64       = base64.b64encode(bytes(_CH3_W * _CH3_H * 4)).decode()   # 400B, channel=4(RGBA)
+# width/height boundary with channel=3
+_CH3_W_ZERO_IMG    = base64.b64encode(bytes(0)).decode()                      # width=0 mismatch
+_CH3_BOUNDARY_W, _CH3_BOUNDARY_H = 1, 1                                      # 최소 유효 크기
+_CH3_BOUNDARY_IMG  = base64.b64encode(bytes(_CH3_BOUNDARY_W * _CH3_BOUNDARY_H * 3)).decode()
+
+# channel=3으로 고정된 엔드포인트 (RGB only)
+_FIXED_CHANNEL_3_PATHS: frozenset[str] = frozenset({
+    "/api/v2/all-in-one",
+})
 
 # endpoint profiles
 _MATCH_VERDICT_PATHS: frozenset[str] = frozenset({
@@ -198,6 +214,7 @@ STATE_DEPENDENT_PATHS: frozenset[str] = frozenset({
     "/api/v2/verify-template",
     "/api/v2/identify",
     "/api/v2/identify-template",
+    "/api/v2/user/{user_id}/template",
 })
 
 
@@ -1965,5 +1982,138 @@ class RuleBasedTCGenerator:
                     expected_result_type="probe_only",
                 )
             )
+
+        # ── channel=3 고정 엔드포인트 전용 TC ──────────────────────────────
+        if path in _FIXED_CHANNEL_3_PATHS:
+            # (A) channel=1 (grayscale) → must_fail: RGB only 서버는 거부해야 함
+            for wrong_ch, img_b64, label in [
+                (1, _CH1_IMG_B64, "grayscale_ch1"),
+                (4, _CH4_IMG_B64, "rgba_ch4"),
+            ]:
+                wrong_ch_body = {
+                    **base_body,
+                    "width":      _CH3_W,
+                    "height":     _CH3_H,
+                    "channel":    wrong_ch,
+                    "image_data": img_b64,
+                }
+                key = f"fixed_ch3_wrong:{wrong_ch}"
+                if self._register_case(method, resolved_path, "channel", key, "invalid_image_relation", "raw_image_relation"):
+                    blocks.append(
+                        self._api_test_block(
+                            fname=f"test_{op_id}_raw_image_relation_channel_{label}",
+                            docstring=(
+                                f"[rule:raw_image_relation][channel=3 fixed] "
+                                f"channel={wrong_ch} ({label}) — RGB-only endpoint must reject non-3 channel."
+                            ),
+                            call_str=_render_call(method, path, path_params, query_params, wrong_ch_body),
+                            assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}"),
+                            axis="domain",
+                            reason_code="invalid_image_relation",
+                            target_field="channel",
+                            test_condition=f"channel={wrong_ch} ({label}), image_data={_CH3_W*_CH3_H*wrong_ch}B — channel≠3 (RGB-only endpoint)",
+                            expected_http="200",
+                            expected_app="success=false, error_code<0 (channel must be 3)",
+                            error_detail=f"domain.invalid_image_relation.channel.{label}",
+                            request_method=method,
+                            request_path=resolved_path,
+                            request_query=query_params,
+                            request_headers=None,
+                            request_body=wrong_ch_body,
+                            expected_status_display="200 / success=false (channel must be 3)",
+                            rule_type="raw_image_relation",
+                            rule_subtype=f"channel_fixed3_{label}",
+                            endpoint_profile="raw_image",
+                            expected_result_type="expected_fail",
+                        )
+                    )
+
+            # (B) channel=3 고정, 유효한 컬러 이미지 → probe_only
+            #     (실제 얼굴 없이 통과 여부만 확인; success=false 가능하나 서버 crash 없어야 함)
+            valid_ch3_body = {
+                **base_body,
+                "width":      _CH3_W,
+                "height":     _CH3_H,
+                "channel":    3,
+                "image_data": _CH3_IMG_VALID_B64,
+            }
+            if self._register_case(method, resolved_path, "channel", "fixed3_valid", "invalid_image_relation", "raw_image_relation"):
+                blocks.append(
+                    self._api_test_block(
+                        fname=f"test_{op_id}_raw_image_relation_channel_fixed3_valid",
+                        docstring=(
+                            "[rule:raw_image_relation][channel=3 fixed] "
+                            f"channel=3, {_CH3_W}x{_CH3_H} color image — valid RGB payload, no crash expected."
+                        ),
+                        call_str=_render_call(method, path, path_params, query_params, valid_ch3_body),
+                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid"),
+                        axis="domain",
+                        reason_code="invalid_image_relation",
+                        target_field="channel",
+                        test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid",
+                        expected_http="200",
+                        expected_app="no crash (status < 500); success may vary (face detection dependent)",
+                        error_detail="domain.invalid_image_relation.channel.fixed3_valid",
+                        request_method=method,
+                        request_path=resolved_path,
+                        request_query=query_params,
+                        request_headers=None,
+                        request_body=valid_ch3_body,
+                        expected_status_display="200 / no crash (probe_only, channel=3 fixed)",
+                        rule_type="raw_image_relation",
+                        rule_subtype="channel_fixed3_valid",
+                        endpoint_profile="raw_image",
+                        expected_result_type="probe_only",
+                    )
+                )
+
+            # (C) channel=3 고정, width/height 경계값 TC
+            #     - width=0 → must_fail (서버가 0 크기 이미지 거부해야 함)
+            #     - height=0 → must_fail
+            #     - width=1, height=1 (최소 유효) → probe_only
+            for wh_label, w, h, img_b64, policy in [
+                ("width_zero",   0,              _CH3_H,         base64.b64encode(bytes(0)).decode(),                            "must_fail"),
+                ("height_zero",  _CH3_W,         0,              base64.b64encode(bytes(0)).decode(),                            "must_fail"),
+                ("min_1x1",      1,              1,              base64.b64encode(bytes(1 * 1 * 3)).decode(),                    "probe_only"),
+            ]:
+                wh_body = {
+                    **base_body,
+                    "width":      w,
+                    "height":     h,
+                    "channel":    3,
+                    "image_data": img_b64,
+                }
+                key_wh = f"ch3_wh:{wh_label}"
+                if self._register_case(method, resolved_path, "width_height", key_wh, "invalid_image_relation", "raw_image_relation"):
+                    exp_app = ("success=false, error_code<0" if policy == "must_fail"
+                               else "no crash (status < 500)")
+                    blocks.append(
+                        self._api_test_block(
+                            fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
+                            docstring=(
+                                f"[rule:raw_image_relation][channel=3 fixed] "
+                                f"width={w}, height={h}, channel=3 — {wh_label} ({policy})."
+                            ),
+                            call_str=_render_call(method, path, path_params, query_params, wh_body),
+                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}"),
+                            axis="domain",
+                            reason_code="invalid_image_relation",
+                            target_field="width_height",
+                            test_condition=f"channel=3 (fixed), width={w}, height={h}, image_data={max(w,0)*max(h,0)*3}B — {wh_label}",
+                            expected_http="200",
+                            expected_app=exp_app,
+                            error_detail=f"domain.invalid_image_relation.wh.ch3_{wh_label}",
+                            request_method=method,
+                            request_path=resolved_path,
+                            request_query=query_params,
+                            request_headers=None,
+                            request_body=wh_body,
+                            expected_status_display=f"200 / {exp_app}",
+                            rule_type="raw_image_relation",
+                            rule_subtype=f"channel_fixed3_{wh_label}",
+                            endpoint_profile="raw_image",
+                            expected_result_type="expected_fail" if policy == "must_fail" else "probe_only",
+                        )
+                    )
 
         return blocks

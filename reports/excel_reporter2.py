@@ -1111,15 +1111,62 @@ class ExcelReportBuilder2:
             return []
 
     @staticmethod
+    @staticmethod
+    def _probe_failure_reason(t: dict, cls: str) -> str:
+        """Crash Probe 행의 Failure Reason 컬럼 — 분류 기반 의미있는 설명."""
+        ec = t.get("response_error_code")
+        msg = str(t.get("response_msg") or "")
+        outcome = str(t.get("outcome", "")).lower()
+        _STATE = {-28: "USER_NOT_FOUND", -43: "TEMPLATE_NOT_FOUND",
+                  -91: "FILE_NOT_FOUND", -29: "DATABASE_NOT_LOADED", -20: "DATABASE_NOT_EXIST"}
+        _DOMAIN = {-33: "SYS_PARAM_OUT_OF_RANGE", -34: "INVALID_USER_ID",
+                   -35: "INVALID_SUB_ID", -40: "MAX_TEMPLATE_LIMIT",
+                   -50: "ENROLL_DIFFERENT_FACE", -200: "FAILED_FACE_DETECT"}
+        try:
+            ec_int = int(ec)
+            if ec_int in _STATE:
+                return f"상태 미충족 — {_STATE[ec_int]}"
+            if ec_int in _DOMAIN:
+                return f"도메인 실패 — {_DOMAIN[ec_int]}"
+            if ec_int == -90:
+                return "요청 오류 — INVALID_PARAMETER"
+            if ec_int == -1:
+                return "정상적인 실패 응답 (ec=-1)"
+        except (TypeError, ValueError):
+            pass
+        if cls == "CRASH_DETECTED":
+            return "서버 Crash 감지"
+        if cls == "VALIDATION_GAP":
+            return "엔드포인트 버그 (Validation 미수행)"
+        if cls == "CONNECTION_ERROR":
+            return "서버 미응답 (연결 끊김)"
+        if cls == "GRACEFUL_REJECTION":
+            return f"정상 거부{' — ' + msg[:60] if msg else ''}"
+        if cls == "UNEXPECTED_SUCCESS":
+            return "예상치 못한 성공 (Validation 누락 의심)"
+        if outcome == "passed":
+            return "정상 처리됨"
+        return "알 수 없음"
+
     def _classify_probe(test: dict[str, Any]) -> str:
         if test.get("probe_classification"):
-            return str(test["probe_classification"])
+            cls = str(test["probe_classification"])
+            # ConnectionError 후 서버 죽음 → CRASH_DETECTED 로 승격
+            if cls == "CONNECTION_ERROR" and test.get("server_alive") is False:
+                return "CRASH_DETECTED"
+            return cls
 
         longrepr = str(test.get("longrepr") or "")
+        blob = longrepr.lower()
         if "CRASH_DETECTED" in longrepr:
             return "CRASH_DETECTED"
         if "VALIDATION_GAP" in longrepr:
             return "VALIDATION_GAP"
+        # ConnectionResetError 10054 = 원격 호스트가 연결을 강제로 끊음 → 서버 Crash 의심
+        if "connectionreset" in blob or "10054" in blob or "원격 호스트" in longrepr:
+            if not test.get("server_alive", True):
+                return "CRASH_DETECTED"
+            return "CONNECTION_ERROR"
 
         outcome = str(test.get("outcome", "")).lower()
         if outcome == "passed":
@@ -1185,12 +1232,12 @@ class ExcelReportBuilder2:
                 self._format_value(t.get("probe_input")),
                 t.get("probe_severity", ""),
                 t.get("actual_status", ""),
-                t.get("response_success"),
+                ("true" if t.get("response_success") is True else "false" if t.get("response_success") is False else "-"),
                 t.get("response_error_code", ""),
                 t.get("response_msg", ""),
                 cls,
                 str(t.get("outcome", "")).upper(),
-                classify_failure_cause_from_item(t),
+                self._probe_failure_reason(t, cls),
             ]
 
             r = idx + 5

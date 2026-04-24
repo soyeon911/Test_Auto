@@ -168,6 +168,10 @@ def _probe(
     alive = _is_alive(base_url)
     result["server_alive"] = alive
 
+    # ConnectionError 후 서버가 죽어있으면 → 서버 Crash로 재분류
+    if result["outcome"] == CONNECTION_ERROR and not alive:
+        result["outcome"] = CRASH_DETECTED
+
     if result["outcome"] is None:
         if not alive:
             result["outcome"] = CRASH_DETECTED
