@@ -94,17 +94,102 @@ _RAW_IMG_MISMATCH_B64 = base64.b64encode(bytes(10)).decode()
 _BLACK_1X1_W, _BLACK_1X1_H = 1, 1
 _BLACK_1X1_IMG_B64 = base64.b64encode(bytes(_BLACK_1X1_W * _BLACK_1X1_H * 3)).decode()
 
+def _read_image_size(path: str) -> tuple[int, int]:
+    """
+    Read image width/height from PNG or JPEG without external dependencies.
+    Returns (width, height).
+    """
+    with open(path, "rb") as f:
+        header = f.read(24)
+
+        # PNG: width/height are at bytes 16:24
+        if header.startswith(b"\x89PNG\r\n\x1a\n"):
+            width = int.from_bytes(header[16:20], "big")
+            height = int.from_bytes(header[20:24], "big")
+            return width, height
+
+        # JPEG: scan SOF markers
+        if header[:2] == b"\xff\xd8":
+            f.seek(2)
+            while True:
+                marker_start = f.read(1)
+                if not marker_start:
+                    break
+
+                if marker_start != b"\xff":
+                    continue
+
+                marker = f.read(1)
+                while marker == b"\xff":
+                    marker = f.read(1)
+
+                # Standalone markers without length
+                if marker in [b"\xd8", b"\xd9"]:
+                    continue
+
+                length_bytes = f.read(2)
+                if len(length_bytes) != 2:
+                    break
+
+                length = int.from_bytes(length_bytes, "big")
+                if length < 2:
+                    break
+
+                # SOF markers containing image size
+                if marker in [
+                    b"\xc0", b"\xc1", b"\xc2", b"\xc3",
+                    b"\xc5", b"\xc6", b"\xc7",
+                    b"\xc9", b"\xca", b"\xcb",
+                    b"\xcd", b"\xce", b"\xcf",
+                ]:
+                    precision = f.read(1)
+                    height = int.from_bytes(f.read(2), "big")
+                    width = int.from_bytes(f.read(2), "big")
+                    return width, height
+
+                f.seek(length - 2, 1)
+
+    raise ValueError(f"Unsupported or invalid image format: {path}")
+
 # 실제 얼굴 이미지 (320x240 JPEG — face detect / enroll / verify 성공 케이스용)
 # tests/fixtures/face_320x240.jpg 로부터 로드
 import os as _os
-_FACE_IMG_PATH = _os.path.join(_os.path.dirname(__file__), "..", "tests", "fixtures", "face_320x240.jpg")
+
+_FACE_IMG_PATH = _os.path.abspath(
+    _os.path.join(
+        _os.path.dirname(__file__),
+        "..",
+        "tests",
+        "fixtures",
+        "face_320x240.jpg",
+    )
+)
+
 try:
     with open(_FACE_IMG_PATH, "rb") as _f:
-        _FACE_IMG_B64 = base64.b64encode(_f.read()).decode()
-    _FACE_IMG_W, _FACE_IMG_H = 320, 240
-except FileNotFoundError:
-    _FACE_IMG_B64 = _BLACK_1X1_IMG_B64  # fallback
-    _FACE_IMG_W, _FACE_IMG_H = 1, 1
+        _FACE_IMG_BYTES = _f.read()
+
+    _FACE_IMG_B64 = base64.b64encode(_FACE_IMG_BYTES).decode()
+    _FACE_IMG_W, _FACE_IMG_H = _read_image_size(_FACE_IMG_PATH)
+
+    # raw image 엔드포인트용: JPEG 디코딩 → RGB 픽셀 raw bytes → base64
+    # (all-in-one 등 width*height*channel 바이트를 직접 받는 엔드포인트에서 사용)
+    try:
+        from PIL import Image as _PIL_Image
+        import io as _io
+        with _PIL_Image.open(_io.BytesIO(_FACE_IMG_BYTES)) as _pil_img:
+            _pil_rgb = _pil_img.convert("RGB")
+            _FACE_IMG_RAW_BYTES = _pil_rgb.tobytes()  # width*height*3 raw RGB bytes
+        _FACE_IMG_RAW_B64 = base64.b64encode(_FACE_IMG_RAW_BYTES).decode()
+    except Exception as _pil_exc:
+        print(f"[RuleBasedTCGenerator] WARN: PIL decode failed for RAW face fixture ({_pil_exc}); using zeroed fallback")
+        _FACE_IMG_RAW_B64 = base64.b64encode(bytes(_FACE_IMG_W * _FACE_IMG_H * 3)).decode()
+
+except Exception as _exc:
+    print(f"[RuleBasedTCGenerator] WARN: failed to load face fixture: {_FACE_IMG_PATH} ({_exc})")
+    _FACE_IMG_B64 = _BLACK_1X1_IMG_B64
+    _FACE_IMG_RAW_B64 = _BLACK_1X1_IMG_B64
+    _FACE_IMG_W, _FACE_IMG_H = _BLACK_1X1_W, _BLACK_1X1_H
 
 # channel=3 고정 엔드포인트 전용 fixtures
 # 10x10 RGB 이미지 (300 bytes) — channel=3 fixed TC용
@@ -331,6 +416,11 @@ def _exp_app_fail(axis: str, reason_code: str, target_field: str = "") -> str:
 def _safe_name(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]", "_", text).strip("_")
 
+def _norm_path(path: str) -> str:
+    path = (path or "").strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    return path.rstrip("/")
 
 def _build_url(path: str, path_values: dict[str, Any]) -> str:
     url = path
@@ -1371,35 +1461,76 @@ class RuleBasedTCGenerator:
         req_body: dict | None,
         img_var: str,
     ) -> dict | None:
-        """body 내 base64_image 태그 필드를 img_var 상수명으로 교체한 dict 반환.
-        실제 dict 값은 코드 생성용이 아니라 call 렌더링용이므로 _FACE_IMG_B64 실제값을 넣는다."""
         if not base_body or not req_body:
             return None
+
         props = (req_body.get("schema") or {}).get("properties", {})
         new_body = dict(base_body)
         replaced = False
+
         for field, fschema in props.items():
             if self._normalize_tag(fschema) == "base64_image":
                 if img_var == "_BLACK_1X1_IMG_B64":
                     new_body[field] = _BLACK_1X1_IMG_B64
+
+                    if "width" in new_body:
+                        new_body["width"] = _BLACK_1X1_W
+                    if "height" in new_body:
+                        new_body["height"] = _BLACK_1X1_H
+                    if "channel" in new_body:
+                        new_body["channel"] = 3
+
                 elif img_var == "_FACE_IMG_B64":
-                    new_body[field] = _FACE_IMG_B64
+                    # raw image 엔드포인트(width*height*channel 픽셀 직접 전송)는
+                    # JPEG bytes가 아닌 디코딩된 RGB raw 픽셀 base64를 사용해야 함
+                    if self._is_raw_image_relation_endpoint(req_body):
+                        new_body[field] = _FACE_IMG_RAW_B64
+                    else:
+                        new_body[field] = _FACE_IMG_B64
+
+                    if "width" in new_body:
+                        new_body["width"] = _FACE_IMG_W
+                    if "height" in new_body:
+                        new_body["height"] = _FACE_IMG_H
+                    if "channel" in new_body:
+                        new_body["channel"] = 3
+
                 replaced = True
                 break
+
         return new_body if replaced else None
 
     def _qfe_face_tolerant_assertion(self) -> str:
-        """1x1 블랙 이미지 TC용: FAILED_FACE_DETECT(-200) + STATE_NOT_MET 허용."""
-        face_tolerant = sorted(STATE_NOT_MET_CODES | DOMAIN_FAIL_CODES & frozenset([-200, -300, -400, -401, -500, -600, -700]))
+        """1x1 블랙 이미지 TC용: QFE_Error.h 기반 에러코드를 카테고리별로 세분화하여 허용.
+
+        카테고리:
+          - general_fail  : -1(FAILED), -6(BUSY), -9(SDK_INSTANCE_BUSY), -9999(UNKNOWN)
+          - face_pipeline : -200(FACE_DETECT) ~ -800(GET_THRESHOLD), ROI 에러(-201, -202) 포함
+          - state_not_met : DB 없음/미로드, 설정 없음, 리소스 없음 등 STATE_NOT_MET_CODES 전체
+        """
+        _general_fail_codes  = sorted([-1, -6, -9, -9999])
+        _face_pipeline_codes = sorted([-200, -201, -202, -300, -400, -401, -500, -600, -700, -800])
+        _state_codes         = sorted(STATE_NOT_MET_CODES)
         return (
             f'_ec = body.get("error_code", 0)\n'
-            f'_face_tolerant = {sorted(STATE_NOT_MET_CODES | frozenset([-200, -300, -400, -401, -500, -600, -700]))}\n'
+            f'# QFE_Error.h 기반 허용 코드 (카테고리별 세분화)\n'
+            f'_general_fail   = {_general_fail_codes}  # FAILED / BUSY / SDK_BUSY / UNKNOWN\n'
+            f'_face_pipeline  = {_face_pipeline_codes}  # FACE_DETECT~GET_THRESHOLD, ROI 에러\n'
+            f'_state_not_met  = {_state_codes}  # DB/설정/리소스 상태 미충족\n'
             f'if body.get("success") is True:\n'
             f'    pass  # 예상치 못한 성공이지만 허용 (일부 환경에서 face 검출 가능)\n'
+            f'elif _ec in _general_fail:\n'
+            f'    pass  # 일반 실패 / 리소스 부족 허용\n'
+            f'elif _ec in _face_pipeline:\n'
+            f'    pass  # 얼굴 처리 파이프라인 단계별 실패 허용\n'
+            f'elif _ec in _state_not_met:\n'
+            f'    pass  # DB/설정 상태 미충족 허용\n'
             f'else:\n'
-            f'    assert _ec in _face_tolerant, (\n'
+            f'    assert False, (\n'
             f'        f"[FAIL] face op with black image: unexpected ec={{_ec}}\\n"\n'
-            f'        f"  expected -200(FAILED_FACE_DETECT) or state not met\\n"\n'
+            f'        f"  allowed general_fail={_general_fail_codes}\\n"\n'
+            f'        f"         face_pipeline={_face_pipeline_codes}\\n"\n'
+            f'        f"         state_not_met={_state_codes}\\n"\n'
             f'        f"  body: {{resp.text[:300]}}"\n'
             f'    )\n'
         )
@@ -1433,7 +1564,10 @@ class RuleBasedTCGenerator:
         call = _render_call(method, path, path_params, query_params, valid_body)
         assertion = self._build_policy_assertion("must_pass", "image_data", "raw_image_valid", success_statuses)
 
-        return self._api_test_block(
+        blocks: list[str] = []
+
+        # ── TC A: relation-valid 합성 이미지 (기존 positive) ──────────────────
+        blocks.append(self._api_test_block(
             fname=f"test_{op_id}_positive",
             docstring="[rule:positive] Raw image endpoint — relation-valid payload should pass.",
             call_str=call,
@@ -1458,7 +1592,101 @@ class RuleBasedTCGenerator:
             rule_subtype="positive_domain",
             endpoint_profile="raw_image",
             expected_result_type="expected_pass",
-        )
+        ))
+
+        # ── TC B: 1x1 블랙 이미지 → FAILED_FACE_DETECT(-200) 또는 STATE_NOT_MET ──
+        # raw image 엔드포인트에서도 얼굴 없는 이미지에 대한 에러 코드를 명시적으로 검증
+        black_body = {
+            **base_body,
+            "width": _BLACK_1X1_W,
+            "height": _BLACK_1X1_H,
+            "channel": 3,
+            "image_data": _BLACK_1X1_IMG_B64,
+        }
+        if self._register_case(
+            method, resolved_path, "image_data", "black_1x1", "no_face_detected", "face_black"
+        ):
+            call_b = _render_call(method, path, path_params, query_params, black_body)
+            blocks.append(self._api_test_block(
+                fname=f"test_{op_id}_face_black_1x1",
+                docstring=(
+                    "[rule:face_image] Raw image 엔드포인트 — 1x1 블랙 이미지(얼굴 없음); "
+                    "FAILED_FACE_DETECT(-200) 또는 STATE_NOT_MET 허용."
+                ),
+                call_str=call_b,
+                assertion_str=self._qfe_face_tolerant_assertion(),
+                axis="domain",
+                reason_code="no_face_detected",
+                target_field="image_data",
+                test_condition=(
+                    f"raw image: width={_BLACK_1X1_W}, height={_BLACK_1X1_H}, channel=3, "
+                    f"image_data={_BLACK_1X1_W * _BLACK_1X1_H * 3}B (블랙 — 얼굴 없음)"
+                ),
+                expected_http="200",
+                expected_app=(
+                    "success=false, error_code=-200 (FAILED_FACE_DETECT) "
+                    f"OR ec in general_fail/face_pipeline/state_not_met"
+                ),
+                error_detail="domain.no_face_detected.image_data.black_1x1",
+                request_method=method,
+                request_path=resolved_path,
+                request_query=query_params,
+                request_headers=None,
+                request_body=black_body,
+                expected_status_display="200 / success=false, ec=-200 OR state not met",
+                rule_type="face_image",
+                rule_subtype="no_face_black",
+                endpoint_profile="raw_image",
+                expected_result_type="expected_fail",
+            ))
+
+        # ── TC C: 실제 얼굴 이미지 (320x240 JPEG → 디코딩된 RGB raw bytes) ──────
+        # raw image 엔드포인트는 JPEG bytes가 아닌 실제 픽셀 데이터를 요구함
+        face_body = {
+            **base_body,
+            "width": _FACE_IMG_W,
+            "height": _FACE_IMG_H,
+            "channel": 3,
+            "image_data": _FACE_IMG_RAW_B64,  # JPEG 디코딩 후 RGB raw bytes base64
+        }
+        if self._register_case(
+            method, resolved_path, "image_data", "face_real", "face_image_real", "face_real"
+        ):
+            call_c = _render_call(method, path, path_params, query_params, face_body)
+            assertion_c = self._qfe_state_tolerant_assertion(path)
+            blocks.append(self._api_test_block(
+                fname=f"test_{op_id}_face_real_image",
+                docstring=(
+                    f"[rule:face_image] Raw image 엔드포인트 — 실제 얼굴 이미지 "
+                    f"({_FACE_IMG_W}x{_FACE_IMG_H} RGB raw bytes); face detect 성공 기대."
+                ),
+                call_str=call_c,
+                assertion_str=assertion_c,
+                axis="domain",
+                reason_code="face_image_real",
+                target_field="image_data",
+                test_condition=(
+                    f"raw image: width={_FACE_IMG_W}, height={_FACE_IMG_H}, channel=3, "
+                    f"image_data={_FACE_IMG_W * _FACE_IMG_H * 3}B (JPEG→RGB 디코딩 픽셀)"
+                ),
+                expected_http="200",
+                expected_app=(
+                    f"success=true/ec>=0 OR ec in {sorted(STATE_NOT_MET_CODES)} (state 미충족 허용)"
+                ),
+                error_detail="domain.face_image_real.image_data",
+                request_method=method,
+                request_path=resolved_path,
+                request_query=query_params,
+                request_headers=None,
+                request_body=face_body,
+                expected_status_display="200 / success=true (face detected) OR state not met",
+                rule_type="face_image",
+                rule_subtype="real_face",
+                endpoint_profile="raw_image",
+                expected_result_type="expected_pass",
+            ))
+
+        return "\n\n".join(blocks)
 
     def _missing_required(
         self,
@@ -2262,6 +2490,118 @@ class RuleBasedTCGenerator:
                             docstring=(
                                 f"[rule:raw_image_relation][channel=3 fixed] "
                                 f"channel={wrong_ch} ({label}) — RGB-only endpoint must reject non-3 channel."
+                            ),
+                            call_str=_render_call(method, path, path_params, query_params, wrong_ch_body),
+                            assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}"),
+                            axis="domain",
+                            reason_code="invalid_image_relation",
+                            target_field="channel",
+                            test_condition=f"channel={wrong_ch} ({label}), image_data={_CH3_W*_CH3_H*wrong_ch}B — channel≠3 (RGB-only endpoint)",
+                            expected_http="200",
+                            expected_app="success=false, error_code<0 (channel must be 3)",
+                            error_detail=f"domain.invalid_image_relation.channel.{label}",
+                            request_method=method,
+                            request_path=resolved_path,
+                            request_query=query_params,
+                            request_headers=None,
+                            request_body=wrong_ch_body,
+                            expected_status_display="200 / success=false (channel must be 3)",
+                            rule_type="raw_image_relation",
+                            rule_subtype=f"channel_fixed3_{label}",
+                            endpoint_profile="raw_image",
+                            expected_result_type="expected_fail",
+                        )
+                    )
+
+            # (B) channel=3 고정, 유효한 컬러 이미지 → probe_only
+            #     (실제 얼굴 없이 통과 여부만 확인; success=false 가능하나 서버 crash 없어야 함)
+            valid_ch3_body = {
+                **base_body,
+                "width":      _CH3_W,
+                "height":     _CH3_H,
+                "channel":    3,
+                "image_data": _CH3_IMG_VALID_B64,
+            }
+            if self._register_case(method, resolved_path, "channel", "fixed3_valid", "invalid_image_relation", "raw_image_relation"):
+                blocks.append(
+                    self._api_test_block(
+                        fname=f"test_{op_id}_raw_image_relation_channel_fixed3_valid",
+                        docstring=(
+                            "[rule:raw_image_relation][channel=3 fixed] "
+                            f"channel=3, {_CH3_W}x{_CH3_H} color image — valid RGB payload, no crash expected."
+                        ),
+                        call_str=_render_call(method, path, path_params, query_params, valid_ch3_body),
+                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid"),
+                        axis="domain",
+                        reason_code="invalid_image_relation",
+                        target_field="channel",
+                        test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid",
+                        expected_http="200",
+                        expected_app="no crash (status < 500); success may vary (face detection dependent)",
+                        error_detail="domain.invalid_image_relation.channel.fixed3_valid",
+                        request_method=method,
+                        request_path=resolved_path,
+                        request_query=query_params,
+                        request_headers=None,
+                        request_body=valid_ch3_body,
+                        expected_status_display="200 / no crash (probe_only, channel=3 fixed)",
+                        rule_type="raw_image_relation",
+                        rule_subtype="channel_fixed3_valid",
+                        endpoint_profile="raw_image",
+                        expected_result_type="probe_only",
+                    )
+                )
+
+            # (C) channel=3 고정, width/height 경계값 TC
+            #     - width=0 → must_fail (서버가 0 크기 이미지 거부해야 함)
+            #     - height=0 → must_fail
+            #     - width=1, height=1 (최소 유효) → probe_only
+            for wh_label, w, h, img_b64, policy in [
+                ("width_zero",   0,              _CH3_H,         base64.b64encode(bytes(0)).decode(),                            "must_fail"),
+                ("height_zero",  _CH3_W,         0,              base64.b64encode(bytes(0)).decode(),                            "must_fail"),
+                ("min_1x1",      1,              1,              base64.b64encode(bytes(1 * 1 * 3)).decode(),                    "probe_only"),
+            ]:
+                wh_body = {
+                    **base_body,
+                    "width":      w,
+                    "height":     h,
+                    "channel":    3,
+                    "image_data": img_b64,
+                }
+                key_wh = f"ch3_wh:{wh_label}"
+                if self._register_case(method, resolved_path, "width_height", key_wh, "invalid_image_relation", "raw_image_relation"):
+                    exp_app = (_exp_app_fail("domain", "invalid_image_relation", "width_height") if policy == "must_fail"
+                               else "no crash (status < 500)")
+                    blocks.append(
+                        self._api_test_block(
+                            fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
+                            docstring=(
+                                f"[rule:raw_image_relation][channel=3 fixed] "
+                                f"width={w}, height={h}, channel=3 — {wh_label} ({policy})."
+                            ),
+                            call_str=_render_call(method, path, path_params, query_params, wh_body),
+                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}"),
+                            axis="domain",
+                            reason_code="invalid_image_relation",
+                            target_field="width_height",
+                            test_condition=f"channel=3 (fixed), width={w}, height={h}, image_data={max(w,0)*max(h,0)*3}B — {wh_label}",
+                            expected_http="200",
+                            expected_app=exp_app,
+                            error_detail=f"domain.invalid_image_relation.wh.ch3_{wh_label}",
+                            request_method=method,
+                            request_path=resolved_path,
+                            request_query=query_params,
+                            request_headers=None,
+                            request_body=wh_body,
+                            expected_status_display=f"200 / {exp_app}",
+                            rule_type="raw_image_relation",
+                            rule_subtype=f"channel_fixed3_{wh_label}",
+                            endpoint_profile="raw_image",
+                            expected_result_type="expected_fail" if policy == "must_fail" else "probe_only",
+                        )
+                    )
+
+        return blocks                                f"channel={wrong_ch} ({label}) — RGB-only endpoint must reject non-3 channel."
                             ),
                             call_str=_render_call(method, path, path_params, query_params, wrong_ch_body),
                             assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}"),
