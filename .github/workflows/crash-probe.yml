@@ -18,7 +18,7 @@ on:
 
 defaults:
   run:
-    shell: powershell
+    shell: pwsh
 
 env:
   BASE_URL:               ${{ inputs.base_url || 'http://127.0.0.1:8080' }}

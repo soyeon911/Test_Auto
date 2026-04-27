@@ -42,7 +42,7 @@ on:
 
 defaults:
   run:
-    shell: powershell
+    shell: pwsh
 
 jobs:
   detect-changes:
@@ -89,7 +89,7 @@ jobs:
 
       - name: API 서버 실행·버전 조회 (job1 detect)
         id: server_version
-        shell: powershell
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -413,7 +413,7 @@ jobs:
 
       - name: API 서버 실행 (job2 test)
         id: start_server_test
-        shell: powershell
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -906,7 +906,7 @@ jobs:
 
       - name: API 서버 종료 (job2 test)
         if: always()
-        shell: powershell
+        shell: pwsh
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -1315,4 +1315,4 @@ jobs:
             if ($line.ToString() -match "LISTENING\s+(\d+)") {
               try { Stop-Process -Id ([int]$matches[1]) -Force -ErrorAction SilentlyContinue } catch {}
             }
-          }
+          }      
