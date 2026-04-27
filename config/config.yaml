@@ -13,7 +13,7 @@ server:
 
   # standard : HTTP 400/422 기반
   # qfe      : HTTP 200 + success/error_code 기반
-  error_response_mode: http_status
+  error_response_mode: qfe
 
   # match / verify 계열 도메인 판정 기준
   # 실제 운영 threshold와 다르면 이 값 수정
