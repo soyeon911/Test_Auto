@@ -641,17 +641,23 @@ class RuleBasedTCGenerator:
         # minimum/maximum 이 명세에 명시되어 있으면 범위 밖 값은 반드시 reject 되어야 함
         range_constrained = (minimum is not None or maximum is not None)
 
+        def _coerce(v):
+            """정수 계열 float(e.g. 0.0, 100000.0)를 int로 변환 — Go JSON unmarshal 오류 방지."""
+            if isinstance(v, float) and v.is_integer():
+                return int(v)
+            return v
+
         cases: list[dict[str, Any]] = []
 
         if minimum is not None:
-            cases.append({"value": minimum, "label": "min", "policy": "must_pass"})
-            cases.append({"value": minimum - 1, "label": "below_min", "policy": "must_fail"})
-            cases.append({"value": minimum + 1, "label": "above_min", "policy": "must_pass"})
+            cases.append({"value": _coerce(minimum),     "label": "min",       "policy": "must_pass"})
+            cases.append({"value": _coerce(minimum - 1), "label": "below_min", "policy": "must_fail"})
+            cases.append({"value": _coerce(minimum + 1), "label": "above_min", "policy": "must_pass"})
 
         if maximum is not None:
-            cases.append({"value": maximum, "label": "max", "policy": "must_pass"})
-            cases.append({"value": maximum + 1, "label": "above_max", "policy": "must_fail"})
-            cases.append({"value": maximum - 1, "label": "below_max", "policy": "must_pass"})
+            cases.append({"value": _coerce(maximum),     "label": "max",       "policy": "must_pass"})
+            cases.append({"value": _coerce(maximum + 1), "label": "above_max", "policy": "must_fail"})
+            cases.append({"value": _coerce(maximum - 1), "label": "below_max", "policy": "must_pass"})
 
         if isinstance(example, (int, float)):
             step = 1 if isinstance(example, int) else 0.1
@@ -1248,10 +1254,23 @@ class RuleBasedTCGenerator:
         if ftype == "number":
             minimum = cons.get("minimum")
             maximum = cons.get("maximum")
+            # Swagger example 우선 사용 — schema_enricher가 description에서 추출한 min/max가
+            # 정수 범위인 경우 float midpoint(e.g. 50000.0)를 보내면 서버 JSON 파싱 실패 가능.
+            # enrichment 후 example은 x_constraints(cons)에 저장됨 → cons 우선 확인
+            _sw_example = cons.get("example") if cons.get("example") is not None else schema.get("example")
+            if _sw_example is not None and isinstance(_sw_example, (int, float)):
+                return _sw_example
             if minimum is not None and maximum is not None:
-                return (minimum + maximum) / 2.0
+                mid = (minimum + maximum) / 2.0
+                # min/max가 정수 계열이면 정수로 반환 (float ".0" 으로 인한 Go unmarshal 오류 방지)
+                if (isinstance(minimum, int) or float(minimum).is_integer()) and \
+                   (isinstance(maximum, int) or float(maximum).is_integer()) and \
+                   float(mid).is_integer():
+                    return int(mid)
+                return mid
             if minimum is not None:
-                return float(minimum)
+                v = float(minimum)
+                return int(minimum) if float(minimum).is_integer() else v
             tag_val = _GOOD_BY_TAG.get(tag)
             if tag_val is not None:
                 return float(tag_val) if isinstance(tag_val, (int, float)) else 1.0
