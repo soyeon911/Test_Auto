@@ -1052,9 +1052,52 @@ class RuleBasedTCGenerator:
             return self._standard_success_assertion(success_statuses or [200])
 
         # ── probe_only ────────────────────────────────────────────────────────
-        if mode == "http_status":
+        if mode in ("http_status", "hybrid"):
             return self._http_probe_assertion(label)
+
         return self._no_crash_assertion(label)
+
+    def _face_no_face_assertion(self, path: str, label: str = "no_face_image") -> str:
+        """
+        얼굴 없음 / face detect 실패 계열 assertion.
+
+        qfe:
+        - 기존 QFE legacy 응답 허용
+        - top-level success=true + nested data.error_code=-200 형태도 기존 정책상 허용
+
+        http_status:
+        - HTTP 422 + expected error_code 계열 기대
+
+        hybrid:
+        - HTTP 422 표준 응답 또는 legacy HTTP 200 응답 모두 허용
+        """
+        exp_codes = _expected_error_codes_for(
+            "domain",
+            "no_face_detected",
+            "image_data",
+            path,
+        )
+
+        if self.error_mode == "http_status":
+            return self._http_error_assertion(
+                422,
+                exp_codes,
+                "image_data",
+                label,
+            )
+
+        if self.error_mode == "hybrid":
+            return self._http_hybrid_error_assertion(
+                422,
+                exp_codes,
+                "image_data",
+                label,
+            )
+
+        if self.error_mode == "qfe":
+            return self._qfe_face_tolerant_assertion()
+
+        return self._standard_error_assertion("image_data", label)
 
     def _api_test_block(
         self,
@@ -1084,15 +1127,44 @@ class RuleBasedTCGenerator:
     ) -> str:
         # http_status / hybrid 모드에서는 expected_http를 axis/reason_code/policy로 재계산
         mode = self.error_mode
+
+        _effective_policy = policy
+        if not _effective_policy:
+            if expected_result_type == "expected_pass":
+                _effective_policy = "must_pass"
+            elif expected_result_type == "expected_fail":
+                _effective_policy = "must_fail"
+            elif expected_result_type == "probe_only":
+                _effective_policy = "probe_only"
+
         if mode in ("http_status", "hybrid"):
-            _real_http = str(_expected_http_for(axis, reason_code, target_field, request_path, policy))
-            _exp_codes = sorted(_expected_error_codes_for(axis, reason_code, target_field, request_path))
+            if _effective_policy == "probe_only":
+                _eff_expected_http = "<500"
+                _exp_codes = []
+            else:
+                _eff_expected_http = str(
+                    _expected_http_for(
+                        axis,
+                        reason_code,
+                        target_field,
+                        request_path,
+                        _effective_policy,
+                    )
+                )
+                _exp_codes = sorted(
+                    _expected_error_codes_for(
+                        axis,
+                        reason_code,
+                        target_field,
+                        request_path,
+                    )
+                )
         else:
-            _real_http = expected_http
+            _eff_expected_http = expected_http
             _exp_codes = []
 
-        _eff_expected_http   = _real_http if mode in ("http_status", "hybrid") else expected_http
         _eff_expected_status = f"{_eff_expected_http} / {expected_app}"
+
 
         indented_assert = textwrap.indent(assertion_str.rstrip("\n"), "        ")
         meta_block = (
@@ -1107,7 +1179,7 @@ class RuleBasedTCGenerator:
             f"        \"rule_subtype\": {rule_subtype!r},\n"
             f"        \"endpoint_profile\": {endpoint_profile!r},\n"
             f"        \"semantic_tag\": {semantic_tag!r},\n"
-            f"        \"policy\": {policy!r},\n"
+            f"        \"policy\": {_effective_policy!r},\n"
             f"        \"expected_result_type\": {expected_result_type!r},\n"
             f"        \"target_param\": {target_field!r},\n"
             f"        \"condition\": {test_condition!r},\n"
@@ -1440,16 +1512,20 @@ class RuleBasedTCGenerator:
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
 
-        allow_state_not_met = self.error_mode == "qfe" and path in STATE_DEPENDENT_PATHS
+        allow_state_not_met = path in STATE_DEPENDENT_PATHS
 
-        assertion = (
-            self._qfe_state_tolerant_assertion(path)
-            if allow_state_not_met
-            else (
-                self._qfe_success_assertion()
-                if self.error_mode == "qfe"
-                else self._standard_success_assertion(success_statuses)
-            )
+        axis_value = "state" if allow_state_not_met else "domain"
+        reason_value = "precondition_not_met" if allow_state_not_met else "success_expected"
+
+        assertion = self._build_policy_assertion(
+            "must_pass",
+            "",
+            "positive",
+            success_statuses,
+            allow_state_not_met=allow_state_not_met,
+            path=path,
+            axis=axis_value,
+            reason_code=reason_value,
         )
 
         exp_app = (
@@ -1463,8 +1539,6 @@ class RuleBasedTCGenerator:
             )
         )
 
-        axis_value = "state" if allow_state_not_met else "domain"
-        reason_value = "precondition_not_met" if allow_state_not_met else "success_expected"
         error_detail_value = "state.precondition_not_met" if allow_state_not_met else "domain.success_expected"
 
         doc = (
@@ -1496,6 +1570,7 @@ class RuleBasedTCGenerator:
             rule_subtype="positive_default",
             endpoint_profile=profile,
             expected_result_type="expected_pass",
+            policy="must_pass",
         )
 
     def _positive_match_verdict(
@@ -1518,9 +1593,19 @@ class RuleBasedTCGenerator:
         body = self._build_valid_body(req_body)
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
+        base_assertion = self._build_policy_assertion(
+            "must_pass",
+            "",
+            "match_verdict_positive",
+            success_statuses,
+            allow_state_not_met=True,
+            path=path,
+            axis="state",
+            reason_code="precondition_not_met",
+        )
 
         if path == "/api/v2/match":
-            assertion = self._qfe_state_tolerant_assertion(path) + self._when_success(
+            assertion = base_assertion + self._when_success(
                 self._match_status_assertion(
                     score_field="match_score",
                     status_field="status",
@@ -1537,7 +1622,7 @@ class RuleBasedTCGenerator:
                 "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
         elif "verify" in path:
-            assertion = self._qfe_state_tolerant_assertion(path) + self._when_success(
+            assertion = base_assertion + self._when_success(
                 self._match_domain_assertion(
                     score_field="match_score",
                     verdict_field="verified",
@@ -1553,7 +1638,7 @@ class RuleBasedTCGenerator:
                 "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
         else:
-            assertion = self._qfe_state_tolerant_assertion(path) + self._when_success(
+            assertion = base_assertion + self._when_success(
                 self._match_score_only_assertion(
                     score_field="match_score",
                 )
@@ -1589,6 +1674,7 @@ class RuleBasedTCGenerator:
             rule_type="positive",
             rule_subtype="positive_outcome",
             endpoint_profile="match_verdict",
+            policy="must_pass",
             expected_result_type="expected_pass",
         )
 
@@ -1613,8 +1699,10 @@ class RuleBasedTCGenerator:
         resolved_path = _build_url(path, path_params)
         blocks: list[str] = []
 
-        # ── TC A: 기존 probe_only (synthetic 1x1 이미지) ───────────────────
+        # ── TC A: schema-valid synthetic image probe ────────────────────────
         call_a = _render_call(method, path, path_params, query_params, base_body)
+        exp_app_a = _exp_app_probe("domain", "no_face_detected", "image_data", path)
+
         blocks.append(self._api_test_block(
             fname=f"test_{op_id}_positive",
             docstring=(
@@ -1622,33 +1710,46 @@ class RuleBasedTCGenerator:
                 "probe_only: no crash expected."
             ),
             call_str=call_a,
-            assertion_str=self._no_crash_assertion("positive_probe"),
-            axis="runtime",
-            reason_code="probe_schema_valid",
-            target_field="",
+            assertion_str=self._build_policy_assertion(
+                "probe_only",
+                "image_data",
+                "positive_probe",
+                path=path,
+                axis="domain",
+                reason_code="no_face_detected",
+            ),
+            axis="domain",
+            reason_code="no_face_detected",
+            target_field="image_data",
             test_condition=(
-                "Happy path (1x1 synthetic image) — probe_only: "
-                "no crash; success may be false (FAILED_FACE_DETECT expected)"
+                "Happy path probe with schema-valid synthetic image — "
+                "no crash; success may be false if no face is detected"
             ),
             expected_http="200",
-            expected_app=_exp_app_probe("domain", "no_face_detected"),
-            error_detail="runtime.probe_schema_valid",
+            expected_app=exp_app_a,
+            error_detail="domain.no_face_detected.image_data.synthetic_1x1",
             request_method=method,
             request_path=resolved_path,
             request_query=query_params,
             request_headers=None,
             request_body=base_body,
-            expected_status_display=f"200 / {_exp_app_probe('domain', 'no_face_detected')}",
+            expected_status_display=f"200 / {exp_app_a}",
             rule_type="positive",
             rule_subtype="positive_schema",
             endpoint_profile="face_operation",
+            policy="probe_only",
             expected_result_type="probe_only",
         ))
 
-        # ── TC B: 1x1 블랙 이미지 → FAILED_FACE_DETECT(-200) 명시적 검증 ──
+        # ── TC B: 1x1 black image → no face / FAILED_FACE_DETECT ────────────
         black_body = self._replace_image_field(base_body, req_body, "_BLACK_1X1_IMG_B64")
         if black_body is not None and self._register_case(
-            method, resolved_path, "image_data", "black_1x1", "no_face_detected", "face_black"
+            method,
+            resolved_path,
+            "image_data",
+            "black_1x1",
+            "no_face_detected",
+            "face_black",
         ):
             call_b = _render_call(method, path, path_params, query_params, black_body)
             blocks.append(self._api_test_block(
@@ -1658,7 +1759,10 @@ class RuleBasedTCGenerator:
                     "FAILED_FACE_DETECT(-200) 또는 STATE_NOT_MET 허용."
                 ),
                 call_str=call_b,
-                assertion_str=self._qfe_face_tolerant_assertion(),
+                assertion_str=self._face_no_face_assertion(
+                    path,
+                    "face_black_1x1",
+                ),
                 axis="domain",
                 reason_code="no_face_detected",
                 target_field="image_data",
@@ -1683,29 +1787,56 @@ class RuleBasedTCGenerator:
                 rule_type="face_image",
                 rule_subtype="no_face_black",
                 endpoint_profile="face_operation",
+                policy="must_fail",
                 expected_result_type="expected_fail",
             ))
 
-        # ── TC C: 실제 얼굴 이미지 (320x240 JPEG) ──────────────────────────
+        # ── TC C: real face image ────────────────────────────────────────────
         face_body = self._replace_image_field(base_body, req_body, "_FACE_IMG_B64")
         if face_body is not None and self._register_case(
-            method, resolved_path, "image_data", "face_real", "face_image_real", "face_real"
+            method,
+            resolved_path,
+            "image_data",
+            "face_real",
+            "face_image_real",
+            "face_real",
         ):
             call_c = _render_call(method, path, path_params, query_params, face_body)
             is_detect_only = path in _FACE_DETECT_ONLY_PATHS
+
             if is_detect_only:
-                assertion_c = self._qfe_state_tolerant_assertion(path)
-                exp_app_c = (
-                    f"success=true/ec>=0 OR ec in {sorted(STATE_NOT_MET_CODES)} (state 미충족 허용)"
+                policy_c = "must_pass"
+                axis_c = "domain"
+                reason_c = "success_expected"
+                assertion_c = self._build_policy_assertion(
+                    policy_c,
+                    "image_data",
+                    "face_real_image",
+                    success_statuses,
+                    allow_state_not_met=False,
+                    path=path,
+                    axis=axis_c,
+                    reason_code=reason_c,
                 )
-                exp_disp_c = "200 / success=true (face detected) OR state not met"
+                exp_app_c = "success=true/ec>=0"
+                exp_disp_c = "200 / success=true (face detected)"
                 result_type_c = "expected_pass"
                 condition_c = (
                     "image_data=실제 얼굴 이미지(320x240 JPEG) — "
-                    "face detect 성공 기대; DB state 미충족 허용"
+                    "face detect 성공 기대"
                 )
             else:
-                assertion_c = self._qfe_state_tolerant_assertion(path)
+                policy_c = "probe_only"
+                axis_c = "state"
+                reason_c = "precondition_not_met"
+                assertion_c = self._build_policy_assertion(
+                    policy_c,
+                    "image_data",
+                    "face_real_state_face_probe",
+                    path=path,
+                    axis=axis_c,
+                    reason_code=reason_c,
+                )
                 exp_app_c = (
                     f"success=true/ec>=0 OR ec in {sorted(STATE_NOT_MET_CODES | frozenset([-200]))} "
                     "(state 미충족 / face detect 실패 허용)"
@@ -1716,6 +1847,7 @@ class RuleBasedTCGenerator:
                     "image_data=실제 얼굴 이미지(320x240 JPEG) — "
                     "enroll/identify/verify: DB state + face 둘 다 필요 → probe_only"
                 )
+
             blocks.append(self._api_test_block(
                 fname=f"test_{op_id}_face_real_image",
                 docstring=(
@@ -1724,13 +1856,13 @@ class RuleBasedTCGenerator:
                 ),
                 call_str=call_c,
                 assertion_str=assertion_c,
-                axis="state" if not is_detect_only else "domain",
-                reason_code="face_image_real",
+                axis=axis_c,
+                reason_code=reason_c,
                 target_field="image_data",
                 test_condition=condition_c,
                 expected_http="200",
                 expected_app=exp_app_c,
-                error_detail=f"{'domain' if is_detect_only else 'state'}.face_image_real.image_data",
+                error_detail=f"{axis_c}.{reason_c}.image_data.face_real",
                 request_method=method,
                 request_path=resolved_path,
                 request_query=query_params,
@@ -1740,6 +1872,7 @@ class RuleBasedTCGenerator:
                 rule_type="face_image",
                 rule_subtype="real_face",
                 endpoint_profile="face_operation",
+                policy=policy_c,
                 expected_result_type=result_type_c,
             ))
 
@@ -1852,7 +1985,15 @@ class RuleBasedTCGenerator:
             "image_data": _RAW_IMG_VALID_B64,
         }
         call = _render_call(method, path, path_params, query_params, valid_body)
-        assertion = self._build_policy_assertion("must_pass", "image_data", "raw_image_valid", success_statuses, axis="domain", reason_code="must_pass")
+        assertion = self._build_policy_assertion(
+            "must_pass",
+            "image_data",
+            "raw_image_valid",
+            success_statuses,
+            path=path,
+            axis="domain",
+            reason_code="success_expected",
+        )
 
         blocks: list[str] = []
 
@@ -1863,7 +2004,7 @@ class RuleBasedTCGenerator:
             call_str=call,
             assertion_str=assertion,
             axis="domain",
-            reason_code="invalid_image_relation",
+            reason_code="success_expected",
             target_field="image_data",
             test_condition=(
                 f"width={_RAW_W}, height={_RAW_H}, channel={_RAW_C}, "
@@ -1871,7 +2012,7 @@ class RuleBasedTCGenerator:
             ),
             expected_http="200",
             expected_app="success=true, error_code>=0",
-            error_detail="domain.invalid_image_relation.image_data.valid",
+            error_detail="domain.success_expected.image_data.raw_valid",
             request_method=method,
             request_path=resolved_path,
             request_query=query_params,
@@ -1881,6 +2022,7 @@ class RuleBasedTCGenerator:
             rule_type="positive",
             rule_subtype="positive_domain",
             endpoint_profile="raw_image",
+            policy="must_pass",
             expected_result_type="expected_pass",
         ))
 
@@ -1904,7 +2046,10 @@ class RuleBasedTCGenerator:
                     "FAILED_FACE_DETECT(-200) 또는 STATE_NOT_MET 허용."
                 ),
                 call_str=call_b,
-                assertion_str=self._qfe_face_tolerant_assertion(),
+                assertion_str=self._face_no_face_assertion(
+                    path,
+                    "raw_face_black_1x1",
+                ),
                 axis="domain",
                 reason_code="no_face_detected",
                 target_field="image_data",
@@ -1927,6 +2072,7 @@ class RuleBasedTCGenerator:
                 rule_type="face_image",
                 rule_subtype="no_face_black",
                 endpoint_profile="raw_image",
+                policy="must_fail",
                 expected_result_type="expected_fail",
             ))
 
@@ -1943,7 +2089,16 @@ class RuleBasedTCGenerator:
             method, resolved_path, "image_data", "face_real", "face_image_real", "face_real"
         ):
             call_c = _render_call(method, path, path_params, query_params, face_body)
-            assertion_c = self._qfe_state_tolerant_assertion(path)
+            assertion_c = self._build_policy_assertion(
+                "must_pass",
+                "image_data",
+                "raw_face_real_image",
+                success_statuses,
+                allow_state_not_met=False,
+                path=path,
+                axis="domain",
+                reason_code="success_expected",
+            )
             blocks.append(self._api_test_block(
                 fname=f"test_{op_id}_face_real_image",
                 docstring=(
@@ -1953,17 +2108,15 @@ class RuleBasedTCGenerator:
                 call_str=call_c,
                 assertion_str=assertion_c,
                 axis="domain",
-                reason_code="face_image_real",
+                reason_code="success_expected",
                 target_field="image_data",
                 test_condition=(
                     f"raw image: width={_FACE_IMG_W}, height={_FACE_IMG_H}, channel=3, "
                     f"image_data={_FACE_IMG_W * _FACE_IMG_H * 3}B (JPEG→RGB 디코딩 픽셀)"
                 ),
                 expected_http="200",
-                expected_app=(
-                    f"success=true/ec>=0 OR ec in {sorted(STATE_NOT_MET_CODES)} (state 미충족 허용)"
-                ),
-                error_detail="domain.face_image_real.image_data",
+                expected_app="success=true/ec>=0",
+                error_detail="domain.success_expected.image_data.raw_face_real",
                 request_method=method,
                 request_path=resolved_path,
                 request_query=query_params,
@@ -1973,6 +2126,7 @@ class RuleBasedTCGenerator:
                 rule_type="face_image",
                 rule_subtype="real_face",
                 endpoint_profile="raw_image",
+                policy="must_pass",
                 expected_result_type="expected_pass",
             ))
 

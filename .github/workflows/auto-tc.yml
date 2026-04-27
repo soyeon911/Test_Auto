@@ -39,6 +39,15 @@ on:
         description: 'Crash Probe pytest -k 필터 (예: enroll or match)'
         required: false
         default: ''
+      error_response_mode:
+        description: 'AutoTC error response mode'
+        required: false
+        default: 'http_status'
+        type: choice
+        options:
+          - qfe
+          - hybrid
+          - http_status
 
 defaults:
   run:
@@ -340,6 +349,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.should_run == 'true'
     runs-on: [self-hosted, windows]
+    ERROR_RESPONSE_MODE: ${{ inputs.error_response_mode != '' && inputs.error_response_mode || 'http_status' }}
+    AUTOTC_CONFIG: config\config.yaml
 
     env:
       BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
@@ -702,15 +713,28 @@ jobs:
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
-          $configPath = "config.yaml"
 
-          if (-not (Test-Path $configPath)) {
-            if (Test-Path "config\config.yaml") {
-              $configPath = "config\config.yaml"
-            } else {
-              throw "config.yaml 파일을 찾을 수 없습니다."
+          $configCandidates = @(
+            "config\config.yaml",
+            "config\config.yml",
+            "config.yaml",
+            "config.yml"
+          )
+
+          $configPath = $null
+          foreach ($c in $configCandidates) {
+            if (Test-Path $c) {
+              $configPath = $c
+              break
             }
           }
+
+          if (-not $configPath) {
+            throw "config 파일을 찾을 수 없습니다. candidates=$($configCandidates -join ', ')"
+          }
+
+          $env:AUTOTC_CONFIG = $configPath
+          "AUTOTC_CONFIG=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
           Write-Host "[Config] using $configPath"
           $text = Get-Content $configPath -Raw -Encoding UTF8
@@ -727,10 +751,27 @@ jobs:
             "`${1}$env:MATCH_THRESHOLD"
           )
 
+          if ($text -match '(?m)^(\s*error_response_mode:\s*).*$') {
+            $text = [regex]::Replace(
+              $text,
+              '(?m)^(\s*error_response_mode:\s*).*$',
+              "`${1}$env:ERROR_RESPONSE_MODE"
+            )
+          } else {
+            $text = [regex]::Replace(
+              $text,
+              '(?m)^(server:\s*)$',
+              "`$1`n  error_response_mode: $env:ERROR_RESPONSE_MODE"
+            )
+          }
+
           Set-Content -Path $configPath -Value $text -Encoding UTF8
 
           Write-Host "[Config] reset_cache=$env:RESET_SEMANTIC_CACHE"
           Write-Host "[Config] match_threshold=$env:MATCH_THRESHOLD"
+          Write-Host "[Config] error_response_mode=$env:ERROR_RESPONSE_MODE"
+
+          Select-String -Path $configPath -Pattern "error_response_mode|match_threshold|reset_cache"
           
 
       - name: TC 생성 (generate)
