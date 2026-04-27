@@ -863,24 +863,24 @@ class RuleBasedTCGenerator:
     # ── http_status / hybrid 모드 전용 assertion ─────────────────────────────
 
     def _http_success_assertion(self, expected_status: int = 200) -> str:
-        return textwrap.dedent(
-            f"""\
-            assert resp.status_code == {expected_status}, (
-                f"[FAIL] expected HTTP {expected_status}, got {{resp.status_code}}\\n"
-                f"  Body: {{resp.text[:500]}}"
-            )
-            try:
-                body = resp.json()
-            except ValueError:
-                pytest.fail(f"Expected JSON response, got: {{resp.text[:300]}}")
-            assert body.get("success") is True, (
-                f"[FAIL] expected success=true\\n  body: {{resp.text[:500]}}"
-            )
-            assert body.get("error_code", 0) >= 0, (
-                f"[FAIL] expected non-negative error_code\\n  body: {{resp.text[:500]}}"
-            )
-        """
-        )
+        lines = [
+            f"assert resp.status_code == {expected_status}, (",
+            f"    f\"[FAIL] expected HTTP {expected_status}, got {{resp.status_code}}\\n\"",
+            "    f\"  Body: {resp.text[:500]}\"",
+            ")",
+            "try:",
+            "    body = resp.json()",
+            "except ValueError:",
+            "    pytest.fail(f\"Expected JSON response, got: {resp.text[:300]}\")",
+            "assert body.get(\"success\") is True, (",
+            "    f\"[FAIL] expected success=true\\n  body: {resp.text[:500]}\"",
+            ")",
+            "assert body.get(\"error_code\", 0) >= 0, (",
+            "    f\"[FAIL] expected non-negative error_code\\n  body: {resp.text[:500]}\"",
+            ")",
+        ]
+        return "\n".join(lines) + "\n"
+
 
     def _http_error_assertion(
         self,
@@ -889,118 +889,96 @@ class RuleBasedTCGenerator:
         field_name: str,
         label: str,
     ) -> str:
-        codes_list = sorted(expected_error_codes or [])
-        has_codes = bool(codes_list)
-        codes_check = (
-            f"assert _ec in {codes_list}, (\n"
-            f'    f"[FAIL] HTTP matched but error_code mismatch\\\\n"\n'
-            f'    f"  expected: {codes_list}\\\\n"\n'
-            f'    f"  actual  : {{{{_ec}}}}\\\\n"\n'
-            f'    f"  msg     : {{{{body.get(\'msg\') or body.get(\'error\')}}}}\\\\n"\n'
-            f'    f"  body    : {{{{resp.text[:300]}}}}" \n'
-            f")\n"
-        ) if has_codes else ""
-        return textwrap.dedent(
-            f"""\
-            assert resp.status_code == {expected_status}, (
-                f"[FAIL] {label} on '{field_name}' — expected HTTP {expected_status}, got {{resp.status_code}}\\n"
-                f"  field : {field_name}\\n"
-                f"  Body  : {{resp.text[:300]}}"
-            )
-            try:
-                body = resp.json()
-            except ValueError:
-                pytest.fail(f"Expected JSON error body, got: {{resp.text[:300]}}")
-            _ec = body.get("error_code")
-            assert body.get("success") is False or _ec is not None, (
-                f"[FAIL] expected structured error body\\n  body: {{resp.text[:300]}}"
-            )
-            {codes_check}"""
-        )
-
-    def _http_hybrid_error_assertion(
-        self,
-        expected_status: int,
-        expected_error_codes: frozenset[int] | None,
-        field_name: str,
-        label: str,
-    ) -> str:
-        """hybrid 모드: standard HTTP 또는 legacy 200+error_code 둘 다 허용.
-        단, 200으로 통과한 경우 PASS_WITH_LEGACY_HTTP 마킹."""
-        codes_list = sorted(expected_error_codes or [])
-        return textwrap.dedent(
-            f"""\
-            _legacy_pass = (resp.status_code == 200)
-            _standard_pass = (resp.status_code == {expected_status})
-            assert _legacy_pass or _standard_pass, (
-                f"[FAIL] {label} on '{field_name}' — expected HTTP {expected_status} (or legacy 200), got {{resp.status_code}}\\n"
-                f"  Body: {{resp.text[:300]}}"
-            )
-            try:
-                body = resp.json()
-            except ValueError:
-                pytest.fail(f"Expected JSON error body, got: {{resp.text[:300]}}")
-            _ec = body.get("error_code")
-            assert body.get("success") is False or _ec is not None, (
-                f"[FAIL] expected structured error body\\n  body: {{resp.text[:300]}}"
-            )
-            if _legacy_pass and not _standard_pass:
-                # migration note: 서버가 아직 legacy 200 반환 중
-                request.node.user_properties.append(("migration_flag", "PASS_WITH_LEGACY_HTTP"))
-            if {bool(codes_list)} and _ec not in {codes_list}:
-                request.node.user_properties.append(("migration_flag", "ERROR_CODE_MISMATCH"))
         """
-        )
+        http_status 모드 must_fail:
+        - HTTP status가 expected_status와 정확히 일치해야 함
+        - expected_error_codes가 있으면 body.error_code도 그 집합에 포함되어야 함
+
+        주의:
+        textwrap.dedent + 동적 multiline 삽입을 쓰면 generated test에
+        unexpected indent가 생길 수 있으므로 line list 방식으로 생성한다.
+        """
+        codes_list = sorted(expected_error_codes or [])
+
+        lines = [
+            f"assert resp.status_code == {expected_status}, (",
+            f"    f\"[FAIL] {label} on '{field_name}' — expected HTTP {expected_status}, got {{resp.status_code}}\\n\"",
+            f"    f\"  field : {field_name}\\n\"",
+            "    f\"  Body  : {resp.text[:300]}\"",
+            ")",
+            "try:",
+            "    body = resp.json()",
+            "except ValueError:",
+            "    pytest.fail(f\"Expected JSON error body, got: {resp.text[:300]}\")",
+            "_ec = body.get(\"error_code\")",
+            "assert body.get(\"success\") is False or _ec is not None, (",
+            "    f\"[FAIL] expected structured error body\\n  body: {resp.text[:300]}\"",
+            ")",
+        ]
+
+        if codes_list:
+            lines.extend([
+                f"assert _ec in {codes_list}, (",
+                "    f\"[FAIL] HTTP matched but error_code mismatch\\n\"",
+                f"    f\"  expected: {codes_list}\\n\"",
+                "    f\"  actual  : {_ec}\\n\"",
+                "    f\"  msg     : {body.get('msg') or body.get('error')}\\n\"",
+                "    f\"  body    : {resp.text[:300]}\"",
+                ")",
+            ])
+
+        return "\n".join(lines) + "\n"
 
     def _http_state_tolerant_assertion(self, path: str) -> str:
-        """http_status 모드: 200(성공) 또는 404(상태 미충족) 허용."""
-        return textwrap.dedent(
-            f"""\
-            assert resp.status_code in [200, 404], (
-                f"[FAIL] expected HTTP 200(success) or 404(state not met), got {{resp.status_code}}\\n"
-                f"  Body: {{resp.text[:500]}}"
-            )
-            try:
-                body = resp.json()
-            except ValueError:
-                pytest.fail(f"Expected JSON response, got: {{resp.text[:300]}}")
-            _ec = body.get("error_code", 0)
-            _msg = str(body.get("msg") or body.get("message") or "").lower()
-            _path = {path!r}
-            if resp.status_code == 200:
-                assert body.get("success") is True and _ec >= 0, (
-                    f"[FAIL] HTTP 200 but success!=true or error_code<0\\n  body: {{resp.text[:300]}}"
-                )
-            else:
-                _state_like_minus_one = (
-                    _ec == -1 and (
-                        (_path in ("/api/v2/verify-template", "/api/v2/verify") and "verification failed" in _msg)
-                        or (_path == "/api/v2/delete" and "failed to delete user" in _msg)
-                        or ("failed to get user template" in _msg)
-                        or ("template not found" in _msg)
-                        or ("user not found" in _msg)
-                    )
-                )
-                assert _ec in {sorted(STATE_NOT_MET_CODES)} or _state_like_minus_one, (
-                    f"[FAIL] HTTP 404 but not a state-not-met error\\n"
-                    f"  error_code: {{_ec}}\\n  body: {{resp.text[:300]}}"
-                )
-        """
-        )
+        """http_status/hybrid 모드: 200(성공) 또는 404(상태 미충족) 허용."""
+        state_codes = sorted(STATE_NOT_MET_CODES)
+
+        lines = [
+            "assert resp.status_code in [200, 404], (",
+            "    f\"[FAIL] expected HTTP 200(success) or 404(state not met), got {resp.status_code}\\n\"",
+            "    f\"  Body: {resp.text[:500]}\"",
+            ")",
+            "try:",
+            "    body = resp.json()",
+            "except ValueError:",
+            "    pytest.fail(f\"Expected JSON response, got: {resp.text[:300]}\")",
+            "_ec = body.get(\"error_code\", 0)",
+            "_msg = str(body.get(\"msg\") or body.get(\"message\") or \"\").lower()",
+            f"_path = {path!r}",
+            "if resp.status_code == 200:",
+            "    assert body.get(\"success\") is True and _ec >= 0, (",
+            "        f\"[FAIL] HTTP 200 but success!=true or error_code<0\\n  body: {resp.text[:300]}\"",
+            "    )",
+            "else:",
+            "    _state_like_minus_one = (",
+            "        _ec == -1 and (",
+            "            (_path in (\"/api/v2/verify-template\", \"/api/v2/verify\") and \"verification failed\" in _msg)",
+            "            or (_path == \"/api/v2/delete\" and \"failed to delete user\" in _msg)",
+            "            or (\"failed to get user template\" in _msg)",
+            "            or (\"template not found\" in _msg)",
+            "            or (\"user not found\" in _msg)",
+            "        )",
+            "    )",
+            f"    assert _ec in {state_codes} or _state_like_minus_one, (",
+            "        f\"[FAIL] HTTP 404 but not a state-not-met error\\n\"",
+            "        f\"  error_code: {_ec}\\n  body: {resp.text[:300]}\"",
+            "    )",
+        ]
+
+        return "\n".join(lines) + "\n"
 
     def _http_probe_assertion(self, label: str = "probe") -> str:
-        """http_status 모드 probe_only: 200/400/404/422 허용, 500 불허."""
-        return textwrap.dedent(
-            f"""\
-            assert resp.status_code < 500, (
-                f"[FAIL] {label} — server crash (HTTP {{resp.status_code}})\\n"
-                f"  Body: {{resp.text[:300]}}"
-            )
-            assert resp.status_code != 0, (
-                f"[FAIL] {label} — no response (status=0)"
-            )
-        """
-        )
+        """http_status/hybrid 모드 probe_only: 200/400/404/422 허용, 500 불허."""
+        lines = [
+            "assert resp.status_code < 500, (",
+            f"    f\"[FAIL] {label} — server crash (HTTP {{resp.status_code}})\\n\"",
+            "    f\"  Body: {resp.text[:300]}\"",
+            ")",
+            "assert resp.status_code != 0, (",
+            f"    f\"[FAIL] {label} — no response (status=0)\"",
+            ")",
+        ]
+        return "\n".join(lines) + "\n"
 
     def _build_policy_assertion(
         self,
