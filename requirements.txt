@@ -9,7 +9,7 @@ google-generativeai>=0.8.0
 # Anthropic (Claude)
 anthropic>=0.40.0
 
-
+Pillow
 
 # Test framework
 pytest>=7.0
