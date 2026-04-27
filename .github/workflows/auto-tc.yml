@@ -42,7 +42,7 @@ on:
 
 defaults:
   run:
-    shell: pwsh
+    shell: powershell
 
 jobs:
   detect-changes:
@@ -89,7 +89,7 @@ jobs:
 
       - name: API 서버 실행·버전 조회 (job1 detect)
         id: server_version
-        shell: pwsh
+        shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -413,7 +413,7 @@ jobs:
 
       - name: API 서버 실행 (job2 test)
         id: start_server_test
-        shell: pwsh
+        shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -906,7 +906,7 @@ jobs:
 
       - name: API 서버 종료 (job2 test)
         if: always()
-        shell: pwsh
+        shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
