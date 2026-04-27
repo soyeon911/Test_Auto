@@ -349,10 +349,11 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.should_run == 'true'
     runs-on: [self-hosted, windows]
-    ERROR_RESPONSE_MODE: ${{ inputs.error_response_mode != '' && inputs.error_response_mode || 'http_status' }}
-    AUTOTC_CONFIG: config\config.yaml
 
     env:
+      ERROR_RESPONSE_MODE: ${{ inputs.error_response_mode != '' && inputs.error_response_mode || 'http_status' }}
+      AUTOTC_CONFIG: config\config.yaml
+
       BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
       SERVER_EXE_NAME: qfe-server.exe
@@ -364,7 +365,6 @@ jobs:
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
       SERVER_LOG_DIR: server_logs
-      # 서버 stderr 로그 파일 경로 (conftest crash guard / build_diag 가 읽음)
       SWAGGER_SOURCE: ${{ needs.detect-changes.outputs.swagger_source }}
       SERVER_LOG_FILE: server_logs/server_stderr.log
       LLM_PROVIDER: ollama
