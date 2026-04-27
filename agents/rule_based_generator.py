@@ -205,6 +205,7 @@ _CH3_BOUNDARY_IMG  = base64.b64encode(bytes(_CH3_BOUNDARY_W * _CH3_BOUNDARY_H * 
 # channel=3으로 고정된 엔드포인트 (RGB only)
 _FIXED_CHANNEL_3_PATHS: frozenset[str] = frozenset({
     "/api/v2/all-in-one",
+    "/api/v2/multi-detect",
 })
 
 # DB state 없이 이미지 입력만으로 동작하는 순수 face 처리 엔드포인트
