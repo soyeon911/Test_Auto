@@ -434,6 +434,82 @@ def _exp_app_probe(axis: str, reason_code: str, target_field: str = "", path: st
     return "no crash; response classified by actual error_code/msg"
 
 
+
+def _expected_http_for(
+    axis: str,
+    reason_code: str,
+    target_field: str = "",
+    path: str = "",
+    policy: str = "",
+) -> int:
+    """axis/reason_code/policy 조합으로 기대 HTTP status code 계산 (http_status / hybrid 모드용)."""
+    if policy == "must_pass":
+        return 200
+
+    if axis == "schema" or reason_code in {
+        "missing_required", "type_mismatch", "wrong_type",
+        "invalid_parameter", "type_coercion_risk",
+    }:
+        return 400
+
+    if reason_code in {"range_violation", "range_error"}:
+        return 400
+
+    if axis == "state" or reason_code in {
+        "user_not_found", "template_not_found", "database_not_loaded",
+        "file_not_found", "precondition_not_met",
+    }:
+        return 404
+
+    if reason_code in {
+        "invalid_base64", "invalid_image_relation", "no_face_detected",
+        "template_size_mismatch", "unprocessable_payload",
+        "constraint_missing_in_generator",
+    }:
+        return 422
+
+    if axis == "system":
+        return 500
+
+    return 400
+
+
+def _expected_error_codes_for(
+    axis: str,
+    reason_code: str,
+    target_field: str = "",
+    path: str = "",
+) -> frozenset[int]:
+    """axis/reason_code/field 조합으로 기대 error_code 집합 계산 (http_status / hybrid 모드용)."""
+    field_lc = (target_field or "").lower()
+
+    if reason_code in {"missing_required", "type_mismatch", "wrong_type", "type_coercion_risk"}:
+        return frozenset({-90, -1})
+
+    if reason_code in {"range_violation", "range_error"}:
+        if field_lc == "threshold":
+            return frozenset({-33})
+        if field_lc == "user_id":
+            return frozenset({-34, -1})
+        if field_lc == "sub_id":
+            return frozenset({-35, -1})
+        return frozenset(DOMAIN_FAIL_CODES) | {-1}
+
+    if reason_code == "invalid_base64":
+        return frozenset({-1, -90, -200})
+
+    if reason_code in {"invalid_image_relation", "no_face_detected"}:
+        return frozenset({-1, -90, -200})
+
+    if reason_code == "precondition_not_met" or axis == "state":
+        return frozenset(STATE_NOT_MET_CODES) | {-1}
+
+    if axis == "system":
+        return frozenset(SYSTEM_ERROR_CODES)
+
+    return frozenset()
+
+
 def _safe_name(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]", "_", text).strip("_")
 
@@ -783,6 +859,149 @@ class RuleBasedTCGenerator:
         """
         )
 
+
+    # ── http_status / hybrid 모드 전용 assertion ─────────────────────────────
+
+    def _http_success_assertion(self, expected_status: int = 200) -> str:
+        return textwrap.dedent(
+            f"""\
+            assert resp.status_code == {expected_status}, (
+                f"[FAIL] expected HTTP {expected_status}, got {{resp.status_code}}\\n"
+                f"  Body: {{resp.text[:500]}}"
+            )
+            try:
+                body = resp.json()
+            except ValueError:
+                pytest.fail(f"Expected JSON response, got: {{resp.text[:300]}}")
+            assert body.get("success") is True, (
+                f"[FAIL] expected success=true\\n  body: {{resp.text[:500]}}"
+            )
+            assert body.get("error_code", 0) >= 0, (
+                f"[FAIL] expected non-negative error_code\\n  body: {{resp.text[:500]}}"
+            )
+        """
+        )
+
+    def _http_error_assertion(
+        self,
+        expected_status: int,
+        expected_error_codes: frozenset[int] | None,
+        field_name: str,
+        label: str,
+    ) -> str:
+        codes_list = sorted(expected_error_codes or [])
+        has_codes = bool(codes_list)
+        codes_check = (
+            f"assert _ec in {codes_list}, (\n"
+            f'    f"[FAIL] HTTP matched but error_code mismatch\\\\n"\n'
+            f'    f"  expected: {codes_list}\\\\n"\n'
+            f'    f"  actual  : {{{{_ec}}}}\\\\n"\n'
+            f'    f"  msg     : {{{{body.get(\'msg\') or body.get(\'error\')}}}}\\\\n"\n'
+            f'    f"  body    : {{{{resp.text[:300]}}}}" \n'
+            f")\n"
+        ) if has_codes else ""
+        return textwrap.dedent(
+            f"""\
+            assert resp.status_code == {expected_status}, (
+                f"[FAIL] {label} on '{field_name}' — expected HTTP {expected_status}, got {{resp.status_code}}\\n"
+                f"  field : {field_name}\\n"
+                f"  Body  : {{resp.text[:300]}}"
+            )
+            try:
+                body = resp.json()
+            except ValueError:
+                pytest.fail(f"Expected JSON error body, got: {{resp.text[:300]}}")
+            _ec = body.get("error_code")
+            assert body.get("success") is False or _ec is not None, (
+                f"[FAIL] expected structured error body\\n  body: {{resp.text[:300]}}"
+            )
+            {codes_check}"""
+        )
+
+    def _http_hybrid_error_assertion(
+        self,
+        expected_status: int,
+        expected_error_codes: frozenset[int] | None,
+        field_name: str,
+        label: str,
+    ) -> str:
+        """hybrid 모드: standard HTTP 또는 legacy 200+error_code 둘 다 허용.
+        단, 200으로 통과한 경우 PASS_WITH_LEGACY_HTTP 마킹."""
+        codes_list = sorted(expected_error_codes or [])
+        return textwrap.dedent(
+            f"""\
+            _legacy_pass = (resp.status_code == 200)
+            _standard_pass = (resp.status_code == {expected_status})
+            assert _legacy_pass or _standard_pass, (
+                f"[FAIL] {label} on '{field_name}' — expected HTTP {expected_status} (or legacy 200), got {{resp.status_code}}\\n"
+                f"  Body: {{resp.text[:300]}}"
+            )
+            try:
+                body = resp.json()
+            except ValueError:
+                pytest.fail(f"Expected JSON error body, got: {{resp.text[:300]}}")
+            _ec = body.get("error_code")
+            assert body.get("success") is False or _ec is not None, (
+                f"[FAIL] expected structured error body\\n  body: {{resp.text[:300]}}"
+            )
+            if _legacy_pass and not _standard_pass:
+                # migration note: 서버가 아직 legacy 200 반환 중
+                request.node.user_properties.append(("migration_flag", "PASS_WITH_LEGACY_HTTP"))
+            if {bool(codes_list)} and _ec not in {codes_list}:
+                request.node.user_properties.append(("migration_flag", "ERROR_CODE_MISMATCH"))
+        """
+        )
+
+    def _http_state_tolerant_assertion(self, path: str) -> str:
+        """http_status 모드: 200(성공) 또는 404(상태 미충족) 허용."""
+        return textwrap.dedent(
+            f"""\
+            assert resp.status_code in [200, 404], (
+                f"[FAIL] expected HTTP 200(success) or 404(state not met), got {{resp.status_code}}\\n"
+                f"  Body: {{resp.text[:500]}}"
+            )
+            try:
+                body = resp.json()
+            except ValueError:
+                pytest.fail(f"Expected JSON response, got: {{resp.text[:300]}}")
+            _ec = body.get("error_code", 0)
+            _msg = str(body.get("msg") or body.get("message") or "").lower()
+            _path = {path!r}
+            if resp.status_code == 200:
+                assert body.get("success") is True and _ec >= 0, (
+                    f"[FAIL] HTTP 200 but success!=true or error_code<0\\n  body: {{resp.text[:300]}}"
+                )
+            else:
+                _state_like_minus_one = (
+                    _ec == -1 and (
+                        (_path in ("/api/v2/verify-template", "/api/v2/verify") and "verification failed" in _msg)
+                        or (_path == "/api/v2/delete" and "failed to delete user" in _msg)
+                        or ("failed to get user template" in _msg)
+                        or ("template not found" in _msg)
+                        or ("user not found" in _msg)
+                    )
+                )
+                assert _ec in {sorted(STATE_NOT_MET_CODES)} or _state_like_minus_one, (
+                    f"[FAIL] HTTP 404 but not a state-not-met error\\n"
+                    f"  error_code: {{_ec}}\\n  body: {{resp.text[:300]}}"
+                )
+        """
+        )
+
+    def _http_probe_assertion(self, label: str = "probe") -> str:
+        """http_status 모드 probe_only: 200/400/404/422 허용, 500 불허."""
+        return textwrap.dedent(
+            f"""\
+            assert resp.status_code < 500, (
+                f"[FAIL] {label} — server crash (HTTP {{resp.status_code}})\\n"
+                f"  Body: {{resp.text[:300]}}"
+            )
+            assert resp.status_code != 0, (
+                f"[FAIL] {label} — no response (status=0)"
+            )
+        """
+        )
+
     def _build_policy_assertion(
         self,
         policy: str,
@@ -791,19 +1010,50 @@ class RuleBasedTCGenerator:
         success_statuses: list[int] | None = None,
         allow_state_not_met: bool = False,
         path: str = "",
+        axis: str = "",
+        reason_code: str = "",
     ) -> str:
+        """
+        error_mode 별 assertion 생성:
+          qfe        — 현재 방식 (HTTP 200 고정, body error_code 중심)
+          http_status — HTTP status 1차 판정, error_code 2차 원인 세분화
+          hybrid     — 이행기: standard/legacy 200 둘 다 허용, migration flag 마킹
+        """
+        mode = self.error_mode
+
+        # ── must_fail ─────────────────────────────────────────────────────────
         if policy == "must_fail":
-            if self.error_mode == "qfe":
+            if mode == "http_status":
+                exp_status = _expected_http_for(axis, reason_code, field_name, path, policy)
+                exp_codes  = _expected_error_codes_for(axis, reason_code, field_name, path)
+                return self._http_error_assertion(exp_status, exp_codes, field_name, label)
+            if mode == "hybrid":
+                exp_status = _expected_http_for(axis, reason_code, field_name, path, policy)
+                exp_codes  = _expected_error_codes_for(axis, reason_code, field_name, path)
+                return self._http_hybrid_error_assertion(exp_status, exp_codes, field_name, label)
+            if mode == "qfe":
                 return self._qfe_error_assertion(field_name, label)
             return self._standard_error_assertion(field_name, label)
 
+        # ── must_pass ─────────────────────────────────────────────────────────
         if policy == "must_pass":
-            if self.error_mode == "qfe":
+            if mode == "http_status":
+                if allow_state_not_met:
+                    return self._http_state_tolerant_assertion(path)
+                return self._http_success_assertion(200)
+            if mode == "hybrid":
+                if allow_state_not_met:
+                    return self._http_state_tolerant_assertion(path)
+                return self._http_success_assertion(200)
+            if mode == "qfe":
                 if allow_state_not_met:
                     return self._qfe_state_tolerant_assertion(path)
                 return self._qfe_success_assertion()
             return self._standard_success_assertion(success_statuses or [200])
 
+        # ── probe_only ────────────────────────────────────────────────────────
+        if mode == "http_status":
+            return self._http_probe_assertion(label)
         return self._no_crash_assertion(label)
 
     def _api_test_block(
@@ -832,6 +1082,18 @@ class RuleBasedTCGenerator:
         policy: str = "",
         expected_result_type: str = "",
     ) -> str:
+        # http_status / hybrid 모드에서는 expected_http를 axis/reason_code/policy로 재계산
+        mode = self.error_mode
+        if mode in ("http_status", "hybrid"):
+            _real_http = str(_expected_http_for(axis, reason_code, target_field, request_path, policy))
+            _exp_codes = sorted(_expected_error_codes_for(axis, reason_code, target_field, request_path))
+        else:
+            _real_http = expected_http
+            _exp_codes = []
+
+        _eff_expected_http   = _real_http if mode in ("http_status", "hybrid") else expected_http
+        _eff_expected_status = f"{_eff_expected_http} / {expected_app}"
+
         indented_assert = textwrap.indent(assertion_str.rstrip("\n"), "        ")
         meta_block = (
             f"    request_query = {request_query!r}\n"
@@ -856,6 +1118,9 @@ class RuleBasedTCGenerator:
             f"        \"request_headers\": request_headers,\n"
             f"        \"request_body\": request_body,\n"
             f"        \"expected_status_display\": {expected_status_display!r},\n"
+            f"        \"expected_http\": {_eff_expected_http!r},\n"
+            f"        \"expected_error_codes\": {_exp_codes!r},\n"
+            f"        \"expected_error_family\": {axis!r},\n"
             f"    }}))\n"
         )
 
@@ -875,7 +1140,7 @@ class RuleBasedTCGenerator:
             f"            reason_code={reason_code!r},\n"
             f"            target_field={target_field!r},\n"
             f"            test_condition={test_condition!r},\n"
-            f"            expected_http={expected_http!r},\n"
+            f"            expected_http={_eff_expected_http!r},\n"
             f"            expected_app={expected_app!r},\n"
             f"            resp=resp,\n"
             f"            body=body,\n"
@@ -889,7 +1154,7 @@ class RuleBasedTCGenerator:
             f"            reason_code='connection_refused',\n"
             f"            target_field={target_field!r},\n"
             f"            test_condition={test_condition!r},\n"
-            f"            expected_http={expected_http!r},\n"
+            f"            expected_http={_eff_expected_http!r},\n"
             f"            expected_app='server unreachable',\n"
             f"            exc=_exc,\n"
             f"            server_crash=True,\n"
@@ -1583,7 +1848,7 @@ class RuleBasedTCGenerator:
             "image_data": _RAW_IMG_VALID_B64,
         }
         call = _render_call(method, path, path_params, query_params, valid_body)
-        assertion = self._build_policy_assertion("must_pass", "image_data", "raw_image_valid", success_statuses)
+        assertion = self._build_policy_assertion("must_pass", "image_data", "raw_image_valid", success_statuses, axis="domain", reason_code="must_pass")
 
         blocks: list[str] = []
 
@@ -1741,7 +2006,7 @@ class RuleBasedTCGenerator:
                     fname=f"test_{op_id}_missing_{_safe_name(target_param['name'])}",
                     docstring=f"[rule:missing_required] Omit required query param '{target_param['name']}'.",
                     call_str=call,
-                    assertion_str=self._build_policy_assertion("must_fail", target_param["name"], "missing_required"),
+                    assertion_str=self._build_policy_assertion("must_fail", target_param["name"], "missing_required", axis="schema", reason_code="missing_required"),
                     axis="schema",
                     reason_code="missing_required",
                     target_field=target_param["name"],
@@ -1787,7 +2052,7 @@ class RuleBasedTCGenerator:
                         fname=f"test_{op_id}_missing_body_{_safe_name(field)}",
                         docstring=f"[rule:missing_required] Omit required body field '{field}'.",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion("must_fail", field, "missing_required"),
+                        assertion_str=self._build_policy_assertion("must_fail", field, "missing_required", axis="schema", reason_code="missing_required"),
                         axis="schema",
                         reason_code="missing_required",
                         target_field=field,
@@ -1862,7 +2127,7 @@ class RuleBasedTCGenerator:
                         fname=f"test_{op_id}_wrong_type_{_safe_name(p['name'])}_{label}",
                         docstring=f"[rule:wrong_type] Pass {label} wrong type for '{p['name']}' (expected {p.get('schema', {}).get('type', 'string')}).",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion(policy, p["name"], f"wrong_type:{label}"),
+                        assertion_str=self._build_policy_assertion(policy, p["name"], f"wrong_type:{label}", axis="schema", reason_code=reason_code),
                         axis="schema",
                         reason_code=reason_code,
                         target_field=p["name"],
@@ -1910,7 +2175,7 @@ class RuleBasedTCGenerator:
                             fname=f"test_{op_id}_wrong_type_body_{_safe_name(field)}_{label}",
                             docstring=f"[rule:wrong_type] Pass {label} wrong type for body field '{field}' (expected {field_schema.get('type', 'string')}).",
                             call_str=call,
-                            assertion_str=self._build_policy_assertion(policy, field, f"wrong_type:{label}"),
+                            assertion_str=self._build_policy_assertion(policy, field, f"wrong_type:{label}", axis="schema", reason_code=reason_code),
                             axis="schema",
                             reason_code=reason_code,
                             target_field=field,
@@ -2016,6 +2281,8 @@ class RuleBasedTCGenerator:
                             success_statuses,
                             allow_state_not_met=allow_state_not_met,
                             path=path,
+                            axis=axis_value,
+                            reason_code=reason_value,
                         ),
                         axis=axis_value,
                         reason_code=reason_value,
@@ -2084,6 +2351,8 @@ class RuleBasedTCGenerator:
                             success_statuses,
                             allow_state_not_met=allow_state_not_met,
                             path=path,
+                            axis=axis_value,
+                            reason_code=reason_value,
                         ),
                         axis=axis_value,
                         reason_code=reason_value,
@@ -2168,7 +2437,7 @@ class RuleBasedTCGenerator:
                         fname=f"test_{op_id}_input_val_{_safe_name(p['name'])}_{probe_label}",
                         docstring=f"[rule:input_validation] param '{p['name']}' tag={tag} probe={probe_label} policy={policy}.",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion(policy, p["name"], f"semantic:{probe_label}"),
+                        assertion_str=self._build_policy_assertion(policy, p["name"], f"semantic:{probe_label}", axis=_s_axis, reason_code=_s_rc),
                         axis=_s_axis,
                         reason_code=_s_rc,
                         target_field=p["name"],
@@ -2221,7 +2490,7 @@ class RuleBasedTCGenerator:
                         fname=f"test_{op_id}_input_val_{_safe_name(field)}_{probe_label}",
                         docstring=f"[rule:input_validation] body field '{field}' tag={tag} probe={probe_label} policy={policy}.",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion(policy, field, f"semantic:{probe_label}"),
+                        assertion_str=self._build_policy_assertion(policy, field, f"semantic:{probe_label}", axis=_s_axis, reason_code=_s_rc),
                         axis=_s_axis,
                         reason_code=_s_rc,
                         target_field=field,
@@ -2430,7 +2699,7 @@ class RuleBasedTCGenerator:
                         "but image_data=10B -> size mismatch (must_fail)."
                     ),
                     call_str=_render_call(method, path, path_params, query_params, mismatch_body),
-                    assertion_str=self._build_policy_assertion("must_fail", "image_data", "raw_image_mismatch"),
+                    assertion_str=self._build_policy_assertion("must_fail", "image_data", "raw_image_mismatch", axis="domain", reason_code="invalid_image_relation"),
                     axis="domain",
                     reason_code="invalid_image_relation",
                     target_field="image_data",
@@ -2468,7 +2737,7 @@ class RuleBasedTCGenerator:
                     fname=f"test_{op_id}_raw_image_relation_invalid_channel",
                     docstring="[rule:raw_image_relation] channel=0 with raw image payload.",
                     call_str=_render_call(method, path, path_params, query_params, invalid_channel_body),
-                    assertion_str=self._build_policy_assertion("probe_only", "channel", "raw_image_invalid_channel"),
+                    assertion_str=self._build_policy_assertion("probe_only", "channel", "raw_image_invalid_channel", axis="domain", reason_code="invalid_image_relation"),
                     axis="domain",
                     reason_code="invalid_image_relation",
                     target_field="channel",
@@ -2513,7 +2782,7 @@ class RuleBasedTCGenerator:
                                 f"channel={wrong_ch} ({label}) — RGB-only endpoint must reject non-3 channel."
                             ),
                             call_str=_render_call(method, path, path_params, query_params, wrong_ch_body),
-                            assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}"),
+                            assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}", axis="domain", reason_code="invalid_image_relation"),
                             axis="domain",
                             reason_code="invalid_image_relation",
                             target_field="channel",
@@ -2552,7 +2821,7 @@ class RuleBasedTCGenerator:
                             f"channel=3, {_CH3_W}x{_CH3_H} color image — valid RGB payload, no crash expected."
                         ),
                         call_str=_render_call(method, path, path_params, query_params, valid_ch3_body),
-                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid"),
+                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid", axis="domain", reason_code="invalid_image_relation"),
                         axis="domain",
                         reason_code="invalid_image_relation",
                         target_field="channel",
@@ -2601,7 +2870,7 @@ class RuleBasedTCGenerator:
                                 f"width={w}, height={h}, channel=3 — {wh_label} ({policy})."
                             ),
                             call_str=_render_call(method, path, path_params, query_params, wh_body),
-                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}"),
+                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}", axis="domain", reason_code="invalid_image_relation"),
                             axis="domain",
                             reason_code="invalid_image_relation",
                             target_field="width_height",

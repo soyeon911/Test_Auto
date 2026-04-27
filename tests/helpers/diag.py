@@ -1,29 +1,13 @@
 """
-tests/helpers/diag.py — 구조화된 진단 데이터 생성/기록 헬퍼
+tests/helpers/diag.py - structured diagnostic data builder
 
-사용법:
-    from tests.helpers.diag import build_diag, attach_diag
+axis values:
+    schema   - type/required/format violations
+    domain   - range/enum/base64/image relation violations
+    state    - registered user/template/DB state dependency
+    runtime  - server crash/connection refused/timeout
 
-    diag = build_diag(
-        axis="schema",
-        reason_code="type_mismatch",
-        target_field="user_id",
-        test_condition="Body field 'user_id' sent with wrong type",
-        expected_http="200",
-        expected_app="success=false, error_code<0",
-        resp=resp,
-        body=body,
-        error_detail="schema.type_mismatch.user_id",
-    )
-    attach_diag(request, diag)
-
-axis 값:
-    schema   — 타입·필수값·포맷 위반
-    domain   — 범위·enum·base64·이미지 관계 위반
-    state    — 등록 사용자·템플릿·DB 상태 의존
-    runtime  — 서버 크래시·연결 거부·타임아웃
-
-reason_code 값 (axis별):
+reason_code values by axis:
     schema  : missing_required | type_mismatch | invalid_json_shape
               path_param_invalid | query_param_invalid | response_format_invalid
     domain  : range_violation | enum_violation | invalid_base64
@@ -43,13 +27,9 @@ from pathlib import Path
 from typing import Any
 
 
-# ─── 서버 로그 tail 헬퍼 ────────────────────────────────────────────────────────
+# --- server log tail helper --------------------------------------------------
 
 def _read_server_log_tail(n_lines: int = 60) -> str:
-    """
-    SERVER_LOG_FILE 환경변수가 설정된 경우 서버 로그 마지막 N줄을 반환한다.
-    설정 안 됐거나 파일이 없으면 빈 문자열 반환.
-    """
     log_path = os.environ.get("SERVER_LOG_FILE", "")
     if not log_path:
         return ""
@@ -60,25 +40,15 @@ def _read_server_log_tail(n_lines: int = 60) -> str:
         return ""
 
 
-# ─── 진단 레코드 생성 ──────────────────────────────────────────────────────────
+# --- request info extractor --------------------------------------------------
 
 def _extract_request_info(resp) -> tuple[Any, dict, dict]:
-    """
-    resp.request (PreparedRequest) 에서 실제로 전송된 request 데이터를 추출한다.
-
-    반환:
-        (request_body, request_query, request_headers)
-        - request_body : dict (JSON 파싱 성공 시) 또는 str / None
-        - request_query: {param: value} — URL 쿼리스트링 파싱 결과
-        - request_headers: 주요 헤더만 (Content-Type 등)
-    """
     import urllib.parse as _up
 
     req = getattr(resp, "request", None)
     if req is None:
         return None, {}, {}
 
-    # ── request body ──────────────────────────────────────────────
     req_body: Any = None
     try:
         raw_body = getattr(req, "body", None)
@@ -88,11 +58,10 @@ def _extract_request_info(resp) -> tuple[Any, dict, dict]:
             try:
                 req_body = json.loads(raw_body)
             except Exception:
-                req_body = raw_body  # JSON 파싱 실패 시 문자열 그대로
+                req_body = raw_body
     except Exception:
         pass
 
-    # ── query params ──────────────────────────────────────────────
     req_query: dict = {}
     try:
         url = getattr(req, "url", "") or ""
@@ -101,7 +70,6 @@ def _extract_request_info(resp) -> tuple[Any, dict, dict]:
     except Exception:
         pass
 
-    # ── headers (Content-Type 등 주요 항목만) ─────────────────────
     req_headers: dict = {}
     try:
         raw_headers = dict(getattr(req, "headers", {}) or {})
@@ -118,22 +86,24 @@ def build_diag(
     reason_code: str,
     target_field: str = "",
     test_condition: str = "",
-    expected_http: str | None = None,
-    expected_app: str | None = None,
+    expected_http: "str | int | None" = None,
+    expected_app: "str | None" = None,
     resp=None,
-    body: dict | None = None,
-    exc: Exception | None = None,
+    body: "dict | None" = None,
+    exc: "Exception | None" = None,
     server_crash: bool = False,
-    server_log_tail: str | None = None,
-    error_detail: str | None = None,
-) -> dict[str, Any]:
-    """구조화된 diag 딕셔너리를 생성한다."""
+    server_log_tail: "str | None" = None,
+    error_detail: "str | None" = None,
+    # http_status mode extra fields
+    expected_error_codes: "list[int] | None" = None,
+    expected_error_family: str = "",
+) -> "dict[str, Any]":
+    """Build a structured diag dictionary."""
 
     if body is None:
         body = {}
 
-    # ── response 스니펫 (500자 이내) ──────────────────────────────
-    snippet: str | None = None
+    snippet: "str | None" = None
     if body:
         try:
             snippet = json.dumps(body, ensure_ascii=False)[:500]
@@ -145,11 +115,8 @@ def build_diag(
         except Exception:
             pass
 
-    # ── request 데이터 추출 (resp.request / PreparedRequest) ──────
     req_body, req_query, req_headers = _extract_request_info(resp)
 
-    # ── server crash 시 log tail 자동 수집 ────────────────────────
-    # exc가 있거나 server_crash=True인데 server_log_tail이 전달 안 됐을 때
     if server_log_tail is None and (exc is not None or server_crash):
         server_log_tail = _read_server_log_tail()
 
@@ -163,12 +130,10 @@ def build_diag(
         "expected_app":       expected_app,
         "actual_status":      getattr(resp, "status_code", None),
 
-        # ── request ───────────────────────────────────────────────
         "request_body":       req_body,
         "request_query":      req_query,
         "request_headers":    req_headers,
 
-        # ── response ──────────────────────────────────────────────
         "response_snippet":   snippet,
         "response_success":   body.get("success")    if isinstance(body, dict) else None,
         "response_error_code":body.get("error_code") if isinstance(body, dict) else None,
@@ -203,7 +168,12 @@ def build_diag(
             if isinstance(body, dict) and isinstance(body.get("data"), dict)
             else None
         ),
+
+        # http_status mode extra fields
+        "expected_error_codes":   expected_error_codes,
+        "expected_error_family":  expected_error_family,
     }
+
 
 def build_probe_diag(
     probe_endpoint: str,
@@ -245,11 +215,10 @@ def build_probe_diag(
 
 
 def attach_diag(request, diag: dict) -> None:
-    """pytest request fixture의 user_properties에 diag를 첨부한다."""
     request.node.user_properties.append(("diag", diag))
 
-def attach_probe_diag(request, diag: dict[str, Any]) -> None:
-    """pytest request fixture의 user_properties에 probe_diag를 첨부한다."""
+
+def attach_probe_diag(request, diag: "dict[str, Any]") -> None:
     request.node.user_properties.append(("probe_diag", diag))
 
 
@@ -261,7 +230,6 @@ def attach_probe_meta(
     probe_input: Any,
     severity: str,
 ) -> None:
-    """pytest request fixture의 user_properties에 probe_meta를 첨부한다."""
     request.node.user_properties.append((
         "probe_meta",
         {
@@ -274,71 +242,160 @@ def attach_probe_meta(
         },
     ))
 
-# ─── 실패 원인 분류 ────────────────────────────────────────────────────────────
+
+# --- legacy QFE failure cause classifier -------------------------------------
 
 def classify_failure_cause(
     outcome: str,
     axis: str,
     reason_code: str,
-    response_success,       # bool | None
-    response_error_code,    # int | None
+    response_success,
+    response_error_code,
     server_crash: bool = False,
 ) -> str:
-    """
-    테스트 결과(outcome)와 diag 정보를 조합하여 실패 원인을 분류한다.
-
-    반환값 카테고리:
-        PASS                    — 테스트 통과
-        서버 Crash (5xx)        — 서버가 5xx로 응답하거나 crash
-        서버 미응답              — 연결 거부 / 타임아웃
-        상태 미충족 (DB 없음)   — state 축 + API가 "데이터 없음" 오류 반환
-        엔드포인트 버그          — schema/domain 축에서 validation이 수행되지 않음
-                                  (잘못된 입력에도 success=true 반환)
-        예상치 못한 실패         — 정상 입력인데 API가 오류 반환 (positive 실패 등)
-        TC 실패 (단언 오류)      — 위 분류에 해당하지 않는 assertion 실패
-        알 수 없음               — outcome이 passed가 아닌데 분류 불가
-    """
     outcome = (outcome or "").lower()
 
     if outcome == "passed":
         return "PASS"
 
-    # 서버 crash / 연결 거부
     if server_crash:
-        return "서버 Crash (5xx)"
+        return "SERVER_CRASH_5XX"
     if reason_code == "connection_refused":
-        return "서버 미응답"
+        return "SERVER_NO_RESPONSE"
     if reason_code in {"timeout", "http_5xx"}:
-        return "서버 Crash (5xx)"
+        return "SERVER_CRASH_5XX"
 
-    # state 축 — positive TC 실패의 원인 구분
     if axis == "state":
-        # API가 success=false 로 응답 → DB/상태 사전 조건 미충족 (서버 자체 버그 X)
         if response_success is False:
-            return "상태 미충족 (DB 없음)"
-        # API가 success=true 인데 TC assertion 실패 → TC 로직 오류 가능성
+            return "STATE_PRECONDITION_NOT_MET"
         if response_success is True:
-            return "TC 실패 (단언 오류)"
+            return "TC_ASSERTION_ERROR"
 
-    # schema 축 — 잘못된 입력을 서버가 묵인
     if axis == "schema":
         if response_success is True:
-            return "엔드포인트 버그 (Validation 미수행)"
+            return "ENDPOINT_BUG_VALIDATION_NOT_PERFORMED"
         if response_success is False:
-            # expected pass인데 fail → positive TC가 상태 문제로 실패했을 수도
-            return "예상치 못한 실패"
+            return "UNEXPECTED_FAILURE"
 
-    # domain 축 — enum/range/semantic 검증 미수행
     if axis == "domain":
         if response_success is True:
-            return "엔드포인트 버그 (도메인 검증 미수행)"
+            return "ENDPOINT_BUG_DOMAIN_VALIDATION_SKIPPED"
         if response_success is False:
-            return "예상치 못한 실패"
+            return "UNEXPECTED_FAILURE"
 
-    # runtime 축
     if axis == "runtime":
-        return "서버 Crash (5xx)"
+        return "SERVER_CRASH_5XX"
 
-    return "알 수 없음"
+    return "UNKNOWN"
 
 
+# --- HTTP status primary axis - 3-level failure classification ----------------
+
+def classify_result(
+    outcome: str,
+    expected_http: "str | int | None",
+    expected_error_codes: "list[int] | frozenset[int] | None",
+    actual_status: "int | None",
+    actual_error_code: "int | None",
+    axis: str = "",
+    reason_code: str = "",
+    server_crash: bool = False,
+    migration_flag: str = "",
+) -> "dict[str, str]":
+    """
+    HTTP status primary axis 3-level failure classification.
+
+    Levels:
+        Level 0  PASS / PASS_WITH_LEGACY_HTTP
+        Level 1  HTTP_STATUS_MISMATCH   - actual HTTP != expected HTTP
+        Level 2  ERROR_CODE_MISMATCH    - HTTP matches but error_code set mismatch
+        Level 3  BODY_SCHEMA_MISMATCH   - HTTP+error_code match but body structure wrong
+        Extra    SERVER_CRASH           - 5xx / server_crash=True
+                 CONNECTION_REFUSED     - connection refused / timeout
+                 UNKNOWN                - unclassifiable
+
+    Returns dict with keys: level, cause, migration_flag
+    """
+    outcome = (outcome or "").lower()
+    _mf = migration_flag or ""
+
+    # server crash / connection refused
+    if server_crash or reason_code in {"http_5xx", "unexpected_exception"}:
+        return {
+            "level":          "SERVER_CRASH",
+            "cause":          "Server Crash (5xx) or unexpected server exception",
+            "migration_flag": _mf,
+        }
+    if reason_code == "connection_refused":
+        return {
+            "level":          "CONNECTION_REFUSED",
+            "cause":          "Server not responding - connection refused / timeout",
+            "migration_flag": _mf,
+        }
+
+    # PASS (including hybrid migration PASS)
+    if outcome == "passed":
+        return {
+            "level":          "PASS",
+            "cause":          "Test passed",
+            "migration_flag": _mf,
+        }
+
+    # Level 1: HTTP STATUS MISMATCH
+    try:
+        exp_status_int = int(str(expected_http).strip()) if expected_http is not None else None
+    except (ValueError, TypeError):
+        exp_status_int = None
+
+    if exp_status_int is not None and actual_status is not None:
+        if actual_status != exp_status_int:
+            # hybrid migration: expected 4xx/422 but legacy 200 + correct error_code?
+            _is_legacy_pass = (
+                actual_status == 200
+                and exp_status_int in {400, 404, 422}
+                and actual_error_code is not None
+                and expected_error_codes
+                and actual_error_code in frozenset(expected_error_codes)
+            )
+            if _is_legacy_pass:
+                return {
+                    "level":          "PASS",
+                    "cause":          f"Legacy HTTP 200 but error_code({actual_error_code}) matches - migration tolerated",
+                    "migration_flag": "PASS_WITH_LEGACY_HTTP",
+                }
+            return {
+                "level":          "HTTP_STATUS_MISMATCH",
+                "cause":          (
+                    f"HTTP status mismatch - expected {exp_status_int}, actual {actual_status}"
+                    + (f" (axis={axis}, reason={reason_code})" if axis else "")
+                ),
+                "migration_flag": _mf,
+            }
+
+    # Level 2: ERROR_CODE MISMATCH
+    if expected_error_codes and actual_error_code is not None:
+        _ec_set = frozenset(expected_error_codes)
+        if actual_error_code not in _ec_set:
+            return {
+                "level":          "ERROR_CODE_MISMATCH",
+                "cause":          (
+                    f"error_code mismatch - expected {sorted(_ec_set)}, actual {actual_error_code}"
+                    + (f" (axis={axis}, reason={reason_code})" if axis else "")
+                ),
+                "migration_flag": _mf,
+            }
+
+    # Level 3: BODY SCHEMA MISMATCH
+    # HTTP and error_code match but assertion failed -> body structure issue
+    if outcome != "passed":
+        return {
+            "level":          "BODY_SCHEMA_MISMATCH",
+            "cause":          "HTTP/error_code match but body structure or data field assertion failed",
+            "migration_flag": _mf,
+        }
+
+    return {
+        "level":          "UNKNOWN",
+        "cause":          "Unclassifiable - insufficient outcome / status info",
+        "migration_flag": _mf,
+    }

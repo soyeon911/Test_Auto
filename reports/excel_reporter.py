@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook
+try:
+    from tests.helpers.diag import classify_result as _classify_result
+except ImportError:
+    _classify_result = None
+
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -46,6 +51,16 @@ _FC_COLORS.update({
     "PASS (상태 미충족)": "EAF7EA",
     "도메인 조건 실패 (No Face/Detect Fail)": "FFE5E5",
     "입력 파라미터 오류 (Invalid Parameter)": "FCE5CD",
+})
+# http_status mode failure level colors
+_FC_COLORS.update({
+    "HTTP_STATUS_MISMATCH":  "F4CCCC",
+    "ERROR_CODE_MISMATCH":   "FCE5CD",
+    "BODY_SCHEMA_MISMATCH":  "FFF2CC",
+    "SERVER_CRASH":          "F4CCCC",
+    "CONNECTION_REFUSED":    "F4CCCC",
+    "PASS_WITH_LEGACY_HTTP": "FFF2CC",
+    "UNKNOWN":               "EFEFEF",
 })
 
 def _map_qfe_error_code(error_code: Any, msg: str, path: str = "") -> str | None:
@@ -430,7 +445,7 @@ class ExcelReportBuilder:
             ws.freeze_panes = "A3"
 
     def _build_tc_table(self, ws, tests: list[dict[str, Any]], base_url: str) -> None:
-        self._title_banner(ws, "A1:AG1", "TC (Test Case) Table")
+        self._title_banner(ws, "A1:AL1", "TC (Test Case) Table")
         ws.row_dimensions[1].height = 24
 
         headers = [
@@ -467,6 +482,12 @@ class ExcelReportBuilder:
             "Duration (s)",
             "Error Detail",
             "Failure Detail (pytest)",
+            # http_status mode columns
+            "HTTP Match",
+            "Expected HTTP",
+            "Expected Error Codes",
+            "Error Code Match",
+            "Failure Level",
         ]
         self._header_row(ws, 2, headers)
 
@@ -478,6 +499,7 @@ class ExcelReportBuilder:
             28, 44, 38, 16, 16, 16,
             18, 42, 12, 42,
             12, 30, 12, 42, 55,
+            12, 10, 28, 14, 24,
         ]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
@@ -530,6 +552,48 @@ class ExcelReportBuilder:
             response_msg = item.get("response_msg", "") or ""
             failure_cause = classify_failure_cause_from_item(item)
 
+            # -- classify_result for http_status columns ------------------
+            _exp_http = item.get("expected_http")
+            _exp_ec   = item.get("expected_error_codes") or []
+            _act_http = item.get("actual_status")
+            _act_ec   = item.get("response_error_code")
+            try:
+                _act_http_int = int(str(_act_http)) if _act_http not in (None, "") else None
+            except (ValueError, TypeError):
+                _act_http_int = None
+            try:
+                _exp_http_int = int(str(_exp_http)) if _exp_http not in (None, "") else None
+            except (ValueError, TypeError):
+                _exp_http_int = None
+            _http_match = (
+                "YES" if _exp_http_int is not None and _act_http_int is not None and _exp_http_int == _act_http_int
+                else "NO" if _exp_http_int is not None and _act_http_int is not None
+                else "N/A"
+            )
+            _ec_match = (
+                "YES" if _exp_ec and _act_ec is not None and _act_ec in _exp_ec
+                else "NO" if _exp_ec and _act_ec is not None
+                else "N/A"
+            )
+            _failure_level = ""
+            if _classify_result is not None and outcome != "unknown":
+                try:
+                    _cr = _classify_result(
+                        outcome=outcome,
+                        expected_http=_exp_http,
+                        expected_error_codes=_exp_ec or None,
+                        actual_status=_act_http_int,
+                        actual_error_code=_act_ec,
+                        axis=axis,
+                        reason_code=item.get("reason_code", ""),
+                        server_crash=bool(item.get("server_crashed")),
+                    )
+                    _failure_level = _cr["level"]
+                    if _cr.get("migration_flag"):
+                        _failure_level += f" ({_cr['migration_flag']})"  
+                except Exception:
+                    pass
+
             row_vals = [
                 idx,
                 base_url,
@@ -564,6 +628,12 @@ class ExcelReportBuilder:
                 duration,
                 item.get("error_detail", ""),
                 longrepr[:2000] if outcome in {"failed", "broken"} else "",
+                # http_status mode columns
+                _http_match,
+                str(_exp_http) if _exp_http is not None else "",
+                str(sorted(_exp_ec)) if _exp_ec else "",
+                _ec_match,
+                _failure_level,
             ]
 
             r = idx + 2
@@ -697,6 +767,8 @@ class ExcelReportBuilder:
 
         if diag.get("actual_status") is not None:
             item["actual_status"] = str(diag["actual_status"])
+        if diag.get("expected_http") is not None:
+            item["expected_http"] = diag["expected_http"]
 
         req_body = diag.get("request_body")
         if req_body is not None:
@@ -721,6 +793,8 @@ class ExcelReportBuilder:
         item["response_data_match_score"] = diag.get("response_data_match_score")
         item["response_data_status"] = diag.get("response_data_status")
         item["response_data_verified"] = diag.get("response_data_verified")
+        item["expected_error_codes"] = diag.get("expected_error_codes")
+        item["expected_error_family"] = diag.get("expected_error_family", "")
         item["probe_endpoint"] = diag.get("probe_endpoint", item.get("probe_endpoint", ""))
         item["probe_label"] = diag.get("probe_label", item.get("probe_label", ""))
         item["probe_input"] = diag.get("probe_input", item.get("probe_input"))
@@ -784,6 +858,8 @@ class ExcelReportBuilder:
                 "response_data_error_code": None,
                 "response_data_match_score": None,
                 "response_data_status": None,
+                "expected_error_codes": None,
+                "expected_error_family": "",
             }
             # user_properties 에 diag 가 있으면 test_diag.jsonl 없이도 필드 채움
             if inline_diag:
@@ -855,6 +931,8 @@ class ExcelReportBuilder:
                 "response_data_error_code": None,
                 "response_data_match_score": None,
                 "response_data_status": None,
+                "expected_error_codes": None,
+                "expected_error_family": "",
             })
         return out
 
