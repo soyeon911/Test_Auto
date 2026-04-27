@@ -413,6 +413,26 @@ def _exp_app_fail(axis: str, reason_code: str, target_field: str = "") -> str:
     return "success=false, error_code<0"
 
 
+def _exp_app_probe(axis: str, reason_code: str, target_field: str = "", path: str = "") -> str:
+    """probe_only TC의 expected_app 문자열 — axis/reason_code/field에 따라 구체적 기대 설명 반환."""
+    field_lc = (target_field or "").lower()
+    if axis == "schema" or reason_code in ("type_coercion_risk", "type_mismatch"):
+        return "no crash; if rejected: success=false, error_code=-90 (INVALID_PARAMETER) or schema-like -1"
+    if reason_code in ("range_violation", "range_error"):
+        if field_lc == "user_id":
+            return "no crash; if rejected: error_code=-34 (INVALID_USER_ID) or schema/state-like -1"
+        if field_lc == "sub_id":
+            return "no crash; if rejected: error_code=-35 (INVALID_SUB_ID) or schema/state-like -1"
+        if field_lc == "threshold":
+            return "no crash; if rejected: error_code=-33 (SYS_PARAM_OUT_OF_RANGE)"
+        return "no crash; if rejected: error_code in DOMAIN_FAIL_CODES or schema-like -1"
+    if reason_code in ("invalid_base64", "no_face_detected", "invalid_image_relation"):
+        return "no crash; if rejected: domain error expected (-200 FAILED_FACE_DETECT / DOMAIN_FAIL_CODES / -1 depending on endpoint)"
+    if axis == "state":
+        return "no crash; success=true or state-not-met error allowed"
+    return "no crash; response classified by actual error_code/msg"
+
+
 def _safe_name(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]", "_", text).strip("_")
 
@@ -1341,14 +1361,14 @@ class RuleBasedTCGenerator:
                 "no crash; success may be false (FAILED_FACE_DETECT expected)"
             ),
             expected_http="200",
-            expected_app="no crash (status < 500); success=false/ec=-200 (FAILED_FACE_DETECT) 허용",
+            expected_app=_exp_app_probe("domain", "no_face_detected"),
             error_detail="runtime.probe_schema_valid",
             request_method=method,
             request_path=resolved_path,
             request_query=query_params,
             request_headers=None,
             request_body=base_body,
-            expected_status_display="200 / no crash (probe_only)",
+            expected_status_display=f"200 / {_exp_app_probe('domain', 'no_face_detected')}",
             rule_type="positive",
             rule_subtype="positive_schema",
             endpoint_profile="face_operation",
@@ -1835,7 +1855,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, p["name"], repr(wrong), reason_code, "wrong_type"):
                     continue
 
-                exp_app = _exp_app_fail("schema", reason_code, p["name"]) if policy == "must_fail" else "no crash (status < 500)"
+                exp_app = _exp_app_fail("schema", reason_code, p["name"]) if policy == "must_fail" else _exp_app_probe("schema", reason_code, p["name"], path)
                 blocks.append(
                     self._api_test_block(
                         fname=f"test_{op_id}_wrong_type_{_safe_name(p['name'])}_{label}",
@@ -1883,7 +1903,7 @@ class RuleBasedTCGenerator:
                     if not self._register_case(method, resolved_path, field, repr(wrong), reason_code, "wrong_type"):
                         continue
 
-                    exp_app = _exp_app_fail("schema", reason_code, field) if policy == "must_fail" else "no crash (status < 500)"
+                    exp_app = _exp_app_fail("schema", reason_code, field) if policy == "must_fail" else _exp_app_probe("schema", reason_code, field, path)
                     blocks.append(
                         self._api_test_block(
                             fname=f"test_{op_id}_wrong_type_body_{_safe_name(field)}_{label}",
@@ -1979,8 +1999,8 @@ class RuleBasedTCGenerator:
                     else {
                         "must_pass": "success=true, error_code>=0",
                         "must_fail": _exp_app_fail("domain", "range_violation", p["name"]),
-                        "probe_only": "no crash (status < 500)",
-                    }.get(policy, "no crash (status < 500)")
+                        "probe_only": _exp_app_probe("domain", "range_violation", p["name"], path),
+                    }.get(policy, _exp_app_probe("domain", "range_violation", p["name"], path))
                 )
 
                 blocks.append(
@@ -2047,8 +2067,8 @@ class RuleBasedTCGenerator:
                     else {
                         "must_pass": "success=true, error_code>=0",
                         "must_fail": _exp_app_fail("domain", "range_violation", field),
-                        "probe_only": "no crash (status < 500)",
-                    }.get(policy, "no crash (status < 500)")
+                        "probe_only": _exp_app_probe("domain", "range_violation", field, path),
+                    }.get(policy, _exp_app_probe("domain", "range_violation", field, path))
                 )
 
                 blocks.append(
@@ -2140,7 +2160,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, p["name"], repr(probe_val), _s_rc, "input_validation"):
                     continue
 
-                exp_app = _exp_app_fail(_s_axis, _s_rc, p["name"]) if policy == "must_fail" else "no crash (status < 500)"
+                exp_app = _exp_app_fail(_s_axis, _s_rc, p["name"]) if policy == "must_fail" else _exp_app_probe(_s_axis, _s_rc, p["name"], path)
 
                 blocks.append(
                     self._api_test_block(
@@ -2194,7 +2214,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, field, repr(probe_val), _s_rc, "input_validation"):
                     continue
 
-                exp_app = _exp_app_fail(_s_axis, _s_rc, field) if policy == "must_fail" else "no crash (status < 500)"
+                exp_app = _exp_app_fail(_s_axis, _s_rc, field) if policy == "must_fail" else _exp_app_probe(_s_axis, _s_rc, field, path)
                 blocks.append(
                     self._api_test_block(
                         fname=f"test_{op_id}_input_val_{_safe_name(field)}_{probe_label}",
@@ -2453,14 +2473,14 @@ class RuleBasedTCGenerator:
                     target_field="channel",
                     test_condition="width/height valid but channel=0",
                     expected_http="200",
-                    expected_app="no crash (status < 500)",
+                    expected_app=_exp_app_probe("domain", "invalid_image_relation", "channel", path),
                     error_detail="domain.invalid_image_relation.channel.zero",
                     request_method=method,
                     request_path=resolved_path,
                     request_query=query_params,
                     request_headers=None,
                     request_body=invalid_channel_body,
-                    expected_status_display="200 / no crash (probe_only)",
+                    expected_status_display=f"200 / {_exp_app_probe('domain', 'invalid_image_relation', 'channel', path)}",
                     rule_type="raw_image_relation",
                     rule_subtype="channel_zero",
                     endpoint_profile="raw_image",
@@ -2537,14 +2557,14 @@ class RuleBasedTCGenerator:
                         target_field="channel",
                         test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid",
                         expected_http="200",
-                        expected_app="no crash (status < 500); success may vary (face detection dependent)",
+                        expected_app=_exp_app_probe("domain", "no_face_detected", "image_data", path),
                         error_detail="domain.invalid_image_relation.channel.fixed3_valid",
                         request_method=method,
                         request_path=resolved_path,
                         request_query=query_params,
                         request_headers=None,
                         request_body=valid_ch3_body,
-                        expected_status_display="200 / no crash (probe_only, channel=3 fixed)",
+                        expected_status_display=f"200 / {_exp_app_probe('domain', 'no_face_detected', 'image_data', path)}",
                         rule_type="raw_image_relation",
                         rule_subtype="channel_fixed3_valid",
                         endpoint_profile="raw_image",
@@ -2571,7 +2591,7 @@ class RuleBasedTCGenerator:
                 key_wh = f"ch3_wh:{wh_label}"
                 if self._register_case(method, resolved_path, "width_height", key_wh, "invalid_image_relation", "raw_image_relation"):
                     exp_app = (_exp_app_fail("domain", "invalid_image_relation", "width_height") if policy == "must_fail"
-                               else "no crash (status < 500)")
+                               else _exp_app_probe("domain", "invalid_image_relation", "width_height", path))
                     blocks.append(
                         self._api_test_block(
                             fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
