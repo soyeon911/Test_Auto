@@ -547,7 +547,14 @@ def _expected_http_statuses_for(
         # raw image relation mismatch, channel mismatch 등
         # 구조는 맞지만 값 관계가 유효하지 않은 경우
         if reason_code == "invalid_image_relation":
-            return (422,)
+            field_lc = (target_field or "").lower()
+
+            # 필드 자체 validation 실패: channel=0, width=0, height=0 등
+            if field_lc in {"channel", "width", "height", "width_height"}:
+                return (400,)
+
+            # 필드 값 타입/범위는 통과했지만 width*height*channel != image_data bytes 관계 오류
+            return (400, 422)
 
         # state-dependent positive/probe:
         # 정상 데이터가 있으면 200, user/template/db/sdk 상태 미충족이면 422/503
@@ -1226,10 +1233,24 @@ class RuleBasedTCGenerator:
 
         return "\n".join(lines) + "\n"
 
-    def _http_probe_assertion(self, label: str = "probe") -> str:
-        """http_status/hybrid 모드 probe_only: Swagger-declared non-crash statuses 허용."""
-        statuses = list(_expected_http_statuses_for("domain", "probe_only", policy="probe_only"))
+    def _http_probe_assertion(
+        self,
+        label: str = "probe",
+        field_name: str = "",
+        axis: str = "",
+        reason_code: str = "",
+        path: str = "",
+    ) -> str:
+        """http_status/hybrid 모드 probe_only: axis/reason_code/field/path 기준 허용 status 사용."""
+        statuses = list(_expected_http_statuses_for(
+            axis=axis,
+            reason_code=reason_code,
+            target_field=field_name,
+            path=path,
+            policy="probe_only",
+        ))
         status_display = "/".join(str(s) for s in statuses)
+
         lines = [
             f"assert resp.status_code in {statuses!r}, (",
             f"    f\"[FAIL] {label} — expected non-crash HTTP {status_display}, got {{resp.status_code}}\\n\"",
@@ -1293,9 +1314,13 @@ class RuleBasedTCGenerator:
 
         # ── probe_only ────────────────────────────────────────────────────────
         if mode in ("http_status", "hybrid"):
-            return self._http_probe_assertion(label)
-
-        return self._no_crash_assertion(label)
+            return self._http_probe_assertion(
+                label=label,
+                field_name=field_name,
+                axis=axis,
+                reason_code=reason_code,
+                path=path,
+            )
 
     def _face_no_face_assertion(self, path: str, label: str = "no_face_image") -> str:
         """
