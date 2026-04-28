@@ -896,7 +896,6 @@ class RuleBasedTCGenerator:
         """
         http_status 모드 must_fail:
         - HTTP status가 expected_status와 정확히 일치해야 함
-        - expected_error_codes가 있으면 body.error_code도 그 집합에 포함되어야 함
 
         주의:
         textwrap.dedent + 동적 multiline 삽입을 쓰면 generated test에

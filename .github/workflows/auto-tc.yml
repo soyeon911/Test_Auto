@@ -550,45 +550,83 @@ jobs:
 
       - name: 서버 health check (테스트 전)
         id: pre_health
+        shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $healthCandidates = @(
-            "$env:BASE_URL/health",
-            "$env:BASE_URL/health"
-          )
-
-          $maxRetries = 20
-          $retryDelay = 3
+          $baseUrl = "$env:BASE_URL".TrimEnd("/")
+          $healthUrl = "$baseUrl$env:HEALTH_CHECK_PATH"
+          $serverPort = 8080
           $serverUp = $false
 
-          foreach ($healthUrl in $healthCandidates) {
-            Write-Host "[Health] checking URL: $healthUrl"
+          if (-not $env:SERVER_PID) {
+            Write-Host "::error::SERVER_PID가 없습니다. API 서버 실행 step에서 PID 저장 실패."
+            "server_up=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            exit 0
+          }
 
-            for ($i = 1; $i -le $maxRetries; $i++) {
-              try {
-                $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
-                if ($null -ne $resp -and $null -ne $resp.StatusCode) {
-                  Write-Host "[Health] 응답 코드: $($resp.StatusCode)"
-                  if ($resp.StatusCode -lt 500) {
-                    $serverUp = $true
-                    Write-Host "[Health] OK via $healthUrl"
-                    break
-                  }
-                }
-              }
-              catch {
-                Write-Host "[Health] 시도 $i/$maxRetries 실패 ($healthUrl): $($_.Exception.Message)"
-              }
+          $expectedPid = [int]$env:SERVER_PID
+          Write-Host "[Health] expected SERVER_PID: $expectedPid"
+          Write-Host "[Health] checking URL: $healthUrl"
 
-              if ($i -lt $maxRetries) {
-                Start-Sleep -Seconds $retryDelay
+          function Get-PortPids {
+            param([int]$Port)
+
+            $lines = netstat -ano -p tcp | Select-String ":$Port\s"
+            $pids = @()
+
+            foreach ($line in $lines) {
+              $text = $line.ToString().Trim()
+              if ($text -match "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$") {
+                $pids += [int]$matches[1]
               }
             }
 
-            if ($serverUp) { break }
+            return $pids | Sort-Object -Unique
+          }
+
+          $maxRetries = 30
+          $retryDelay = 2
+
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            Write-Host "[Health] try $i/$maxRetries"
+
+            try {
+              $proc = Get-Process -Id $expectedPid -ErrorAction Stop
+              Write-Host "[Health] process alive: PID=$($proc.Id), Name=$($proc.ProcessName)"
+            }
+            catch {
+              Write-Host "[Health] expected process is not alive: PID=$expectedPid"
+              break
+            }
+
+            $portPids = @(Get-PortPids -Port $serverPort)
+            Write-Host "[Health] port $serverPort listener PID(s): $($portPids -join ', ')"
+
+            if ($portPids.Count -gt 0 -and ($portPids -notcontains $expectedPid)) {
+              Write-Host "::error::8080 포트를 점유한 서버가 workflow에서 시작한 서버가 아닙니다. expected=$expectedPid actual=$($portPids -join ', ')"
+              break
+            }
+
+            try {
+              $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
+              Write-Host "[Health] 응답 코드: $($resp.StatusCode)"
+
+              if ($resp.StatusCode -eq 200 -and ($portPids -contains $expectedPid)) {
+                $serverUp = $true
+                Write-Host "[Health] OK via $healthUrl, PID=$expectedPid"
+                break
+              }
+            }
+            catch {
+              Write-Host "[Health] 실패: $($_.Exception.Message)"
+            }
+
+            if ($i -lt $maxRetries) {
+              Start-Sleep -Seconds $retryDelay
+            }
           }
 
           "server_up=$($serverUp.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -648,17 +686,26 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $swaggerUrl = "$env:SWAGGER_SOURCE".Trim()
-          if (-not $swaggerUrl) {
-            throw "SWAGGER_SOURCE 가 비어 있습니다. detect-changes 단계에서 Swagger URL을 찾지 못했습니다."
+          $baseUrl = "$env:BASE_URL".Trim()
+          if (-not $baseUrl) {
+            $baseUrl = "http://127.0.0.1:8080"
           }
+
+          $baseUrl = $baseUrl.TrimEnd("/")
+          $swaggerUrl = "$baseUrl/docs/doc.json"
+
+          Write-Host "[Swagger] fetching from running server: $swaggerUrl"
 
           $downloadDir = "input"
           New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
 
           $swaggerPath = Join-Path $downloadDir "server_swagger.json"
 
-          Invoke-WebRequest -Uri $swaggerUrl -OutFile $swaggerPath -TimeoutSec 20 -UseBasicParsing
+          Invoke-WebRequest `
+            -Uri $swaggerUrl `
+            -OutFile $swaggerPath `
+            -TimeoutSec 20 `
+            -UseBasicParsing
 
           if (-not (Test-Path $swaggerPath)) {
             throw "Swagger 다운로드 실패: $swaggerPath"
@@ -666,15 +713,21 @@ jobs:
 
           try {
             $raw = Get-Content $swaggerPath -Raw -Encoding utf8 | ConvertFrom-Json
+
             if ($null -eq $raw.paths) {
               throw "다운로드한 파일에 paths 가 없습니다."
             }
+
+            Write-Host "[Swagger] title: $($raw.info.title)"
+            Write-Host "[Swagger] version: $($raw.info.version)"
+            Write-Host "[Swagger] paths count: $($raw.paths.PSObject.Properties.Count)"
           }
           catch {
             throw "다운로드한 Swagger 검증 실패: $($_.Exception.Message)"
           }
 
           Write-Host "[Swagger] downloaded: $swaggerUrl -> $swaggerPath"
+
           "DOWNLOADED_SWAGGER=$swaggerPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Ollama health check
