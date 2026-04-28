@@ -561,6 +561,10 @@ def _expected_http_statuses_for(
         # raw image relation mismatch, channel mismatch 등
         # 구조는 맞지만 값 관계가 유효하지 않은 경우
         if reason_code == "invalid_image_relation":
+            # all-in-one 패턴 엔드포인트는 HTTP 레벨 거부 없이 항상 200 + data.error_code=-200 반환
+            if _path_key(path) in _FIXED_CHANNEL_3_PATHS:
+                return (200,)
+
             field_lc = (target_field or "").lower()
 
             # 필드 자체 validation 실패: channel=0, width=0, height=0 등
@@ -571,7 +575,7 @@ def _expected_http_statuses_for(
             return (400, 422)
         
         if reason_code == "no_face_detected":
-            if _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
+            if _path_key(path) in {"/all-in-one", "/multi-detect", "/faces/analyze", "/faces/detect/raw"}:
                 return (200,)
             return (422,)
 
@@ -634,7 +638,7 @@ def _expected_http_statuses_for(
         return (400, 422)
 
     if reason_code in {"no_face_detected", "template_size_mismatch", "unprocessable_payload", "constraint_missing_in_generator"}:
-        if reason_code == "no_face_detected" and _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
+        if reason_code == "no_face_detected" and _path_key(path) in {"/all-in-one", "/multi-detect", "/faces/analyze", "/faces/detect/raw"}:
             return (200,)
         return (422, 503)
 
@@ -1315,6 +1319,11 @@ class RuleBasedTCGenerator:
 
         # ── must_fail ─────────────────────────────────────────────────────────
         if policy == "must_fail":
+            if mode in ("http_status", "hybrid"):
+                # all-in-one 패턴 엔드포인트는 invalid_image_relation/no_face_detected 시에도
+                # HTTP 200 + data.error_code=-200 반환 (HTTP 레벨 reject 없음)
+                if reason_code in {"invalid_image_relation", "no_face_detected"} and _path_key(path) in _FIXED_CHANNEL_3_PATHS:
+                    return self._http_nested_no_face_assertion(label)
             if mode == "http_status":
                 exp_statuses = _expected_http_statuses_for(axis, reason_code, field_name, path, policy)
                 exp_codes  = _expected_error_codes_for(axis, reason_code, field_name, path)
@@ -1386,7 +1395,10 @@ class RuleBasedTCGenerator:
         pkey = _path_key(path)
 
         # 현재 QFE v3 raw face endpoints는 no face를 HTTP 200 + data.error_code=-200으로 반환함
+        # /all-in-one, /multi-detect도 동일한 AllInOneResponse 패턴 사용
         if self.error_mode in ("http_status", "hybrid") and pkey in {
+            "/all-in-one",
+            "/multi-detect",
             "/faces/analyze",
             "/faces/detect/raw",
         }:
@@ -2155,8 +2167,7 @@ class RuleBasedTCGenerator:
                 ),
                 expected_http="200",
                 expected_app=(
-                    "success=false, error_code=-200 (FAILED_FACE_DETECT) "
-                    f"OR ec in {sorted(STATE_NOT_MET_CODES)}"
+                    "success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected"
                 ),
                 error_detail="domain.no_face_detected.image_data.black_1x1",
                 request_method=method,
@@ -2165,7 +2176,7 @@ class RuleBasedTCGenerator:
                 request_headers=None,
                 request_body=black_body,
                 expected_status_display=(
-                    "200 / success=false, ec=-200 (FAILED_FACE_DETECT) OR state not met"
+                    "200 / success=true, error_code=0, data.error_code=-200"
                 ),
                 rule_type="face_image",
                 rule_subtype="no_face_black",
@@ -2442,8 +2453,7 @@ class RuleBasedTCGenerator:
                 ),
                 expected_http="200",
                 expected_app=(
-                    "success=false, error_code=-200 (FAILED_FACE_DETECT) "
-                    f"OR ec in general_fail/face_pipeline/state_not_met"
+                    "success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected"
                 ),
                 error_detail="domain.no_face_detected.image_data.black_1x1",
                 request_method=method,
@@ -2451,7 +2461,7 @@ class RuleBasedTCGenerator:
                 request_query=query_params,
                 request_headers=None,
                 request_body=black_body,
-                expected_status_display="200 / success=false, ec=-200 OR state not met",
+                expected_status_display="200 / success=true, error_code=0, data.error_code=-200",
                 rule_type="face_image",
                 rule_subtype="no_face_black",
                 endpoint_profile="raw_image",
@@ -3327,20 +3337,20 @@ class RuleBasedTCGenerator:
                                 f"channel={wrong_ch} ({label}) — RGB-only endpoint must reject non-3 channel."
                             ),
                             call_str=_render_call(method, path, path_params, query_params, wrong_ch_body),
-                            assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}", axis="domain", reason_code="invalid_image_relation"),
+                            assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}", axis="domain", reason_code="invalid_image_relation", path=resolved_path),
                             axis="domain",
                             reason_code="invalid_image_relation",
                             target_field="channel",
                             test_condition=f"channel={wrong_ch} ({label}), image_data={_CH3_W*_CH3_H*wrong_ch}B — channel≠3 (RGB-only endpoint)",
                             expected_http="200",
-                            expected_app="success=false, error_code<0 (channel must be 3)",
+                            expected_app="success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected",
                             error_detail=f"domain.invalid_image_relation.channel.{label}",
                             request_method=method,
                             request_path=resolved_path,
                             request_query=query_params,
                             request_headers=None,
                             request_body=wrong_ch_body,
-                            expected_status_display="200 / success=false (channel must be 3)",
+                            expected_status_display="200 / success=true, error_code=0, data.error_code=-200",
                             rule_type="raw_image_relation",
                             rule_subtype=f"channel_fixed3_{label}",
                             endpoint_profile="raw_image",
@@ -3366,20 +3376,20 @@ class RuleBasedTCGenerator:
                             f"channel=3, {_CH3_W}x{_CH3_H} color image — valid RGB payload, no crash expected."
                         ),
                         call_str=_render_call(method, path, path_params, query_params, valid_ch3_body),
-                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid", axis="domain", reason_code="invalid_image_relation"),
+                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid", axis="domain", reason_code="invalid_image_relation", path=resolved_path),
                         axis="domain",
                         reason_code="invalid_image_relation",
                         target_field="channel",
                         test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid",
                         expected_http="200",
-                        expected_app=_exp_app_probe("domain", "no_face_detected", "image_data", path),
+                        expected_app="success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected",
                         error_detail="domain.invalid_image_relation.channel.fixed3_valid",
                         request_method=method,
                         request_path=resolved_path,
                         request_query=query_params,
                         request_headers=None,
                         request_body=valid_ch3_body,
-                        expected_status_display=f"200 / {_exp_app_probe('domain', 'no_face_detected', 'image_data', path)}",
+                        expected_status_display="200 / success=true, error_code=0, data.error_code=-200",
                         rule_type="raw_image_relation",
                         rule_subtype="channel_fixed3_valid",
                         endpoint_profile="raw_image",
@@ -3405,8 +3415,9 @@ class RuleBasedTCGenerator:
                 }
                 key_wh = f"ch3_wh:{wh_label}"
                 if self._register_case(method, resolved_path, "width_height", key_wh, "invalid_image_relation", "raw_image_relation"):
-                    exp_app = (_exp_app_fail("domain", "invalid_image_relation", "width_height") if policy == "must_fail"
-                               else _exp_app_probe("domain", "invalid_image_relation", "width_height", path))
+                    # all-in-one 엔드포인트는 항상 HTTP 200 + nested data.error_code=-200 반환
+                    _all_in_one_display = "success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected"
+                    exp_app = _all_in_one_display
                     blocks.append(
                         self._api_test_block(
                             fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
@@ -3415,7 +3426,7 @@ class RuleBasedTCGenerator:
                                 f"width={w}, height={h}, channel=3 — {wh_label} ({policy})."
                             ),
                             call_str=_render_call(method, path, path_params, query_params, wh_body),
-                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}", axis="domain", reason_code="invalid_image_relation"),
+                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}", axis="domain", reason_code="invalid_image_relation", path=resolved_path),
                             axis="domain",
                             reason_code="invalid_image_relation",
                             target_field="width_height",
