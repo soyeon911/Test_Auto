@@ -699,17 +699,51 @@ class RuleBasedTCGenerator:
         return schema.get("x_constraints", {}) or {}
 
     def _combined_constraints(self, name: str, schema: dict) -> dict[str, Any]:
-        """Merge field-name fallback constraints with enriched/schema constraints.
+        """Merge field-name fallback constraints with schema/enriched constraints.
 
-        Priority: field fallback < schema standard fields < x_constraints.
+        Important:
+        - x_constraints may contain keys with None values. Do not let those wipe out
+          QFE field-name fallbacks such as mode=0..1 or channel=3.
+        - For known QFE fields, field-name constraints are authoritative because the
+          current Swagger often documents the range in parameter descriptions instead
+          of definition.minimum/maximum.
         """
         field_key = (name or "").lower()
-        merged: dict[str, Any] = dict(_FIELD_CONSTRAINTS.get(field_key, {}))
+        field_constraints = dict(_FIELD_CONSTRAINTS.get(field_key, {}))
+        merged: dict[str, Any] = dict(field_constraints)
+
+        # Standard Swagger fields, when explicitly present, can refine generic defaults.
         for key in ("minimum", "maximum", "example"):
             if schema.get(key) is not None:
                 merged[key] = schema[key]
-        merged.update(self._schema_constraints(schema))
+
+        # Enriched constraints are useful, but ignore None values.
+        for key, value in self._schema_constraints(schema).items():
+            if value is not None:
+                merged[key] = value
+
+        # Safety net: known QFE fields win over description-derived ranges.
+        # Example: body description "Mode: 0=disabled, 1=enabled" must not degrade
+        # into example-only, which would make example+1 (=2) look like must_pass.
+        if field_constraints:
+            for key, value in field_constraints.items():
+                if key in {"minimum", "maximum", "example"} and value is not None:
+                    merged[key] = value
+
         return merged
+
+    def _is_enum_like_numeric_field(self, name: str, schema: dict) -> bool:
+        """Return True for numeric enum-like fields such as mode=0/1.
+
+        These should not receive example±1 boundary cases. Their valid/invalid
+        probes should be min, max, below_min, above_max.
+        """
+        field_key = (name or "").lower()
+        if field_key == "mode":
+            return True
+        if schema.get("enum"):
+            return True
+        return self._normalize_tag(schema, name) == "enum_mode"
 
     def _probe_policy(self, schema: dict) -> dict[str, Any]:
         return schema.get("x_probe_policy", {}) or {}
@@ -776,17 +810,12 @@ class RuleBasedTCGenerator:
 
     def _range_cases(self, name: str, schema: dict) -> list[dict[str, Any]]:
         cons = self._combined_constraints(name, schema)
-        # x_constraints 우선, 없으면 표준 Swagger/fallback minimum/maximum 읽기
         minimum = cons.get("minimum")
         maximum = cons.get("maximum")
-
         example = cons.get("example")
 
         if minimum is None and maximum is None and not isinstance(example, (int, float)):
             return []
-
-        # minimum/maximum 이 명세에 명시되어 있으면 범위 밖 값은 반드시 reject 되어야 함
-        range_constrained = (minimum is not None or maximum is not None)
 
         def _coerce(v):
             """정수 계열 float(e.g. 0.0, 100000.0)를 int로 변환 — Go JSON unmarshal 오류 방지."""
@@ -795,6 +824,19 @@ class RuleBasedTCGenerator:
             return v
 
         cases: list[dict[str, Any]] = []
+
+        # Enum-like numeric fields such as mode=0/1 should not generate
+        # below_example/above_example. Otherwise mode=2 can appear as
+        # boundary: above_example and be misread as a success candidate.
+        if self._is_enum_like_numeric_field(name, schema) and minimum is not None and maximum is not None:
+            cases.append({"value": _coerce(minimum),     "label": "min",       "policy": "must_pass"})
+            cases.append({"value": _coerce(maximum),     "label": "max",       "policy": "must_pass"})
+            cases.append({"value": _coerce(minimum - 1), "label": "below_min", "policy": "must_fail"})
+            cases.append({"value": _coerce(maximum + 1), "label": "above_max", "policy": "must_fail"})
+            dedup: dict[Any, dict[str, Any]] = {}
+            for c in cases:
+                dedup[c["value"]] = c
+            return list(dedup.values())
 
         if minimum is not None:
             cases.append({"value": _coerce(minimum),     "label": "min",       "policy": "must_pass"})
