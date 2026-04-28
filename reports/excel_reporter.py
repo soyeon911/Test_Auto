@@ -20,9 +20,9 @@ _BLUE_DARK = "1F497D"
 _BLUE_TITLE = "2E75B6"
 _THIN = Side(style="thin", color="CCCCCC")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
-_GREEN_BG = "EAF7EA"
-_RED_BG = "FFE5E5"
-_YELLOW_BG = "FFEB9C"
+_GREEN_BG = "F1F8F1"   # very light green
+_RED_BG = "F9EEEE"     # very light red/pink
+_YELLOW_BG = "FFF7D6"  # soft pale yellow
 
 # Failure Cause 색상
 _FC_COLORS: dict[str, str] = {

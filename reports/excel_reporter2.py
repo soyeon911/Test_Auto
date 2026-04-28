@@ -10,24 +10,27 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-_BLUE_DARK = "1F497D"
-_BLUE_TITLE = "2E75B6"
-_BLUE_LIGHT = "BDD7EE"
-_GREEN_DARK = "375623"
-_GREEN_FILL = "C6EFCE"
-_RED_FILL = "FFC7CE"
-_RED_FONT = "C00000"
-_YELLOW_FILL = "FFEB9C"
-_GRAY_HEADER = "D9D9D9"
-_WHITE = "FFFFFF"
-_STRIPE = "FAFAFA"
+_BLUE_DARK = "3F5F7F"      # 기존 1F497D보다 부드러운 남색
+_BLUE_TITLE = "5B8DB8"     # 제목용 soft blue
+_BLUE_LIGHT = "E8F1FA"     # 연한 파란 배경
 
+_GREEN_DARK = "4F6F45"     # 진녹색이지만 덜 탁함
+_GREEN_FILL = "F1F8F1"     # PASS 배경
+
+_RED_FILL = "F9EEEE"       # FAIL 배경
+_RED_FONT = "9E3A3A"       # 기존 C00000보다 덜 자극적인 빨강
+
+_YELLOW_FILL = "FFF7D6"    # WARN 배경
+
+_GRAY_HEADER = "EEEEEE"    # 헤더 회색 완화
+_WHITE = "FFFFFF"
+_STRIPE = "FBFBFB"         # 거의 흰색에 가까운 줄무늬
 _METHOD_COLORS = {
-    "GET": "D9EAD3",
-    "POST": "FCE5CD",
-    "PUT": "FFF2CC",
-    "DELETE": "F4CCCC",
-    "PATCH": "EAD1DC",
+    "GET": "EEF6EE",       # soft green
+    "POST": "FDF2E6",      # soft orange
+    "PUT": "FFF7D6",       # soft yellow
+    "DELETE": "F9EEEE",    # soft red
+    "PATCH": "F3ECF5",     # soft purple
 }
 
 _TYPE_KO = {
