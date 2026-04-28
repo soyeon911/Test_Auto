@@ -56,7 +56,7 @@ import copy
 import json
 from pathlib import Path
 from typing import Any
-
+import re
 import requests
 import yaml
 
@@ -130,6 +130,8 @@ class APIParser:
         if not base_path.startswith("/"):
             base_path = "/" + base_path
         return base_path.rstrip("/")
+    
+    
 
     @staticmethod
     def _join_base_path(base_path: str, path: str) -> str:
@@ -147,6 +149,8 @@ class APIParser:
     # operation parsing
     # ──────────────────────────────────────────────────────────────
 
+    
+
     def _parse_operation(self, path: str, method: str, op: dict[str, Any]) -> dict[str, Any]:
         raw_params = op.get("parameters", [])
 
@@ -163,6 +167,7 @@ class APIParser:
         parameters = self._resolve_parameters(non_body_params)
         request_body = self._parse_swagger_body_param(swagger_body)
         responses = self._parse_responses(op.get("responses", {}))
+        description = op.get("description", "")
 
         return {
             "path": path,
@@ -174,7 +179,46 @@ class APIParser:
             "parameters": parameters,
             "request_body": request_body,
             "responses": responses,
+            "x_error_codes": self._parse_error_codes_from_description(description),
         }
+    
+    def _parse_error_codes_from_description(self, description: str) -> dict[int, str]:
+        if not description:
+            return {}
+
+        # "**Error codes:** ..." 이후 라인만 추출
+        m = re.search(
+            r"\*\*Error codes:\*\*\s*(.+?)(?:\n\n|\n\s*\*\*|$)",
+            description,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not m:
+            return {}
+
+        text = m.group(1).strip()
+
+        # 구분자: ·, comma, semicolon 등을 모두 처리
+        parts = re.split(r"\s*[·;,]\s*", text)
+
+        result: dict[int, str] = {}
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+
+            # 예: "-34 invalid user_id", "`-34` invalid user_id", "80/81 session busy"
+            nums = re.findall(r"`?(-?\d+)`?", part)
+            if not nums:
+                continue
+
+            desc = re.sub(r"`?-?\d+`?(?:/`?-?\d+`?)*", "", part, count=1).strip(" -:·")
+            for n in nums:
+                try:
+                    result[int(n)] = desc
+                except ValueError:
+                    pass
+
+        return result
 
     def _merge_parameters(
         self,

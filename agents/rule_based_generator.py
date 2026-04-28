@@ -679,6 +679,7 @@ class RuleBasedTCGenerator:
             config.get("server", {}).get("match_threshold", 0.0)
         )
         self._seen_cases: set[tuple[Any, ...]] = set()
+        self._current_endpoint_error_codes: dict[int, str] = {}
 
     # ──────────────────────────────────────────────────────────────
     # public
@@ -1282,6 +1283,7 @@ class RuleBasedTCGenerator:
         semantic_tag: str = "",
         policy: str = "",
         expected_result_type: str = "",
+        
     ) -> str:
         # http_status / hybrid 모드에서는 expected_http를 axis/reason_code/policy로 재계산
         mode = self.error_mode
@@ -1320,6 +1322,9 @@ class RuleBasedTCGenerator:
             _eff_expected_http = expected_http
             _exp_codes = []
 
+        _documented_error_codes = getattr(self, "_current_endpoint_error_codes", {}) or {}
+        _documented_error_code_list = sorted(int(k) for k in _documented_error_codes.keys())
+
         _eff_expected_status = f"{_eff_expected_http} / {expected_app}"
 
 
@@ -1350,6 +1355,8 @@ class RuleBasedTCGenerator:
             f"        \"expected_http\": {_eff_expected_http!r},\n"
             f"        \"expected_error_codes\": {_exp_codes!r},\n"
             f"        \"expected_error_family\": {axis!r},\n"
+            f"        \"documented_error_codes\": {_documented_error_codes!r},\n"
+            f"        \"documented_error_code_list\": {_documented_error_code_list!r},\n"
             f"    }}))\n"
         )
 
@@ -1516,6 +1523,8 @@ class RuleBasedTCGenerator:
     # ──────────────────────────────────────────────────────────────
 
     def _generate_api(self, endpoint: dict[str, Any]) -> str:
+        self._current_endpoint_error_codes = endpoint.get("x_error_codes", {}) or {}
+
         op_id = _safe_name(endpoint.get("operation_id", "unknown"))
         method = endpoint.get("method", "get").lower()
         path = endpoint.get("path", "/")
