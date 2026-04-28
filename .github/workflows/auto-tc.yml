@@ -17,10 +17,21 @@ on:
         required: false
         default: 'false'
         type: boolean
+
+      server_target:
+      description: '테스트 대상 서버'
+      required: false
+      default: 'external'
+      type: choice
+      options:
+        - local
+        - external
+
       base_url:
-        description: '서버 Base URL (기본값: http://127.0.0.1:8080)'
-        required: false
-        default: ''
+      description: '서버 Base URL'
+      required: false
+      default: 'http://192.168.150.125:7900'
+      
       reset_semantic_cache:
         description: 'semantic cache 강제 초기화'
         required: false
@@ -65,9 +76,8 @@ jobs:
       swagger_source: ${{ steps.server_version.outputs.swagger_source }}
 
     env:
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
-      SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
-      SERVER_EXE_NAME: qfe-server.exe
+      SERVER_TARGET: ${{ inputs.server_target != '' && inputs.server_target || 'external' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.125:7900' }}
       SERVER_LICENSE_KEY: 1
       SERVER_MODE_CHOICE: 1
       SERVER_INSTANCE_COUNT: 1
@@ -96,7 +106,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: API 서버 실행·버전 조회 (job1 detect)
+      - name: 서버 버전·Swagger 조회 (job1 detect)
         id: server_version
         shell: powershell
         run: |
@@ -104,170 +114,86 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-          $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
-          $stdoutLog = Join-Path $env:SERVER_LOG_DIR "detect_server_stdout.log"
-          $stderrLog = Join-Path $env:SERVER_LOG_DIR "detect_server_stderr.log"
-          $serverPort = 8080
+          $baseUrl = "$env:BASE_URL".TrimEnd("/")
+          $healthUrl = "$baseUrl$env:HEALTH_CHECK_PATH"
+          $swaggerUrl = "$baseUrl/docs/doc.json"
 
-          Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+          Write-Host "[Detect] BASE_URL=$baseUrl"
+          Write-Host "[Detect] health=$healthUrl"
+          Write-Host "[Detect] swagger=$swaggerUrl"
 
-          function Get-PortPids {
-            param([int]$Port)
-
-            $lines = netstat -ano -p tcp | Select-String ":$Port\s"
-            $pids = @()
-
-            foreach ($line in $lines) {
-              $text = $line.ToString().Trim()
-              if ($text -match "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$") {
-                $pids += [int]$matches[1]
-              }
-            }
-
-            return $pids | Sort-Object -Unique
-          }
-
-          function Stop-PortListeners {
-            param([int]$Port)
-
-            $pids = Get-PortPids -Port $Port
-            if (-not $pids -or $pids.Count -eq 0) {
-              Write-Host "[Detect Server] no existing listener on port $Port"
-              return
-            }
-
-            Write-Host "[Detect Server] found listener(s) on port $Port : $($pids -join ', ')"
-
-            foreach ($procPid in $pids) {
-              try {
-                $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $procPid" -ErrorAction Stop
-                Write-Host "[Detect Server] stopping PID=$procPid Name=$($procInfo.Name)"
-                Stop-Process -Id $procPid -Force -ErrorAction Stop
-              }
-              catch {
-                Write-Warning "[Detect Server] failed to stop PID=$procPid : $($_.Exception.Message)"
-              }
-            }
-
-            Start-Sleep -Seconds 2
-
-            $remaining = Get-PortPids -Port $Port
-            if ($remaining -and $remaining.Count -gt 0) {
-              throw "Port $Port is still in use after cleanup. Remaining PID(s): $($remaining -join ', ')"
-            }
-          }
-
-          Stop-PortListeners -Port $serverPort
-
-          $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName = $serverExe
-          $psi.WorkingDirectory = $env:SERVER_DIR
-          $psi.Arguments = "-host 0.0.0.0"
-          $psi.UseShellExecute = $false
-          $psi.RedirectStandardInput = $true
-          $psi.RedirectStandardOutput = $true
-          $psi.RedirectStandardError = $true
-          $psi.CreateNoWindow = $true
-
-          $proc = New-Object System.Diagnostics.Process
-          $proc.StartInfo = $psi
-          $proc.Start() | Out-Null
-
-          Start-Sleep -Milliseconds 500
-
-          $proc.StandardInput.WriteLine($env:SERVER_LICENSE_KEY)
-          $proc.StandardInput.WriteLine($env:SERVER_MODE_CHOICE)
-          $proc.StandardInput.WriteLine($env:SERVER_INSTANCE_COUNT)
-          $proc.StandardInput.WriteLine($env:SERVER_MODEL_PATH)
-          $proc.StandardInput.WriteLine($env:SERVER_DB_PATH)
-          $proc.StandardInput.Flush()
-          $proc.StandardInput.Close()
-
-          $healthUrl = "$($env:BASE_URL)$($env:HEALTH_CHECK_PATH)"
+          # 1) Health check
           $ready = $false
-
-          try {
-            for ($i = 0; $i -lt 20; $i++) {
-              Start-Sleep -Seconds 1
-
-              if ($proc.HasExited) {
-                break
-              }
-
-              try {
-                $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
-                if ($resp.StatusCode -eq 200) {
-                  $ready = $true
-                  break
-                }
-              }
-              catch {}
-            }
-
-            if ($proc.HasExited -or -not $ready) {
-              if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) }
-              $outText = $proc.StandardOutput.ReadToEnd()
-              $errText = $proc.StandardError.ReadToEnd()
-
-              $outText | Out-File -FilePath $stdoutLog -Encoding utf8
-              $errText | Out-File -FilePath $stderrLog -Encoding utf8
-
-              Write-Host "[Detect Server] stdout:"
-              Get-Content $stdoutLog -ErrorAction SilentlyContinue
-              Write-Host "[Detect Server] stderr:"
-              Get-Content $stderrLog -ErrorAction SilentlyContinue
-
-              throw "detect-changes용 서버가 정상 기동하지 않았습니다. exit=$($proc.ExitCode)"
-            }
-
-            Write-Host "[Detect Server] started pid=$($proc.Id)"
-
-            # ── 서버 버전 조회 ────────────────────────────────────────────────
-            $baseUrl = "http://127.0.0.1:8080"
-            if ("${{ inputs.base_url }}" -ne "") { $baseUrl = "${{ inputs.base_url }}" }
-
-            $version = "unknown"
-            $swaggerSource = ""
-
-            # QFE 서버 버전: GET /api/v2/info -> { data: { version: "x.x.x" } }
+          for ($i = 1; $i -le 20; $i++) {
             try {
-              $resp = Invoke-RestMethod -Uri "$baseUrl/api/v2/info" -TimeoutSec 5 -ErrorAction Stop
-              if ($null -ne $resp.data.version -and "$($resp.data.version)".Trim() -ne "") {
-                $version = [string]$resp.data.version
-                Write-Host "[Version] /api/v2/info -> $version"
+              $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+              Write-Host "[Detect] health status=$($resp.StatusCode)"
+
+              if ($resp.StatusCode -eq 200) {
+                $ready = $true
+                break
               }
             }
             catch {
-              Write-Host "[Version] /api/v2/info 실패: $($_.Exception.Message)"
+              Write-Host "[Detect] health failed $i/20: $($_.Exception.Message)"
             }
 
-            # Swagger 소스: 로컬 파일 우선, 없으면 빈 문자열
-            $localSwagger = @("input/QFEapi.json", "input/QFEapi.yaml", "QFEapi.json", "QFEapi.yaml")
-            foreach ($f in $localSwagger) {
-              if (Test-Path $f) {
-                $swaggerSource = (Resolve-Path $f).Path
-                Write-Host "[Version] Swagger Source (local): $swaggerSource"
-                break
-              }
+            Start-Sleep -Seconds 2
+          }
+
+          if (-not $ready) {
+            throw "외부 API 서버 health check 실패: $healthUrl"
+          }
+
+          # 2) Version 조회
+          $version = "unknown"
+          try {
+            $info = Invoke-RestMethod -Uri "$baseUrl/api/v2/info" -TimeoutSec 5 -ErrorAction Stop
+            if ($null -ne $info.data.version -and "$($info.data.version)".Trim() -ne "") {
+              $version = [string]$info.data.version
+            }
+            Write-Host "[Version] /api/v2/info -> $version"
+          }
+          catch {
+            Write-Host "[Version] /api/v2/info 실패: $($_.Exception.Message)"
+          }
+
+          # 3) Swagger 다운로드
+          $downloadDir = "input"
+          New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+
+          $swaggerPath = Join-Path $downloadDir "server_swagger.json"
+
+          Invoke-WebRequest `
+            -Uri $swaggerUrl `
+            -OutFile $swaggerPath `
+            -TimeoutSec 20 `
+            -UseBasicParsing
+
+          if (-not (Test-Path $swaggerPath)) {
+            throw "Swagger 다운로드 실패: $swaggerPath"
+          }
+
+          try {
+            $raw = Get-Content $swaggerPath -Raw -Encoding utf8 | ConvertFrom-Json
+
+            if ($null -eq $raw.paths) {
+              throw "다운로드한 Swagger에 paths가 없습니다."
             }
 
-            Write-Host "[Version] 최종 서버 버전: $version"
-            Write-Host "[Version] Swagger Source: $swaggerSource"
-            "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            "swagger_source=$swaggerSource" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "[Swagger] title: $($raw.info.title)"
+            Write-Host "[Swagger] version: $($raw.info.version)"
+            Write-Host "[Swagger] paths count: $($raw.paths.PSObject.Properties.Count)"
           }
-          finally {
-            # ── 서버 종료 (항상 실행) ─────────────────────────────────────────
-            if ($proc -and -not $proc.HasExited) {
-              try {
-                Stop-Process -Id $proc.Id -Force -ErrorAction Stop
-                Write-Host "[Detect Server] stopped PID=$($proc.Id)"
-              }
-              catch {
-                Write-Warning "[Detect Server] failed to stop PID=$($proc.Id) : $($_.Exception.Message)"
-              }
-            }
+          catch {
+            throw "Swagger 검증 실패: $($_.Exception.Message)"
           }
+
+          Write-Host "[Version] 최종 서버 버전: $version"
+          Write-Host "[Version] Swagger Source: $swaggerPath"
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "swagger_source=$swaggerPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Swagger Hash 계산
         id: hash
@@ -354,14 +280,8 @@ jobs:
       ERROR_RESPONSE_MODE: ${{ inputs.error_response_mode != '' && inputs.error_response_mode || 'http_status' }}
       AUTOTC_CONFIG: config\config.yaml
 
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
-      SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
-      SERVER_EXE_NAME: qfe-server.exe
-      SERVER_LICENSE_KEY: 1
-      SERVER_MODE_CHOICE: 1
-      SERVER_INSTANCE_COUNT: 1
-      SERVER_MODEL_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model
-      SERVER_DB_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db
+      SERVER_TARGET: ${{ inputs.server_target != '' && inputs.server_target || 'external' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.125:7900' }}
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
       SERVER_LOG_DIR: server_logs
@@ -393,6 +313,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: 서버 파일 사전 점검
+        if: env.SERVER_TARGET == 'local'
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -423,6 +344,7 @@ jobs:
           Write-Host "[Server] db: $env:SERVER_DB_PATH"
 
       - name: API 서버 실행 (job2 test)
+        if: env.SERVER_TARGET == 'local'
         id: start_server_test
         shell: powershell
         run: |
@@ -582,34 +504,10 @@ jobs:
 
           $baseUrl = "$env:BASE_URL".TrimEnd("/")
           $healthUrl = "$baseUrl$env:HEALTH_CHECK_PATH"
-          $serverPort = 8080
           $serverUp = $false
 
-          if (-not $env:SERVER_PID) {
-            Write-Host "::error::SERVER_PID가 없습니다. API 서버 실행 step에서 PID 저장 실패."
-            "server_up=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            exit 0
-          }
-
-          $expectedPid = [int]$env:SERVER_PID
-          Write-Host "[Health] expected SERVER_PID: $expectedPid"
+          Write-Host "[Health] SERVER_TARGET=$env:SERVER_TARGET"
           Write-Host "[Health] checking URL: $healthUrl"
-
-          function Get-PortPids {
-            param([int]$Port)
-
-            $lines = netstat -ano -p tcp | Select-String ":$Port\s"
-            $pids = @()
-
-            foreach ($line in $lines) {
-              $text = $line.ToString().Trim()
-              if ($text -match "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$") {
-                $pids += [int]$matches[1]
-              }
-            }
-
-            return $pids | Sort-Object -Unique
-          }
 
           $maxRetries = 30
           $retryDelay = 2
@@ -617,30 +515,30 @@ jobs:
           for ($i = 1; $i -le $maxRetries; $i++) {
             Write-Host "[Health] try $i/$maxRetries"
 
-            try {
-              $proc = Get-Process -Id $expectedPid -ErrorAction Stop
-              Write-Host "[Health] process alive: PID=$($proc.Id), Name=$($proc.ProcessName)"
-            }
-            catch {
-              Write-Host "[Health] expected process is not alive: PID=$expectedPid"
-              break
-            }
+            if ($env:SERVER_TARGET -eq "local") {
+              if (-not $env:SERVER_PID) {
+                Write-Host "::error::SERVER_PID가 없습니다. API 서버 실행 step에서 PID 저장 실패."
+                break
+              }
 
-            $portPids = @(Get-PortPids -Port $serverPort)
-            Write-Host "[Health] port $serverPort listener PID(s): $($portPids -join ', ')"
-
-            if ($portPids.Count -gt 0 -and ($portPids -notcontains $expectedPid)) {
-              Write-Host "::error::8080 포트를 점유한 서버가 workflow에서 시작한 서버가 아닙니다. expected=$expectedPid actual=$($portPids -join ', ')"
-              break
+              try {
+                $expectedPid = [int]$env:SERVER_PID
+                $proc = Get-Process -Id $expectedPid -ErrorAction Stop
+                Write-Host "[Health] local process alive: PID=$($proc.Id), Name=$($proc.ProcessName)"
+              }
+              catch {
+                Write-Host "[Health] expected local process is not alive: PID=$env:SERVER_PID"
+                break
+              }
             }
 
             try {
               $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 5 -ErrorAction Stop -UseBasicParsing
               Write-Host "[Health] 응답 코드: $($resp.StatusCode)"
 
-              if ($resp.StatusCode -eq 200 -and ($portPids -contains $expectedPid)) {
+              if ($resp.StatusCode -eq 200) {
                 $serverUp = $true
-                Write-Host "[Health] OK via $healthUrl, PID=$expectedPid"
+                Write-Host "[Health] OK via $healthUrl"
                 break
               }
             }
@@ -656,10 +554,11 @@ jobs:
           "server_up=$($serverUp.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
           if (-not $serverUp) {
-            Write-Host "::warning::서버가 health check에 응답하지 않습니다. 로그를 수집합니다."
+            Write-Host "::warning::서버가 health check에 응답하지 않습니다."
           }
 
       - name: 서버 시작 로그 출력 (실패 시)
+        if: env.SERVER_TARGET == 'local'
         if: steps.pre_health.outputs.server_up == 'false'
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -675,12 +574,14 @@ jobs:
           }
 
       - name: Crash 로그 수집 (테스트 전)
+        if: env.SERVER_TARGET == 'local'
         if: steps.pre_health.outputs.server_up == 'false'
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           scripts\collect_crash_logs.ps1 -OutputDir $env:CRASH_LOG_DIR -Label "pre_test"
 
       - name: Crash 로그 업로드 (테스트 전)
+        if: env.SERVER_TARGET == 'local'
         if: steps.pre_health.outputs.server_up == 'false'
         uses: actions/upload-artifact@v4
         with:
@@ -689,6 +590,7 @@ jobs:
           retention-days: 14
 
       - name: 서버 로그 업로드 (테스트 전 실패 시)
+        if: env.SERVER_TARGET == 'local'
         if: steps.pre_health.outputs.server_up == 'false'
         uses: actions/upload-artifact@v4
         with:
@@ -716,7 +618,7 @@ jobs:
           }
 
           $baseUrl = $baseUrl.TrimEnd("/")
-          $swaggerUrl = "$baseUrl/docs/doc.json"
+          $swaggerUrl = "$baseUrl/docs/swagger.json"
 
           Write-Host "[Swagger] fetching from running server: $swaggerUrl"
 
@@ -1023,7 +925,7 @@ jobs:
           Write-Host "[Result] Pipeline completed successfully."
 
       - name: API 서버 종료 (job2 test)
-        if: always()
+        if: env.SERVER_TARGET == 'local'
         shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
