@@ -433,9 +433,11 @@ jobs:
           $serverExe = Join-Path $env:SERVER_DIR $env:SERVER_EXE_NAME
           $stdoutLog = Join-Path $env:SERVER_LOG_DIR "server_stdout.log"
           $stderrLog = Join-Path $env:SERVER_LOG_DIR "server_stderr.log"
+          $wrapperLog = Join-Path $env:SERVER_LOG_DIR "server_wrapper.log"
+          $childPidFile = Join-Path $env:SERVER_LOG_DIR "server_child.pid"
           $serverPort = 8080
 
-          Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+          Remove-Item $stdoutLog, $stderrLog, $wrapperLog, $childPidFile -Force -ErrorAction SilentlyContinue
 
           function Get-PortPids {
             param([int]$Port)
@@ -476,77 +478,99 @@ jobs:
             }
 
             Start-Sleep -Seconds 2
-
-            $remaining = Get-PortPids -Port $Port
-            if ($remaining -and $remaining.Count -gt 0) {
-              throw "Port $Port is still in use after cleanup. Remaining PID(s): $($remaining -join ', ')"
-            }
           }
 
           Stop-PortListeners -Port $serverPort
 
-          # ── Start-Process + 파일 리다이렉션 ─────────────────────────────────
-          # 파이프(RedirectStandardOutput=true) 방식은 스텝 종료 시 파이프가 닫혀
-          # 서버 프로세스가 죽는 문제가 있음. Start-Process + 파일 리다이렉션으로
-          # 부모 PowerShell 수명과 독립적인 프로세스를 생성.
-          $stdinFile = Join-Path $env:SERVER_LOG_DIR "server_stdin.tmp"
-          @(
-            $env:SERVER_LICENSE_KEY,
-            $env:SERVER_MODE_CHOICE,
-            $env:SERVER_INSTANCE_COUNT,
-            $env:SERVER_MODEL_PATH,
-            $env:SERVER_DB_PATH,
-            ""
-          ) | Set-Content -Path $stdinFile -Encoding ascii
+          # GitHub Actions runner가 자식 프로세스를 추적해서 정리하는 문제를 줄이기 위해 wrapper에는 tracking id를 제거
+          $env:RUNNER_TRACKING_ID = ""
 
-          $proc = Start-Process `
-            -FilePath        $serverExe `
-            -WorkingDirectory $env:SERVER_DIR `
-            -ArgumentList    "-host 0.0.0.0" `
-            -RedirectStandardInput  $stdinFile `
-            -RedirectStandardOutput $stdoutLog `
-            -RedirectStandardError  $stderrLog `
+          $wrapper = Start-Process `
+            -FilePath "powershell.exe" `
+            -ArgumentList @(
+              "-NoProfile",
+              "-ExecutionPolicy", "Bypass",
+              "-File", "scripts\run_qfe_server_wrapper.ps1",
+              "-ServerExe", "`"$serverExe`"",
+              "-WorkingDirectory", "`"$env:SERVER_DIR`"",
+              "-StdoutLog", "`"$stdoutLog`"",
+              "-StderrLog", "`"$stderrLog`"",
+              "-LicenseKey", "`"$env:SERVER_LICENSE_KEY`"",
+              "-ModeChoice", "`"$env:SERVER_MODE_CHOICE`"",
+              "-InstanceCount", "`"$env:SERVER_INSTANCE_COUNT`"",
+              "-ModelPath", "`"$env:SERVER_MODEL_PATH`"",
+              "-DbPath", "`"$env:SERVER_DB_PATH`"",
+              "-ChildPidFile", "`"$childPidFile`""
+            ) `
+            -RedirectStandardOutput $wrapperLog `
+            -RedirectStandardError  $wrapperLog `
             -PassThru `
             -WindowStyle Hidden
 
-          Start-Sleep -Milliseconds 500
-
-          "SERVER_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "SERVER_STDOUT_LOG=$stdoutLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "SERVER_STDERR_LOG=$stderrLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "[Test Server] wrapper PID=$($wrapper.Id)"
 
           $healthUrl = "$($env:BASE_URL)$($env:HEALTH_CHECK_PATH)"
           $ready = $false
+          $serverPid = $null
 
-          for ($i = 0; $i -lt 20; $i++) {
+          for ($i = 1; $i -le 60; $i++) {
             Start-Sleep -Seconds 1
 
-            if ($proc.HasExited) {
-              break
+            if (Test-Path $childPidFile) {
+              $serverPidText = (Get-Content $childPidFile -Raw -Encoding ascii).Trim()
+              if ($serverPidText -match "^\d+$") {
+                $serverPid = [int]$serverPidText
+              }
+            }
+
+            if ($serverPid) {
+              try {
+                Get-Process -Id $serverPid -ErrorAction Stop | Out-Null
+              }
+              catch {
+                Write-Host "[Test Server] qfe-server process not alive yet/anymore: PID=$serverPid"
+              }
             }
 
             try {
-              $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+              $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
               if ($resp.StatusCode -eq 200) {
-                $ready = $true
-                break
+                $portPids = @(Get-PortPids -Port $serverPort)
+
+                Write-Host "[Test Server] health OK"
+                Write-Host "[Test Server] server PID file: $serverPid"
+                Write-Host "[Test Server] port $serverPort listener PID(s): $($portPids -join ', ')"
+
+                if ($serverPid -and ($portPids -contains $serverPid)) {
+                  $ready = $true
+                  break
+                }
               }
             }
-            catch {}
+            catch {
+              Write-Host "[Test Server] waiting health $i/60: $($_.Exception.Message)"
+            }
           }
 
-          if ($proc.HasExited -or -not $ready) {
-            if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) }
-
+          if (-not $ready) {
             Write-Host "[Test Server] stdout:"
             Get-Content $stdoutLog -ErrorAction SilentlyContinue
+
             Write-Host "[Test Server] stderr:"
             Get-Content $stderrLog -ErrorAction SilentlyContinue
 
-            throw "테스트용 서버가 정상 기동하지 않았습니다. exit=$($proc.ExitCode)"
+            Write-Host "[Test Server] wrapper log:"
+            Get-Content $wrapperLog -ErrorAction SilentlyContinue
+
+            throw "테스트용 서버가 정상 기동하지 않았습니다."
           }
 
-          Write-Host "[Test Server] started pid=$($proc.Id)"
+          "SERVER_PID=$serverPid" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SERVER_WRAPPER_PID=$($wrapper.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SERVER_STDOUT_LOG=$stdoutLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SERVER_STDERR_LOG=$stderrLog" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "[Test Server] started wrapper PID=$($wrapper.Id), server PID=$serverPid"
 
       - name: 서버 health check (테스트 전)
         id: pre_health
@@ -1007,10 +1031,20 @@ jobs:
           if ($env:SERVER_PID) {
             try {
               Stop-Process -Id ([int]$env:SERVER_PID) -Force -ErrorAction Stop
-              Write-Host "[Test Server] stopped PID=$env:SERVER_PID"
+              Write-Host "[Test Server] stopped server PID=$env:SERVER_PID"
             }
             catch {
-              Write-Warning "[Test Server] failed to stop PID=$env:SERVER_PID : $($_.Exception.Message)"
+              Write-Warning "[Test Server] failed to stop server PID=$env:SERVER_PID : $($_.Exception.Message)"
+            }
+          }
+
+          if ($env:SERVER_WRAPPER_PID) {
+            try {
+              Stop-Process -Id ([int]$env:SERVER_WRAPPER_PID) -Force -ErrorAction Stop
+              Write-Host "[Test Server] stopped wrapper PID=$env:SERVER_WRAPPER_PID"
+            }
+            catch {
+              Write-Warning "[Test Server] failed to stop wrapper PID=$env:SERVER_WRAPPER_PID : $($_.Exception.Message)"
             }
           }
 
