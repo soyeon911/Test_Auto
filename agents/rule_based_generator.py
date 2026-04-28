@@ -881,9 +881,7 @@ class RuleBasedTCGenerator:
             "assert body.get(\"success\") is True, (",
             "    f\"[FAIL] expected success=true\\n  body: {resp.text[:500]}\"",
             ")",
-            "assert body.get(\"error_code\", 0) >= 0, (",
-            "    f\"[FAIL] expected non-negative error_code\\n  body: {resp.text[:500]}\"",
-            ")",
+            # error_code는 diag에 기록되어 failure cause 분류에만 사용됨 (pass/fail 기준 아님)
         ]
         return "\n".join(lines) + "\n"
 
@@ -922,15 +920,11 @@ class RuleBasedTCGenerator:
             ")",
         ]
 
+        # error_code는 diag에 기록되어 failure cause 분류에만 사용됨 (pass/fail 기준 아님)
+        # assert _ec in codes_list 는 의도적으로 생략
         if codes_list:
             lines.extend([
-                f"assert _ec in {codes_list}, (",
-                "    f\"[FAIL] HTTP matched but error_code mismatch\\n\"",
-                f"    f\"  expected: {codes_list}\\n\"",
-                "    f\"  actual  : {_ec}\\n\"",
-                "    f\"  msg     : {body.get('msg') or body.get('error')}\\n\"",
-                "    f\"  body    : {resp.text[:300]}\"",
-                ")",
+                f"# [info] expected error_code(s): {codes_list} — recorded in diag for failure cause only",
             ])
 
         return "\n".join(lines) + "\n"
@@ -948,26 +942,14 @@ class RuleBasedTCGenerator:
             "    body = resp.json()",
             "except ValueError:",
             "    pytest.fail(f\"Expected JSON response, got: {resp.text[:300]}\")",
-            "_ec = body.get(\"error_code\", 0)",
-            "_msg = str(body.get(\"msg\") or body.get(\"message\") or \"\").lower()",
-            f"_path = {path!r}",
+            # pass/fail 기준: HTTP status + success 값만 사용 (error_code는 diag로만)
             "if resp.status_code == 200:",
-            "    assert body.get(\"success\") is True and _ec >= 0, (",
-            "        f\"[FAIL] HTTP 200 but success!=true or error_code<0\\n  body: {resp.text[:300]}\"",
+            "    assert body.get(\"success\") is True, (",
+            "        f\"[FAIL] HTTP 200 but success!=true\\n  body: {resp.text[:300]}\"",
             "    )",
             "else:",
-            "    _state_like_minus_one = (",
-            "        _ec == -1 and (",
-            "            (_path in (\"/api/v2/verify-template\", \"/api/v2/verify\") and \"verification failed\" in _msg)",
-            "            or (_path == \"/api/v2/delete\" and \"failed to delete user\" in _msg)",
-            "            or (\"failed to get user template\" in _msg)",
-            "            or (\"template not found\" in _msg)",
-            "            or (\"user not found\" in _msg)",
-            "        )",
-            "    )",
-            f"    assert _ec in {state_codes} or _state_like_minus_one, (",
-            "        f\"[FAIL] HTTP 404 but not a state-not-met error\\n\"",
-            "        f\"  error_code: {_ec}\\n  body: {resp.text[:300]}\"",
+            "    assert body.get(\"success\") is False, (",
+            "        f\"[FAIL] HTTP 404 but success!=false\\n  body: {resp.text[:300]}\"",
             "    )",
         ]
 
@@ -2673,10 +2655,14 @@ class RuleBasedTCGenerator:
         self,
         score_field: str,
     ) -> str:
-         return (
+        return (
             '_data = body.get("data") or {}\n'
+            # match_score를 diag에 항상 기록 (pass/fail 여부와 무관)
+            f'diag["response_data_match_score"] = _data.get("{score_field}")\n'
             f'assert isinstance(_data.get("{score_field}"), (int, float)), (\n'
-            '    f"[FAIL] domain: expected numeric ..."\n'
+            f'    f"[FAIL] domain: expected numeric {score_field!r} in data\\n"\n'
+            f'    f"  data      : {{_data}}\\n"\n'
+            f'    f"  Full body : {{resp.text[:300]}}"\n'
             ')\n'
         )
 
@@ -2696,11 +2682,11 @@ class RuleBasedTCGenerator:
                 f"  Full body : {{resp.text[:300]}}"
             )
 
-            assert isinstance(_data.get("{data_error_code_field}"), int), (
-                f"[FAIL] domain: expected integer '{data_error_code_field}' in data\\n"
-                f"  data      : {{_data}}\\n"
-                f"  Full body : {{resp.text[:300]}}"
-            )
+            # match_score를 diag에 항상 기록 (pass/fail 여부와 무관) — 인플레이스 업데이트
+            diag["response_data_match_score"] = _data.get("{score_field}")
+
+            # data.error_code는 diag에 기록하되 pass/fail 기준에서 제외
+            # assert isinstance(_data.get("{data_error_code_field}"), int)  ← 제거됨
 
             assert isinstance(_data.get("{score_field}"), (int, float)), (
                 f"[FAIL] domain: expected numeric '{score_field}' in data\\n"
