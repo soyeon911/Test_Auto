@@ -353,28 +353,167 @@ class ExcelReportBuilder:
         return self.output_path
 
     def _load_endpoints_from_source(self, source_file: str) -> list[dict]:
-        """Load API endpoints for the API List sheet when build() caller did not pass endpoints."""
+        """Load API endpoints for the API List sheet without importing APIParser."""
         if not source_file:
             return []
 
-        source = str(source_file)
-        try:
-            try:
-                from parsers.api_parser import APIParser
-            except ImportError:
-                try:
-                    from api_parser import APIParser
-                except ImportError:
-                    from parser.api_parser import APIParser
-
-            endpoints = APIParser(source).load().parse()
-            if not isinstance(endpoints, list):
-                return []
-            print(f"[ExcelReporter] API List loaded {len(endpoints)} endpoint(s) from {source}")
-            return endpoints
-        except Exception as exc:
-            print(f"[ExcelReporter] API List fallback parse failed: {exc}")
+        p = Path(source_file)
+        if not p.exists() or not p.is_file():
+            print(f"[ExcelReporter] API List source not found: {source_file}")
             return []
+
+        try:
+            if p.suffix.lower() in {".yaml", ".yml"}:
+                try:
+                    import yaml
+                except ImportError:
+                    print("[ExcelReporter] PyYAML is required to read YAML swagger files")
+                    return []
+                spec = yaml.safe_load(p.read_text(encoding="utf-8"))
+            else:
+                spec = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"[ExcelReporter] API List source read failed: {exc}")
+            return []
+
+        if not isinstance(spec, dict):
+            return []
+
+        definitions = spec.get("definitions", {}) or {}
+        base_path = str(spec.get("basePath") or "").strip().rstrip("/")
+
+        def resolve_ref(obj):
+            if not isinstance(obj, dict):
+                return obj
+            ref = obj.get("$ref")
+            if not ref or not isinstance(ref, str) or not ref.startswith("#/"):
+                return obj
+
+            node = spec
+            for part in ref.lstrip("#/").split("/"):
+                if not isinstance(node, dict):
+                    return obj
+                node = node.get(part, {})
+            return node if isinstance(node, dict) else obj
+
+        def resolve_schema(schema):
+            if not isinstance(schema, dict):
+                return schema
+
+            schema = resolve_ref(schema)
+            if not isinstance(schema, dict):
+                return schema
+
+            out = dict(schema)
+
+            props = out.get("properties")
+            if isinstance(props, dict):
+                out["properties"] = {
+                    name: resolve_schema(prop)
+                    for name, prop in props.items()
+                }
+
+            items = out.get("items")
+            if isinstance(items, dict):
+                out["items"] = resolve_schema(items)
+
+            return out
+
+        def normalize_param(param):
+            param = resolve_ref(param)
+            if not isinstance(param, dict):
+                return {}
+
+            schema = param.get("schema")
+            if not schema:
+                schema = {
+                    "type": param.get("type", "string")
+                }
+                for key in [
+                    "format", "enum", "minimum", "maximum",
+                    "minLength", "maxLength", "pattern", "items",
+                ]:
+                    if key in param:
+                        schema[key] = param[key]
+
+            return {
+                "name": param.get("name", ""),
+                "in": param.get("in", "query"),
+                "required": param.get("required", False),
+                "description": param.get("description", ""),
+                "schema": resolve_schema(schema),
+            }
+
+        def parse_body_param(param):
+            if not param:
+                return None
+
+            param = resolve_ref(param)
+            schema = resolve_schema(param.get("schema", {}))
+            if not schema:
+                return None
+
+            return {
+                "content_type": "application/json",
+                "required": param.get("required", False),
+                "description": param.get("description", ""),
+                "name": param.get("name", ""),
+                "schema": schema,
+            }
+
+        endpoints: list[dict] = []
+        http_methods = {"get", "post", "put", "patch", "delete", "head", "options"}
+
+        for raw_path, path_item in (spec.get("paths") or {}).items():
+            if not isinstance(path_item, dict):
+                continue
+
+            path = str(raw_path)
+            if base_path and not path.startswith(base_path + "/"):
+                path = base_path + path
+
+            path_level_params = path_item.get("parameters", []) or []
+
+            for method, operation in path_item.items():
+                method_l = str(method).lower()
+                if method_l not in http_methods or not isinstance(operation, dict):
+                    continue
+
+                raw_params = list(path_level_params) + list(operation.get("parameters", []) or [])
+
+                non_body_params = []
+                body_param = None
+                for rp in raw_params:
+                    rp = resolve_ref(rp)
+                    if isinstance(rp, dict) and rp.get("in") == "body":
+                        body_param = rp
+                    else:
+                        non_body_params.append(rp)
+
+                responses = {}
+                for code, resp in (operation.get("responses") or {}).items():
+                    resp = resolve_ref(resp)
+                    if not isinstance(resp, dict):
+                        resp = {}
+                    responses[str(code)] = {
+                        "description": resp.get("description", ""),
+                        "schema": resolve_schema(resp.get("schema", {})) if resp.get("schema") else None,
+                    }
+
+                endpoints.append({
+                    "path": path,
+                    "method": method_l,
+                    "operation_id": operation.get("operationId", f"{method_l}_{path}"),
+                    "summary": operation.get("summary", ""),
+                    "description": operation.get("description", ""),
+                    "tags": operation.get("tags", []),
+                    "parameters": [normalize_param(p) for p in non_body_params],
+                    "request_body": parse_body_param(body_param),
+                    "responses": responses,
+                })
+
+        print(f"[ExcelReporter] API List loaded {len(endpoints)} endpoint(s) from {source_file}")
+        return endpoints
 
     def _build_summary(self, ws, summary: dict[str, Any], source_file: str, base_url: str) -> None:
         self._title_banner(ws, "A1:B1", "AutoTC — Test Execution Summary")
