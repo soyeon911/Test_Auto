@@ -485,25 +485,49 @@ def _exp_app_fail(axis: str, reason_code: str, target_field: str = "") -> str:
 
 
 def _exp_app_probe(axis: str, reason_code: str, target_field: str = "", path: str = "") -> str:
-    """probe_only TC의 expected_app 문자열 — axis/reason_code/field에 따라 구체적 기대 설명 반환."""
     field_lc = (target_field or "").lower()
+    pkey = _path_key(path)
+    state_suffix = (
+        " OR state-not-met error allowed"
+        if pkey in STATE_DEPENDENT_PATHS
+        else ""
+    )
+
     if axis == "schema" or reason_code in ("type_coercion_risk", "type_mismatch"):
-        return "no crash; if rejected: success=false, error_code=-90 (INVALID_PARAMETER) or schema-like -1"
+        return (
+            "no crash; if rejected: success=false, error_code=-90 "
+            "(INVALID_PARAMETER) or schema-like -1"
+            + state_suffix
+        )
+
     if reason_code in ("range_violation", "range_error"):
         if field_lc == "user_id":
-            return "no crash; if rejected: error_code=-34 (INVALID_USER_ID) or schema/state-like -1"
+            return "no crash; if rejected: error_code=-34 (INVALID_USER_ID) or schema-like -1"
         if field_lc == "sub_id":
-            return "no crash; if rejected: error_code=-35 (INVALID_SUB_ID) or schema/state-like -1"
+            return (
+                "no crash; if rejected: error_code=-35 (INVALID_SUB_ID) "
+                "or state-not-met error allowed"
+            )
         if field_lc == "threshold":
             return "no crash; if rejected: error_code=-33 (SYS_PARAM_OUT_OF_RANGE)"
-        return "no crash; if rejected: error_code in DOMAIN_FAIL_CODES or schema-like -1"
+        return "no crash; if rejected: error_code in DOMAIN_FAIL_CODES or schema-like -1" + state_suffix
+
     if reason_code in ("invalid_base64", "no_face_detected", "invalid_image_relation"):
-        return "no crash; if rejected: domain error expected (-200 FAILED_FACE_DETECT / DOMAIN_FAIL_CODES / -1 depending on endpoint)"
+        return (
+            "no crash; if rejected: domain error expected "
+            "(-200 FAILED_FACE_DETECT / DOMAIN_FAIL_CODES / -1 depending on endpoint)"
+            + state_suffix
+        )
+
     if axis == "state":
         return "no crash; success=true or state-not-met error allowed"
-    return "no crash; response classified by actual error_code/msg"
 
+    return "no crash; response classified by actual error_code/msg" + state_suffix
 
+def _exp_app_nested_no_face(path: str) -> str:
+    if _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
+        return "success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected"
+    return "success=false, error_code=-200 (FAILED_FACE_DETECT)"
 
 def _expected_http_statuses_for(
     axis: str,
@@ -518,6 +542,18 @@ def _expected_http_statuses_for(
     명시하므로, report meta와 assertion이 같은 허용 집합을 쓰도록 한다.
     """
     pkey = _path_key(path)
+    
+    def _with_state_probe_fallback(statuses: tuple[int, ...]) -> tuple[int, ...]:
+        if pkey not in STATE_DEPENDENT_PATHS:
+            return statuses
+
+        # user_id 자체가 명백히 invalid한 range probe면 state fallback으로 숨기지 않음
+        if reason_code in {"range_violation", "range_error"} and field_lc == "user_id":
+            return statuses
+
+        # state-dependent endpoint에서는 validation 통과 후 state/resource 오류가 먼저 날 수 있음
+        return tuple(dict.fromkeys([*statuses, 422, 503]))
+
 
     if policy == "probe_only":
         field_lc = (target_field or "").lower()
@@ -526,32 +562,21 @@ def _expected_http_statuses_for(
         # 예: mode="1", mode="0", boolean="true"
         # 서버가 엄격하면 400, 관대하게 coercion하면 200
         if axis == "schema" or reason_code in {"type_coercion_risk", "type_mismatch"}:
-            return (200, 400)
+            return _with_state_probe_fallback((200, 400))
 
         # ID 계열 probe:
         # user_id=0/-1, sub_id=-1 등은 invalid parameter에 가까움.
         if reason_code in {"range_violation", "range_error"}:
-            field_lc = (target_field or "").lower()
-
-            # path/resource identifier 자체가 invalid
-            # user_id=0, user_id=-1 등은 request parameter 오류
             if field_lc == "user_id":
                 return (400,)
 
-            # sub_id는 0부터 유효하므로 sub_id=0은 range violation이 아님.
-            # sub_id=-1 같은 음수는 request parameter 오류.
-            # 단, 현재 함수에는 실제 probe 값이 없으므로 보수적으로 400/422 허용.
             if field_lc == "sub_id":
-                return (400, 422)
+                return _with_state_probe_fallback((400, 422))
 
-            # max_face=0은 Go validator required tag 때문에 400으로 떨어질 수 있고,
-            # max_face=11은 명세상 range 초과라 422 계열이 타당함.
-            # 두 boundary가 같은 reason_code로 들어오므로 400/422 둘 다 허용.
             if field_lc == "max_face":
                 return (400, 422)
 
-            # mode, threshold 등 config/body domain value 범위 오류
-            return (422,)
+            return _with_state_probe_fallback((422,))
 
         # base64 문자열 자체가 깨지면 400,
         # decode 이후 이미지/템플릿 처리 실패면 422
@@ -561,10 +586,6 @@ def _expected_http_statuses_for(
         # raw image relation mismatch, channel mismatch 등
         # 구조는 맞지만 값 관계가 유효하지 않은 경우
         if reason_code == "invalid_image_relation":
-            # all-in-one 패턴 엔드포인트는 HTTP 레벨 거부 없이 항상 200 + data.error_code=-200 반환
-            if _path_key(path) in _FIXED_CHANNEL_3_PATHS:
-                return (200,)
-
             field_lc = (target_field or "").lower()
 
             # 필드 자체 validation 실패: channel=0, width=0, height=0 등
@@ -575,7 +596,7 @@ def _expected_http_statuses_for(
             return (400, 422)
         
         if reason_code == "no_face_detected":
-            if _path_key(path) in {"/all-in-one", "/multi-detect", "/faces/analyze", "/faces/detect/raw"}:
+            if _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
                 return (200,)
             return (422,)
 
@@ -638,7 +659,7 @@ def _expected_http_statuses_for(
         return (400, 422)
 
     if reason_code in {"no_face_detected", "template_size_mismatch", "unprocessable_payload", "constraint_missing_in_generator"}:
-        if reason_code == "no_face_detected" and _path_key(path) in {"/all-in-one", "/multi-detect", "/faces/analyze", "/faces/detect/raw"}:
+        if reason_code == "no_face_detected" and _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
             return (200,)
         return (422, 503)
 
@@ -708,10 +729,34 @@ def _norm_path(path: str) -> str:
     return path.rstrip("/")
 
 def _path_key(path: str) -> str:
-    """Return version-neutral logical path, e.g. /api/v3/faces/detect -> /faces/detect."""
+    """Return version-neutral logical path.
+
+    Examples:
+      /api/v3/users/1/templates/0 -> /users/{user_id}/templates/{sub_id}
+      /api/v3/users/1/verify      -> /users/{user_id}/verify
+      /api/v3/faces/analyze       -> /faces/analyze
+    """
     p = _norm_path(path)
     p = re.sub(r"^/api/v\d+(?=/|$)", "", p)
-    return p or "/"
+    p = p or "/"
+
+    # Most specific first
+    replacements = [
+        (r"^/users/[^/]+/templates/[^/]+$", "/users/{user_id}/templates/{sub_id}"),
+        (r"^/users/[^/]+/verify/template$", "/users/{user_id}/verify/template"),
+        (r"^/users/[^/]+/verify$", "/users/{user_id}/verify"),
+        (r"^/users/[^/]+/templates/count$", "/users/{user_id}/templates/count"),
+        (r"^/users/[^/]+/templates$", "/users/{user_id}/templates"),
+        (r"^/users/[^/]+/faces$", "/users/{user_id}/faces"),
+        (r"^/users/[^/]+$", "/users/{user_id}"),
+        (r"^/user/[^/]+/template$", "/user/{user_id}/template"),
+    ]
+
+    for pattern, repl in replacements:
+        if re.match(pattern, p):
+            return repl
+
+    return p
 
 def _build_url(path: str, path_values: dict[str, Any]) -> str:
     url = path
@@ -1319,11 +1364,6 @@ class RuleBasedTCGenerator:
 
         # ── must_fail ─────────────────────────────────────────────────────────
         if policy == "must_fail":
-            if mode in ("http_status", "hybrid"):
-                # all-in-one 패턴 엔드포인트는 invalid_image_relation/no_face_detected 시에도
-                # HTTP 200 + data.error_code=-200 반환 (HTTP 레벨 reject 없음)
-                if reason_code in {"invalid_image_relation", "no_face_detected"} and _path_key(path) in _FIXED_CHANNEL_3_PATHS:
-                    return self._http_nested_no_face_assertion(label)
             if mode == "http_status":
                 exp_statuses = _expected_http_statuses_for(axis, reason_code, field_name, path, policy)
                 exp_codes  = _expected_error_codes_for(axis, reason_code, field_name, path)
@@ -1395,10 +1435,7 @@ class RuleBasedTCGenerator:
         pkey = _path_key(path)
 
         # 현재 QFE v3 raw face endpoints는 no face를 HTTP 200 + data.error_code=-200으로 반환함
-        # /all-in-one, /multi-detect도 동일한 AllInOneResponse 패턴 사용
         if self.error_mode in ("http_status", "hybrid") and pkey in {
-            "/all-in-one",
-            "/multi-detect",
             "/faces/analyze",
             "/faces/detect/raw",
         }:
@@ -2167,7 +2204,8 @@ class RuleBasedTCGenerator:
                 ),
                 expected_http="200",
                 expected_app=(
-                    "success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected"
+                    "success=false, error_code=-200 (FAILED_FACE_DETECT) "
+                    f"OR ec in {sorted(STATE_NOT_MET_CODES)}"
                 ),
                 error_detail="domain.no_face_detected.image_data.black_1x1",
                 request_method=method,
@@ -2176,7 +2214,7 @@ class RuleBasedTCGenerator:
                 request_headers=None,
                 request_body=black_body,
                 expected_status_display=(
-                    "200 / success=true, error_code=0, data.error_code=-200"
+                    "200 / success=false, ec=-200 (FAILED_FACE_DETECT) OR state not met"
                 ),
                 rule_type="face_image",
                 rule_subtype="no_face_black",
@@ -2453,7 +2491,8 @@ class RuleBasedTCGenerator:
                 ),
                 expected_http="200",
                 expected_app=(
-                    "success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected"
+                    "success=false, error_code=-200 (FAILED_FACE_DETECT) "
+                    f"OR ec in general_fail/face_pipeline/state_not_met"
                 ),
                 error_detail="domain.no_face_detected.image_data.black_1x1",
                 request_method=method,
@@ -2461,7 +2500,7 @@ class RuleBasedTCGenerator:
                 request_query=query_params,
                 request_headers=None,
                 request_body=black_body,
-                expected_status_display="200 / success=true, error_code=0, data.error_code=-200",
+                expected_status_display="200 / success=false, ec=-200 OR state not met",
                 rule_type="face_image",
                 rule_subtype="no_face_black",
                 endpoint_profile="raw_image",
@@ -2678,7 +2717,14 @@ class RuleBasedTCGenerator:
                         fname=f"test_{op_id}_wrong_type_{_safe_name(p['name'])}_{label}",
                         docstring=f"[rule:wrong_type] Pass {label} wrong type for '{p['name']}' (expected {p.get('schema', {}).get('type', 'string')}).",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion(policy, p["name"], f"wrong_type:{label}", axis="schema", reason_code=reason_code),
+                        assertion_str=self._build_policy_assertion(
+                            policy,
+                            p["name"],
+                            f"wrong_type:{label}",
+                            axis="schema",
+                            reason_code=reason_code,
+                            path=resolved_path,
+                        ),
                         axis="schema",
                         reason_code=reason_code,
                         target_field=p["name"],
@@ -2726,7 +2772,14 @@ class RuleBasedTCGenerator:
                             fname=f"test_{op_id}_wrong_type_body_{_safe_name(field)}_{label}",
                             docstring=f"[rule:wrong_type] Pass {label} wrong type for body field '{field}' (expected {field_schema.get('type', 'string')}).",
                             call_str=call,
-                            assertion_str=self._build_policy_assertion(policy, field, f"wrong_type:{label}", axis="schema", reason_code=reason_code),
+                            assertion_str=self._build_policy_assertion(
+                                policy,
+                                field,
+                                f"wrong_type:{label}",
+                                axis="schema",
+                                reason_code=reason_code,
+                                path=resolved_path,
+                            ),
                             axis="schema",
                             reason_code=reason_code,
                             target_field=field,
@@ -2988,7 +3041,14 @@ class RuleBasedTCGenerator:
                         fname=f"test_{op_id}_input_val_{_safe_name(p['name'])}_{probe_label}",
                         docstring=f"[rule:input_validation] param '{p['name']}' tag={tag} probe={probe_label} policy={policy}.",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion(policy, p["name"], f"semantic:{probe_label}", axis=_s_axis, reason_code=_s_rc),
+                        assertion_str=self._build_policy_assertion(
+                            policy,
+                            p["name"],
+                            f"semantic:{probe_label}",
+                            axis=_s_axis,
+                            reason_code=_s_rc,
+                            path=resolved_path,
+                        ),
                         axis=_s_axis,
                         reason_code=_s_rc,
                         target_field=p["name"],
@@ -3041,7 +3101,14 @@ class RuleBasedTCGenerator:
                         fname=f"test_{op_id}_input_val_{_safe_name(field)}_{probe_label}",
                         docstring=f"[rule:input_validation] body field '{field}' tag={tag} probe={probe_label} policy={policy}.",
                         call_str=call,
-                        assertion_str=self._build_policy_assertion(policy, field, f"semantic:{probe_label}", axis=_s_axis, reason_code=_s_rc),
+                        assertion_str=self._build_policy_assertion(
+                            policy,
+                            field,
+                            f"semantic:{probe_label}",
+                            axis=_s_axis,
+                            reason_code=_s_rc,
+                            path=resolved_path,
+                        ),
                         axis=_s_axis,
                         reason_code=_s_rc,
                         target_field=field,
@@ -3337,20 +3404,20 @@ class RuleBasedTCGenerator:
                                 f"channel={wrong_ch} ({label}) — RGB-only endpoint must reject non-3 channel."
                             ),
                             call_str=_render_call(method, path, path_params, query_params, wrong_ch_body),
-                            assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}", axis="domain", reason_code="invalid_image_relation", path=resolved_path),
+                            assertion_str=self._build_policy_assertion("must_fail", "channel", f"channel_{label}", axis="domain", reason_code="invalid_image_relation"),
                             axis="domain",
                             reason_code="invalid_image_relation",
                             target_field="channel",
                             test_condition=f"channel={wrong_ch} ({label}), image_data={_CH3_W*_CH3_H*wrong_ch}B — channel≠3 (RGB-only endpoint)",
                             expected_http="200",
-                            expected_app="success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected",
+                            expected_app="success=false, error_code<0 (channel must be 3)",
                             error_detail=f"domain.invalid_image_relation.channel.{label}",
                             request_method=method,
                             request_path=resolved_path,
                             request_query=query_params,
                             request_headers=None,
                             request_body=wrong_ch_body,
-                            expected_status_display="200 / success=true, error_code=0, data.error_code=-200",
+                            expected_status_display="200 / success=false (channel must be 3)",
                             rule_type="raw_image_relation",
                             rule_subtype=f"channel_fixed3_{label}",
                             endpoint_profile="raw_image",
@@ -3376,20 +3443,20 @@ class RuleBasedTCGenerator:
                             f"channel=3, {_CH3_W}x{_CH3_H} color image — valid RGB payload, no crash expected."
                         ),
                         call_str=_render_call(method, path, path_params, query_params, valid_ch3_body),
-                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid", axis="domain", reason_code="invalid_image_relation", path=resolved_path),
+                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid", axis="domain", reason_code="invalid_image_relation"),
                         axis="domain",
                         reason_code="invalid_image_relation",
                         target_field="channel",
                         test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid",
                         expected_http="200",
-                        expected_app="success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected",
+                        expected_app=_exp_app_probe("domain", "no_face_detected", "image_data", path),
                         error_detail="domain.invalid_image_relation.channel.fixed3_valid",
                         request_method=method,
                         request_path=resolved_path,
                         request_query=query_params,
                         request_headers=None,
                         request_body=valid_ch3_body,
-                        expected_status_display="200 / success=true, error_code=0, data.error_code=-200",
+                        expected_status_display=f"200 / {_exp_app_probe('domain', 'no_face_detected', 'image_data', path)}",
                         rule_type="raw_image_relation",
                         rule_subtype="channel_fixed3_valid",
                         endpoint_profile="raw_image",
@@ -3415,9 +3482,8 @@ class RuleBasedTCGenerator:
                 }
                 key_wh = f"ch3_wh:{wh_label}"
                 if self._register_case(method, resolved_path, "width_height", key_wh, "invalid_image_relation", "raw_image_relation"):
-                    # all-in-one 엔드포인트는 항상 HTTP 200 + nested data.error_code=-200 반환
-                    _all_in_one_display = "success=true, error_code=0, data.error_code=-200, data.status=no_faces_detected"
-                    exp_app = _all_in_one_display
+                    exp_app = (_exp_app_fail("domain", "invalid_image_relation", "width_height") if policy == "must_fail"
+                               else _exp_app_probe("domain", "invalid_image_relation", "width_height", path))
                     blocks.append(
                         self._api_test_block(
                             fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
@@ -3426,7 +3492,7 @@ class RuleBasedTCGenerator:
                                 f"width={w}, height={h}, channel=3 — {wh_label} ({policy})."
                             ),
                             call_str=_render_call(method, path, path_params, query_params, wh_body),
-                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}", axis="domain", reason_code="invalid_image_relation", path=resolved_path),
+                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}", axis="domain", reason_code="invalid_image_relation"),
                             axis="domain",
                             reason_code="invalid_image_relation",
                             target_field="width_height",
