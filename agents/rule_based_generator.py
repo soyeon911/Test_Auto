@@ -203,46 +203,104 @@ _CH3_BOUNDARY_W, _CH3_BOUNDARY_H = 1, 1                                      # �
 _CH3_BOUNDARY_IMG  = base64.b64encode(bytes(_CH3_BOUNDARY_W * _CH3_BOUNDARY_H * 3)).decode()
 
 # channel=3으로 고정된 엔드포인트 (RGB only)
+# NOTE: path 비교는 _path_key()로 /api/v2, /api/v3 prefix를 제거한 logical path 기준으로 수행한다.
 _FIXED_CHANNEL_3_PATHS: frozenset[str] = frozenset({
-    "/api/v2/all-in-one",
-    "/api/v2/multi-detect",
+    "/all-in-one",
+    "/multi-detect",
+    "/faces/analyze",
+    "/faces/detect/raw",
 })
 
 # DB state 없이 이미지 입력만으로 동작하는 순수 face 처리 엔드포인트
 # (enroll/identify/verify 제외 — 이들은 DB 상태 필요)
 _FACE_DETECT_ONLY_PATHS: frozenset[str] = frozenset({
-    "/api/v2/detect",
-    "/api/v2/hpe",
-    "/api/v2/mask",
-    "/api/v2/extract",
-    "/api/v2/fam",
-    "/api/v2/validate-image",
+    "/detect",
+    "/hpe",
+    "/mask",
+    "/extract",
+    "/fam",
+    "/validate-image",
+    "/all-in-one",
+    "/multi-detect",
+    "/faces/detect",
+    "/faces/pose",
+    "/faces/mask",
+    "/faces/attributes",
+    "/templates/extract",
+    "/images/validate",
+    "/faces/analyze",
+    "/faces/detect/raw",
 })
 
 # endpoint profiles
 _MATCH_VERDICT_PATHS: frozenset[str] = frozenset({
-    "/api/v2/match",
-    "/api/v2/match-images",
-    "/api/v2/verify",
-    "/api/v2/verify-template",
+    "/match",
+    "/match-images",
+    "/verify",
+    "/verify-template",
+    "/templates/match",
+    "/images/match",
+    "/users/{user_id}/verify",
+    "/users/{user_id}/verify/template",
 })
 
 _FACE_OPERATION_PATHS: frozenset[str] = frozenset({
-    "/api/v2/detect",
-    "/api/v2/hpe",
-    "/api/v2/mask",
-    "/api/v2/extract",
-    "/api/v2/fam",
-    "/api/v2/enroll",
-    "/api/v2/enroll-template",
-    "/api/v2/identify",
-    "/api/v2/identify-template",
-    "/api/v2/validate-image",
-    "/api/v2/verify",
-    "/api/v2/verify-template",
+    "/detect",
+    "/hpe",
+    "/mask",
+    "/extract",
+    "/fam",
+    "/enroll",
+    "/enroll-template",
+    "/identify",
+    "/identify-template",
+    "/validate-image",
+    "/verify",
+    "/verify-template",
+    "/all-in-one",
+    "/multi-detect",
+    "/faces/detect",
+    "/faces/pose",
+    "/faces/mask",
+    "/faces/attributes",
+    "/templates/extract",
+    "/images/validate",
+    "/users/{user_id}/faces",
+    "/faces/identify",
+    "/users/{user_id}/verify",
+    "/faces/analyze",
+    "/faces/detect/raw",
 })
 
 _RAW_IMAGE_FIELDS: frozenset[str] = frozenset({"width", "height", "channel", "image_data"})
+
+# Swagger description에는 required/range가 있지만 definitions.required/min/max가 빠진 모델을 보정한다.
+# schema_enricher가 x_constraints를 붙인 경우에는 x_constraints가 이 fallback보다 우선한다.
+_FIELD_CONSTRAINTS: dict[str, dict[str, Any]] = {
+    "threshold": {"minimum": 0, "maximum": 100000, "example": 75204},
+    "max_face": {"minimum": 1, "maximum": 10, "example": 10},
+    "mode": {"minimum": 0, "maximum": 1, "example": 1},
+    "width": {"minimum": 1, "maximum": 4000, "example": 640},
+    "height": {"minimum": 1, "maximum": 4000, "example": 480},
+    "channel": {"minimum": 3, "maximum": 3, "example": 3},
+    "user_id": {"minimum": 1, "example": 1},
+    "sub_id": {"minimum": 0, "example": 0},
+}
+
+_FIELD_TAG_FALLBACKS: dict[str, str] = {
+    "image_data": "base64_image",
+    "image1_data": "base64_image",
+    "image2_data": "base64_image",
+    "template_data": "base64_template",
+    "template": "base64_template",
+    "template1": "base64_template",
+    "template2": "base64_template",
+    "threshold": "threshold_numeric",
+    "user_id": "path_user_id",
+    "sub_id": "numeric_id",
+    "channel": "channel_count",
+    "mode": "enum_mode",
+}
 
 _INPUT_VALIDATION_PROBES: dict[str, list[dict[str, Any]]] = {
     "base64_image": [
@@ -383,14 +441,26 @@ SYSTEM_ERROR_CODES = frozenset({
     -9999, # UNKNOWN
 })
 STATE_DEPENDENT_PATHS: frozenset[str] = frozenset({
-    "/api/v2/delete",
-    "/api/v2/enroll",
-    "/api/v2/enroll-template",
-    "/api/v2/verify",
-    "/api/v2/verify-template",
-    "/api/v2/identify",
-    "/api/v2/identify-template",
-    "/api/v2/user/{user_id}/template",
+    "/delete",
+    "/enroll",
+    "/enroll-template",
+    "/verify",
+    "/verify-template",
+    "/identify",
+    "/identify-template",
+    "/user/{user_id}/template",
+    "/users",
+    "/users/count",
+    "/templates/count",
+    "/users/{user_id}",
+    "/users/{user_id}/faces",
+    "/users/{user_id}/templates",
+    "/users/{user_id}/templates/count",
+    "/users/{user_id}/templates/{sub_id}",
+    "/users/{user_id}/verify",
+    "/users/{user_id}/verify/template",
+    "/faces/identify",
+    "/templates/identify",
 })
 
 
@@ -459,7 +529,7 @@ def _expected_http_for(
         "user_not_found", "template_not_found", "database_not_loaded",
         "file_not_found", "precondition_not_met",
     }:
-        return 404
+        return 422
 
     if reason_code in {
         "invalid_base64", "invalid_image_relation", "no_face_detected",
@@ -518,6 +588,12 @@ def _norm_path(path: str) -> str:
     if not path.startswith("/"):
         path = "/" + path
     return path.rstrip("/")
+
+def _path_key(path: str) -> str:
+    """Return version-neutral logical path, e.g. /api/v3/faces/detect -> /faces/detect."""
+    p = _norm_path(path)
+    p = re.sub(r"^/api/v\d+(?=/|$)", "", p)
+    return p or "/"
 
 def _build_url(path: str, path_values: dict[str, Any]) -> str:
     url = path
@@ -592,12 +668,55 @@ class RuleBasedTCGenerator:
     def _schema_constraints(self, schema: dict) -> dict[str, Any]:
         return schema.get("x_constraints", {}) or {}
 
+    def _combined_constraints(self, name: str, schema: dict) -> dict[str, Any]:
+        """Merge field-name fallback constraints with enriched/schema constraints.
+
+        Priority: field fallback < schema standard fields < x_constraints.
+        """
+        field_key = (name or "").lower()
+        merged: dict[str, Any] = dict(_FIELD_CONSTRAINTS.get(field_key, {}))
+        for key in ("minimum", "maximum", "example"):
+            if schema.get(key) is not None:
+                merged[key] = schema[key]
+        merged.update(self._schema_constraints(schema))
+        return merged
+
     def _probe_policy(self, schema: dict) -> dict[str, Any]:
         return schema.get("x_probe_policy", {}) or {}
 
-    def _normalize_tag(self, schema: dict) -> str:
+    def _normalize_tag(self, schema: dict, name: str = "") -> str:
         tag = schema.get("semantic_tag", "") or ""
-        return tag if tag in SUPPORTED_QFE_TAGS else "plain_string"
+        if tag in SUPPORTED_QFE_TAGS:
+            return tag
+
+        field_key = (name or "").lower()
+        fallback = _FIELD_TAG_FALLBACKS.get(field_key)
+        if fallback in SUPPORTED_QFE_TAGS:
+            return fallback
+
+        return "plain_string"
+
+    def _required_body_fields(self, req_body: dict | None) -> list[str]:
+        """Return required body fields, with QFE Swagger fallback.
+
+        The current QFE Swagger often documents fields as required in operation
+        descriptions while the referenced definition omits the schema.required array.
+        If the body parameter itself is required and the schema has properties, treat
+        all properties as required. This is appropriate for the request DTOs used here.
+        """
+        if not req_body:
+            return []
+
+        schema = req_body.get("schema") or {}
+        explicit = schema.get("required") or []
+        if explicit:
+            return list(explicit)
+
+        props = schema.get("properties") or {}
+        if req_body.get("required") and isinstance(props, dict):
+            return list(props.keys())
+
+        return []
 
     def _dedup_key(
         self,
@@ -625,15 +744,13 @@ class RuleBasedTCGenerator:
         self._seen_cases.add(key)
         return True
 
-    def _range_cases(self, schema: dict) -> list[dict[str, Any]]:
-        cons = self._schema_constraints(schema)
-        # x_constraints 우선, 없으면 표준 Swagger minimum/maximum 읽기 (버전 호환)
-        minimum = cons.get("minimum") if cons.get("minimum") is not None else schema.get("minimum")
-        maximum = cons.get("maximum") if cons.get("maximum") is not None else schema.get("maximum")
+    def _range_cases(self, name: str, schema: dict) -> list[dict[str, Any]]:
+        cons = self._combined_constraints(name, schema)
+        # x_constraints 우선, 없으면 표준 Swagger/fallback minimum/maximum 읽기
+        minimum = cons.get("minimum")
+        maximum = cons.get("maximum")
 
         example = cons.get("example")
-        if example is None:
-            example = schema.get("example")
 
         if minimum is None and maximum is None and not isinstance(example, (int, float)):
             return []
@@ -714,9 +831,10 @@ class RuleBasedTCGenerator:
                 return "domain"
 
             # state 계열 (endpoint context 필요)
-            if path in {"/api/v2/verify-template", "/api/v2/verify"} and "verification failed" in msg_l:
+            pkey = _path_key(path)
+            if pkey in {"/verify-template", "/verify", "/users/{user_id}/verify", "/users/{user_id}/verify/template"} and "verification failed" in msg_l:
                 return "state"
-            if path == "/api/v2/delete" and "failed to delete user" in msg_l:
+            if pkey in {"/delete", "/users/{user_id}"} and "failed to delete user" in msg_l:
                 return "state"
             if "failed to get user template" in msg_l:
                 return "state"
@@ -798,11 +916,15 @@ class RuleBasedTCGenerator:
             _ec = body.get("error_code", 0)
             _msg = str(body.get("msg") or "").lower()
             _path = {path!r}
+            _pkey = _path.rstrip("/") or "/"
+            _parts = _pkey.split("/", 3)
+            if len(_parts) >= 3 and _parts[1] == "api" and _parts[2].startswith("v") and _parts[2][1:].isdigit():
+                _pkey = ("/" + _parts[3]) if len(_parts) > 3 else "/"
 
             _state_like_minus_one = (
                 _ec == -1 and (
-                    (_path in ("/api/v2/verify-template", "/api/v2/verify") and "verification failed" in _msg)
-                    or (_path == "/api/v2/delete" and "failed to delete user" in _msg)
+                    (_pkey in ("/verify-template", "/verify", "/users/{user_id}/verify", "/users/{user_id}/verify/template") and "verification failed" in _msg)
+                    or (_pkey in ("/delete", "/users/{user_id}") and "failed to delete user" in _msg)
                     or ("failed to get user template" in _msg)
                     or ("template not found" in _msg)
                     or ("user not found" in _msg)
@@ -928,13 +1050,37 @@ class RuleBasedTCGenerator:
 
         return "\n".join(lines) + "\n"
 
-    def _http_state_tolerant_assertion(self, path: str) -> str:
-        """http_status/hybrid 모드: 200(성공) 또는 404(상태 미충족) 허용."""
-        state_codes = sorted(STATE_NOT_MET_CODES)
-
+    def _http_hybrid_error_assertion(
+        self,
+        expected_status: int,
+        expected_error_codes: frozenset[int] | None,
+        field_name: str,
+        label: str,
+    ) -> str:
+        """hybrid 모드 must_fail: legacy 200 또는 표준 HTTP error status를 모두 허용."""
+        codes_list = sorted(expected_error_codes or [])
         lines = [
-            "assert resp.status_code in [200, 404], (",
-            "    f\"[FAIL] expected HTTP 200(success) or 404(state not met), got {resp.status_code}\\n\"",
+            f"assert resp.status_code in [200, {expected_status}], (",
+            f"    f\"[FAIL] {label} on '{field_name}' - expected legacy 200 or HTTP {expected_status}, got {{resp.status_code}}\\n\"",
+            "    f\"  Body: {resp.text[:300]}\"",
+            ")",
+            "try:",
+            "    body = resp.json()",
+            "except ValueError:",
+            "    pytest.fail(f\"Expected JSON error body, got: {resp.text[:300]}\")",
+            "assert body.get(\"success\") is False or body.get(\"error_code\") is not None, (",
+            "    f\"[FAIL] expected structured error body\\n  body: {resp.text[:300]}\"",
+            ")",
+        ]
+        if codes_list:
+            lines.append(f"# [info] expected error_code(s): {codes_list} - recorded in diag for failure cause only")
+        return "\n".join(lines) + "\n"
+
+    def _http_state_tolerant_assertion(self, path: str) -> str:
+        """http_status/hybrid 모드: 200(성공) 또는 400/422/503(상태·SDK 미충족) 허용."""
+        lines = [
+            "assert resp.status_code in [200, 400, 422, 503], (",
+            "    f\"[FAIL] expected HTTP 200(success) or 400/422/503(state/sdk/client error), got {resp.status_code}\\n\"",
             "    f\"  Body: {resp.text[:500]}\"",
             ")",
             "try:",
@@ -948,7 +1094,7 @@ class RuleBasedTCGenerator:
             "    )",
             "else:",
             "    assert body.get(\"success\") is False, (",
-            "        f\"[FAIL] HTTP 404 but success!=false\\n  body: {resp.text[:300]}\"",
+            "        f\"[FAIL] error HTTP but success!=false\\n  body: {resp.text[:300]}\"",
             "    )",
         ]
 
@@ -1216,8 +1362,8 @@ class RuleBasedTCGenerator:
         return body or None
 
     def _good_value(self, name: str, schema: dict) -> Any:
-        cons = self._schema_constraints(schema)
-        tag = self._normalize_tag(schema)
+        cons = self._combined_constraints(name, schema)
+        tag = self._normalize_tag(schema, name)
         ftype = schema.get("type", "string")
 
         if ftype == "integer":
@@ -1310,11 +1456,12 @@ class RuleBasedTCGenerator:
         return _RAW_IMAGE_FIELDS.issubset(props)
 
     def _get_endpoint_profile(self, path: str, req_body: dict | None) -> str:
-        if path in _MATCH_VERDICT_PATHS:
+        pkey = _path_key(path)
+        if pkey in _MATCH_VERDICT_PATHS:
             return "match_verdict"
         if self._is_raw_image_relation_endpoint(req_body):
             return "raw_image"
-        if path in _FACE_OPERATION_PATHS:
+        if pkey in _FACE_OPERATION_PATHS:
             return "face_operation"
         return "default"
 
@@ -1490,7 +1637,7 @@ class RuleBasedTCGenerator:
         resolved_path = _build_url(path, path_params)
         call = _render_call(method, path, path_params, query_params, body)
 
-        allow_state_not_met = path in STATE_DEPENDENT_PATHS
+        allow_state_not_met = _path_key(path) in STATE_DEPENDENT_PATHS
 
         axis_value = "state" if allow_state_not_met else "domain"
         reason_value = "precondition_not_met" if allow_state_not_met else "success_expected"
@@ -1582,7 +1729,9 @@ class RuleBasedTCGenerator:
             reason_code="precondition_not_met",
         )
 
-        if path == "/api/v2/match":
+        pkey = _path_key(path)
+
+        if pkey == "/match":
             assertion = base_assertion + self._when_success(
                 self._match_status_assertion(
                     score_field="match_score",
@@ -1591,15 +1740,47 @@ class RuleBasedTCGenerator:
                 )
             )
             exp_app = (
-                "success=true/error_code>=0 (data present): domain validated; "
+                "success=true/error_code>=0 (data present): data.match_score+status validated; "
                 "OR success=false/error_code<0 (state not met)"
             )
             condition = (
                 "Happy path — valid request; success=true 시 domain 검증 "
-                "(data.error_code, data.match_score, data.status); "
+                "(data.match_score, data.status); "
                 "success=false/error_code<0 이면 상태 미충족으로 허용"
             )
-        elif "verify" in path:
+        elif pkey == "/templates/match":
+            assertion = base_assertion + self._when_success(
+                self._match_domain_assertion(
+                    score_field="match_score",
+                    verdict_field="is_same_person",
+                )
+            )
+            exp_app = (
+                "success=true/error_code>=0 (data present): data.match_score+is_same_person validated; "
+                "OR success=false/error_code<0 (state not met)"
+            )
+            condition = (
+                "Happy path — valid request; success=true 시 domain 검증 "
+                "(data.match_score, data.is_same_person); "
+                "success=false/error_code<0 이면 상태 미충족으로 허용"
+            )
+        elif pkey in {"/match-images", "/images/match"}:
+            assertion = base_assertion + self._when_success(
+                self._match_domain_assertion(
+                    score_field="similarity",
+                    verdict_field="is_same_person",
+                )
+            )
+            exp_app = (
+                "success=true/error_code>=0 (data present): data.similarity+is_same_person validated; "
+                "OR success=false/error_code<0 (state not met)"
+            )
+            condition = (
+                "Happy path — valid request; success=true 시 domain 검증 "
+                "(data.similarity, data.is_same_person); "
+                "success=false/error_code<0 이면 상태 미충족으로 허용"
+            )
+        elif pkey in {"/verify", "/verify-template", "/users/{user_id}/verify", "/users/{user_id}/verify/template"}:
             assertion = base_assertion + self._when_success(
                 self._match_domain_assertion(
                     score_field="match_score",
@@ -1780,7 +1961,7 @@ class RuleBasedTCGenerator:
             "face_real",
         ):
             call_c = _render_call(method, path, path_params, query_params, face_body)
-            is_detect_only = path in _FACE_DETECT_ONLY_PATHS
+            is_detect_only = _path_key(path) in _FACE_DETECT_ONLY_PATHS
 
             if is_detect_only:
                 policy_c = "must_pass"
@@ -1870,7 +2051,7 @@ class RuleBasedTCGenerator:
         replaced = False
 
         for field, fschema in props.items():
-            if self._normalize_tag(fschema) == "base64_image":
+            if self._normalize_tag(fschema, field) == "base64_image":
                 if img_var == "_BLACK_1X1_IMG_B64":
                     new_body[field] = _BLACK_1X1_IMG_B64
 
@@ -2164,7 +2345,7 @@ class RuleBasedTCGenerator:
 
         if req_body:
             body_schema = req_body.get("schema", {})
-            required_fields = body_schema.get("required", [])
+            required_fields = self._required_body_fields(req_body)
             properties = body_schema.get("properties", {})
             path_params = {
                 p["name"]: self._good_value(p["name"], p.get("schema", {}))
@@ -2364,7 +2545,7 @@ class RuleBasedTCGenerator:
             if ptype not in {"integer", "number"}:
                 continue
 
-            for case in self._range_cases(schema):
+            for case in self._range_cases(p["name"], schema):
                 probe = case["value"]
                 label = case["label"]
                 policy = case["policy"]
@@ -2387,7 +2568,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, p["name"], repr(probe), "range_violation", "boundary"):
                     continue
 
-                allow_state_not_met = (policy == "must_pass" and path in STATE_DEPENDENT_PATHS)
+                allow_state_not_met = (policy == "must_pass" and _path_key(path) in STATE_DEPENDENT_PATHS)
                 axis_value = "state" if allow_state_not_met else "domain"
                 reason_value = "precondition_not_met" if allow_state_not_met else "range_violation"
                 error_detail_value = (
@@ -2446,7 +2627,7 @@ class RuleBasedTCGenerator:
             if ftype not in {"integer", "number"}:
                 continue
 
-            for case in self._range_cases(field_schema):
+            for case in self._range_cases(field, field_schema):
                 probe = case["value"]
                 label = case["label"]
                 policy = case["policy"]
@@ -2457,7 +2638,7 @@ class RuleBasedTCGenerator:
                 if not self._register_case(method, resolved_path, field, repr(probe), "range_violation", "boundary"):
                     continue
 
-                allow_state_not_met = (policy == "must_pass" and path in STATE_DEPENDENT_PATHS)
+                allow_state_not_met = (policy == "must_pass" and _path_key(path) in STATE_DEPENDENT_PATHS)
                 axis_value = "state" if allow_state_not_met else "domain"
                 reason_value = "precondition_not_met" if allow_state_not_met else "range_violation"
                 error_detail_value = (
@@ -2533,7 +2714,7 @@ class RuleBasedTCGenerator:
 
         for p in params:
             schema = p.get("schema", {})
-            tag = self._normalize_tag(schema)
+            tag = self._normalize_tag(schema, p["name"])
             if tag not in SUPPORTED_QFE_PROBE_TAGS:
                 continue
             probes = _INPUT_VALIDATION_PROBES.get(tag, [])
@@ -2599,7 +2780,7 @@ class RuleBasedTCGenerator:
         properties = schema.get("properties", {})
 
         for field, field_schema in properties.items():
-            tag = self._normalize_tag(field_schema)
+            tag = self._normalize_tag(field_schema, field)
             if tag not in SUPPORTED_QFE_PROBE_TAGS:
                 continue
             probes = _INPUT_VALIDATION_PROBES.get(tag, [])
@@ -2899,7 +3080,7 @@ class RuleBasedTCGenerator:
             )
 
         # ── channel=3 고정 엔드포인트 전용 TC ──────────────────────────────
-        if path in _FIXED_CHANNEL_3_PATHS:
+        if _path_key(path) in _FIXED_CHANNEL_3_PATHS:
             # (A) channel=1 (grayscale) → must_fail: RGB only 서버는 거부해야 함
             for wrong_ch, img_b64, label in [
                 (1, _CH1_IMG_B64, "grayscale_ch1"),

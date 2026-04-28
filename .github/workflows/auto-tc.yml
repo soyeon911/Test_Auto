@@ -15,41 +15,48 @@ on:
       force_run:
         description: '변경 없어도 강제 실행'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
       server_target:
-      description: '테스트 대상 서버'
-      required: false
-      default: 'external'
-      type: choice
-      options:
-        - local
-        - external
+        description: '테스트 대상 서버'
+        required: false
+        default: external
+        type: choice
+        options:
+          - local
+          - external
 
       base_url:
-      description: '서버 Base URL'
-      required: false
-      default: 'http://192.168.150.125:7900'
-      
+        description: '서버 Base URL'
+        required: false
+        default: 'http://192.168.150.125:7900'
+        type: string
+
       reset_semantic_cache:
         description: 'semantic cache 강제 초기화'
         required: false
-        default: 'true'
+        default: true
         type: boolean
+
       match_threshold:
         description: 'match/verify score threshold'
         required: false
         default: '0'
+        type: string
+
       run_crash_probe:
-        description: 'Crash Probe job 강제 실행 (변경 감지와 무관하게 실행)'
+        description: 'Crash Probe job 강제 실행'
         required: false
-        default: 'false'
+        default: false
         type: boolean
+
       probe_filter:
-        description: 'Crash Probe pytest -k 필터 (예: enroll or match)'
+        description: 'Crash Probe pytest -k 필터'
         required: false
         default: ''
+        type: string
+
       error_response_mode:
         description: 'AutoTC error response mode'
         required: false
@@ -116,7 +123,7 @@ jobs:
 
           $baseUrl = "$env:BASE_URL".TrimEnd("/")
           $healthUrl = "$baseUrl$env:HEALTH_CHECK_PATH"
-          $swaggerUrl = "$baseUrl/docs/doc.json"
+          $swaggerUrl = "$baseUrl/docs/swagger.json"
 
           Write-Host "[Detect] BASE_URL=$baseUrl"
           Write-Host "[Detect] health=$healthUrl"
@@ -282,6 +289,14 @@ jobs:
 
       SERVER_TARGET: ${{ inputs.server_target != '' && inputs.server_target || 'external' }}
       BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.125:7900' }}
+
+      SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
+      SERVER_EXE_NAME: qfe-server.exe
+      SERVER_LICENSE_KEY: 1
+      SERVER_MODE_CHOICE: 1
+      SERVER_INSTANCE_COUNT: 1
+      SERVER_MODEL_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\model
+      SERVER_DB_PATH: C:\Users\sypark5\TestAgent\qfe-api-server-no-license\face_database.db
       REPORT_DIR: reports
       CRASH_LOG_DIR: crash_logs
       SERVER_LOG_DIR: server_logs
@@ -558,8 +573,7 @@ jobs:
           }
 
       - name: 서버 시작 로그 출력 (실패 시)
-        if: env.SERVER_TARGET == 'local'
-        if: steps.pre_health.outputs.server_up == 'false'
+        if: env.SERVER_TARGET == 'local' && steps.pre_health.outputs.server_up == 'false'
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -574,15 +588,13 @@ jobs:
           }
 
       - name: Crash 로그 수집 (테스트 전)
-        if: env.SERVER_TARGET == 'local'
-        if: steps.pre_health.outputs.server_up == 'false'
+        if: env.SERVER_TARGET == 'local' && steps.pre_health.outputs.server_up == 'false'
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           scripts\collect_crash_logs.ps1 -OutputDir $env:CRASH_LOG_DIR -Label "pre_test"
 
       - name: Crash 로그 업로드 (테스트 전)
-        if: env.SERVER_TARGET == 'local'
-        if: steps.pre_health.outputs.server_up == 'false'
+        if: env.SERVER_TARGET == 'local' && steps.pre_health.outputs.server_up == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: crash-logs-pre-${{ github.run_id }}
@@ -590,8 +602,7 @@ jobs:
           retention-days: 14
 
       - name: 서버 로그 업로드 (테스트 전 실패 시)
-        if: env.SERVER_TARGET == 'local'
-        if: steps.pre_health.outputs.server_up == 'false'
+        if: env.SERVER_TARGET == 'local' && steps.pre_health.outputs.server_up == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: server-logs-pre-${{ github.run_id }}
@@ -845,8 +856,8 @@ jobs:
             Write-Host "::warning::테스트 실행 중 API 서버가 다운됐습니다. Crash 로그를 수집합니다."
           }
 
-      - name: Crash 로그 수집 (테스트 후)
-        if: always() && steps.post_health.outputs.server_up == 'false'
+      - name: Crash 로그 업로드 (테스트 후)
+        if: always() && env.SERVER_TARGET == 'local' && steps.post_health.outputs.server_up == 'false'
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           scripts\collect_crash_logs.ps1 -OutputDir "$env:CRASH_LOG_DIR`_post" -Label "post_test"
@@ -925,7 +936,7 @@ jobs:
           Write-Host "[Result] Pipeline completed successfully."
 
       - name: API 서버 종료 (job2 test)
-        if: env.SERVER_TARGET == 'local'
+        if: always() && env.SERVER_TARGET == 'local'
         shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -961,7 +972,7 @@ jobs:
     runs-on: [self-hosted, windows]
 
     env:
-      BASE_URL:          ${{ inputs.base_url != '' && inputs.base_url || 'http://127.0.0.1:8080' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.125:7900' }}
       REPORT_DIR:        reports
       PROBE_REPORT_DIR:  reports/crash_probe
       SWAGGER_SOURCE:    ${{ needs.detect-changes.outputs.swagger_source }}
@@ -1053,7 +1064,9 @@ jobs:
   crash-probe:
     name: Crash Probe (Robustness Layer B)
     needs: detect-changes
-    if: needs.detect-changes.outputs.should_run == 'true' || inputs.run_crash_probe == 'true'
+    if: >
+      (inputs.server_target == 'local') &&
+      (needs.detect-changes.outputs.should_run == 'true' || inputs.run_crash_probe == true)
     runs-on: [self-hosted, windows]
     timeout-minutes: 60
 

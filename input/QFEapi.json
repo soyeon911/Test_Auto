@@ -1,52 +1,18 @@
 {
-    "schemes": [],
+    "schemes": ["http"],
     "swagger": "2.0",
     "info": {
-        "description": "**Quick Face Engine REST API**\n\nProvides face detection, recognition, and database management capabilities.\n\n---\n\n**Response Format**\n\nAll endpoints return JSON with the following structure:\n```json\n{\n\"success\": true,\n\"error_code\": 0,\n\"msg\": \"Operation completed\",\n\"data\": { ... }\n}\n```\n\n- `success`: Operation result (true/false)\n- `error_code`: 0 = success, negative = error (see QFE_RET_CODE)\n- `msg`: Human-readable message\n- `data`: Response payload",
-        "title": "QFE REST API",
+        "description": "**Quick Face Engine API Server**\n\nProvides face detection, recognition, and database management capabilities.\n\n---\n\n**Response Format**\n\nAll endpoints return JSON with the following structure:\n```json\n{\n\"success\": true,\n\"error_code\": 0,\n\"msg\": \"Operation completed\",\n\"data\": { ... }\n}\n```\n\n- `success`: Operation result (true/false)\n- `error_code`: 0 = success, negative = error (see QFE_RET_CODE)\n- `msg`: Human-readable message\n- `data`: Response payload\n\n**Base path:** `/api/v3` (OpenAPI `basePath`). Monitoring aliases: `GET /health`, `GET /stats` also at server root.",
+        "title": "QFE API Server",
         "contact": {},
         "version": "1.1.5"
     },
-    "host": "",
-    "basePath": "/",
+    "host": "localhost:8080",
+    "basePath": "/api/v3",
     "paths": {
-        "/api/v2/all-in-one": {
-            "post": {
-                "description": "Performs face detection and head pose estimation in a single API call. Accepts raw image data with dimensions.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Algorithm"
-                ],
-                "summary": "Face detection and head pose estimation (All-in-One)",
-                "parameters": [
-                    {
-                        "description": "Raw image with dimensions",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.RawImageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/auto-template-update": {
+        "/config/auto-update": {
             "get": {
-                "description": "Gets the current automatic template update mode setting.",
+                "description": "Returns the current auto template update setting.\n\n**Response `data` fields:**\n- `mode` (int): `0` = disabled · `1` = enabled\n\n**Error codes:** `0` success · `-4` SDK not initialized · `-32` parameter not supported",
                 "consumes": [
                     "application/json"
                 ],
@@ -54,20 +20,44 @@
                     "application/json"
                 ],
                 "tags": [
-                    "System Parameter"
+                    "Config"
                 ],
                 "summary": "Get auto template update mode",
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.GetAutoUpdateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, path parameters, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
             },
-            "post": {
-                "description": "Sets the automatic template update mode for enrolled faces during identification.",
+            "put": {
+                "description": "Enables or disables automatic template update during identification. When enabled, the SDK updates a user's stored template with the newly extracted template upon successful identification — this improves recognition accuracy over time. The setting is persisted to `system_parameter.cfg`.\n\n**Request body:**\n- `mode` *(required)*: `0` = disabled · `1` = enabled\n\n**Response `data` fields:**\n- `mode` (int): The newly applied mode value\n\n**Error codes:** `0` success · `-33` invalid mode value · `-32` parameter not supported · `-4` SDK not initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -75,12 +65,12 @@
                     "application/json"
                 ],
                 "tags": [
-                    "System Parameter"
+                    "Config"
                 ],
                 "summary": "Set auto template update mode",
                 "parameters": [
                     {
-                        "description": "Auto update mode (0=disabled, 1=enabled)",
+                        "description": "Mode: 0=disabled, 1=enabled",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -91,7 +81,31 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.SetAutoUpdateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -99,338 +113,9 @@
                 }
             }
         },
-        "/api/v2/delete": {
-            "post": {
-                "description": "Deletes a user and their enrolled face templates from the face database.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Database"
-                ],
-                "summary": "Delete a user",
-                "parameters": [
-                    {
-                        "description": "User ID to delete",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.DeleteRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/detect": {
-            "post": {
-                "description": "Detects all faces in the provided image and returns face locations with 5-point landmarks.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Algorithm"
-                ],
-                "summary": "Detect faces in an image",
-                "parameters": [
-                    {
-                        "description": "Base64 encoded image data",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.ImageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/enroll": {
-            "post": {
-                "description": "Enrolls a face from an image to the face database with a user ID. Used for 1:N identification.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Authentication"
-                ],
-                "summary": "Enroll a face",
-                "parameters": [
-                    {
-                        "description": "Face image and user ID",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.EnrollRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/enroll-template": {
-            "post": {
-                "description": "Enrolls a user using a pre-extracted template instead of an image.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Authentication"
-                ],
-                "summary": "Enroll with template",
-                "parameters": [
-                    {
-                        "description": "Template data and user ID",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.EnrollTemplateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/extract": {
-            "post": {
-                "description": "Extracts a face recognition template (feature vector) from an image containing a face.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Algorithm"
-                ],
-                "summary": "Extract face template",
-                "parameters": [
-                    {
-                        "description": "Base64 encoded image data",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.ImageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/fam": {
-            "post": {
-                "description": "Estimates face attributes including age, gender, emotion, glasses, and ethnicity from a face image.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Algorithm"
-                ],
-                "summary": "Estimate face attributes",
-                "parameters": [
-                    {
-                        "description": "Base64 encoded image data",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.ImageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/hpe": {
-            "post": {
-                "description": "Estimates head pose angles (yaw, pitch, roll) from a face image. Range is approximately ±90 degrees.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Algorithm"
-                ],
-                "summary": "Estimate head pose",
-                "parameters": [
-                    {
-                        "description": "Base64 encoded image data",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.ImageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/identify": {
-            "post": {
-                "description": "Identifies a face from an image by comparing against all enrolled faces in the database.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Authentication"
-                ],
-                "summary": "Identify a face (1:N)",
-                "parameters": [
-                    {
-                        "description": "Base64 encoded image data",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.ImageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/identify-template": {
-            "post": {
-                "description": "Identifies a face using a pre-extracted template instead of an image.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Authentication"
-                ],
-                "summary": "Identify with template",
-                "parameters": [
-                    {
-                        "description": "Template data",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.IdentifyTemplateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/info": {
+        "/config/instances": {
             "get": {
-                "description": "Returns basic information about the QFE SDK including version, status, and initialization details.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "System"
-                ],
-                "summary": "Get SDK information",
-                "responses": {
-                    "200": {
-                        "description": "SDK information response",
-                        "schema": {
-                            "$ref": "#/definitions/models.SDKInfoResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/load-config": {
-            "get": {
-                "description": "Loads system parameters from the default configuration file (system_parameter.cfg).",
+                "description": "Returns the maximum number of SDK instances allowed by the current license and how many are currently active.\n\n**Response `data` fields:**\n- `max_instance` (int): Maximum instances allowed by license\n- `number_of_instance` (int): Currently active instances\n\n**Error codes:** `0` always succeeds (does not require SDK initialization)",
                 "consumes": [
                     "application/json"
                 ],
@@ -440,20 +125,20 @@
                 "tags": [
                     "Config"
                 ],
-                "summary": "Load system configuration",
+                "summary": "Get SDK instance info",
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.MaxInstanceResponse"
                         }
                     }
                 }
             }
         },
-        "/api/v2/mask": {
+        "/config/load": {
             "post": {
-                "description": "Detects whether a person is wearing a mask in the provided face image.",
+                "description": "Reloads system parameters (matching threshold, max face, auto-update mode) from `system_parameter.cfg` on disk.\nUse this to revert in-memory settings to the last saved state without restarting the server.\n\n**Error codes:** `0` success · `-91` config file not found · `-4` SDK not initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -461,23 +146,36 @@
                     "application/json"
                 ],
                 "tags": [
-                    "Algorithm"
+                    "Config"
                 ],
-                "summary": "Check mask presence",
-                "parameters": [
-                    {
-                        "description": "Base64 encoded image data",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.ImageRequest"
-                        }
-                    }
-                ],
+                "summary": "Load configuration from file",
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MessageOKResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, path parameters, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -485,77 +183,9 @@
                 }
             }
         },
-        "/api/v2/match": {
-            "post": {
-                "description": "Compares two face recognition templates and returns a similarity score for 1:1 verification.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Algorithm"
-                ],
-                "summary": "Match two face templates",
-                "parameters": [
-                    {
-                        "description": "Two Base64 encoded templates",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.MatchRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/match-images": {
-            "post": {
-                "description": "Performs end-to-end face matching on two images. Extracts templates from both images and compares them.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Utility"
-                ],
-                "summary": "Match two images directly",
-                "parameters": [
-                    {
-                        "description": "Two Base64 encoded images",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.MatchImagesRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/matching-threshold": {
+        "/config/max-face": {
             "get": {
-                "description": "Gets the current face matching threshold value used for verification and identification.",
+                "description": "Returns the current limit on the number of faces detected per image in face detection operations.\n\n**Response `data` fields:**\n- `max_face` (int): Maximum faces detected per image (default: `10`)\n\n**Error codes:** `0` success · `-4` SDK not initialized · `-32` parameter not supported",
                 "consumes": [
                     "application/json"
                 ],
@@ -563,20 +193,44 @@
                     "application/json"
                 ],
                 "tags": [
-                    "System Parameter"
+                    "Config"
                 ],
-                "summary": "Get matching threshold",
+                "summary": "Get max detectable face count",
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MaxFaceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, path parameters, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
             },
-            "post": {
-                "description": "Sets the face matching threshold value used for verification and identification decisions.",
+            "put": {
+                "description": "Sets the maximum number of faces detected per image. The value is persisted to `system_parameter.cfg` automatically.\n\n**Request body:**\n- `max_face` *(required)*: Integer `1–10`. Setting this lower improves speed; higher allows more faces per frame.\n\n**Response `data` fields:**\n- `max_face` (int): The newly applied limit\n\n**Error codes:** `0` success · `-33` value out of range · `-32` parameter not supported · `-4` SDK not initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -584,67 +238,12 @@
                     "application/json"
                 ],
                 "tags": [
-                    "System Parameter"
+                    "Config"
                 ],
-                "summary": "Set matching threshold",
+                "summary": "Set max detectable face count",
                 "parameters": [
                     {
-                        "description": "Threshold value (0-100000)",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.SetThresholdRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/max-face": {
-            "get": {
-                "description": "Gets the current maximum number of faces that will be detected in a single image.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "System Parameter"
-                ],
-                "summary": "Get max face count",
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Sets the maximum number of faces that will be detected in a single image.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "System Parameter"
-                ],
-                "summary": "Set max face count",
-                "parameters": [
-                    {
-                        "description": "Max face count to set",
+                        "description": "Max face count (1–10)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -655,7 +254,31 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MaxFaceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -663,9 +286,9 @@
                 }
             }
         },
-        "/api/v2/max-instance": {
-            "get": {
-                "description": "Gets the maximum number of SDK instances allowed by license and current active instance count.",
+        "/config/reset": {
+            "post": {
+                "description": "Resets all system parameters (matching threshold, max face, auto-update mode) to their factory default values in memory.\nDoes **not** overwrite `system_parameter.cfg` automatically — call `/save-config` afterwards to persist.\n\n**Error codes:** `0` success · `-4` SDK not initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -673,12 +296,36 @@
                     "application/json"
                 ],
                 "tags": [
-                    "System Parameter"
+                    "Config"
                 ],
-                "summary": "Get max instance info",
+                "summary": "Reset configuration to defaults",
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MessageOKResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, path parameters, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -686,9 +333,9 @@
                 }
             }
         },
-        "/api/v2/multi-detect": {
+        "/config/save": {
             "post": {
-                "description": "Performs multi-face detection without identity matching. Returns detection results including bounding boxes, landmarks, image quality, and warped face images.",
+                "description": "Persists the current in-memory system parameters (matching threshold, max face, auto-update mode) to `system_parameter.cfg`.\nNote: parameter-setting endpoints (`/matching-threshold`, `/max-face`, `/auto-template-update`) call this automatically.\n\n**Error codes:** `0` success · `-4` SDK not initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -696,12 +343,162 @@
                     "application/json"
                 ],
                 "tags": [
-                    "Algorithm"
+                    "Config"
                 ],
-                "summary": "Multi-face detection only",
+                "summary": "Save current configuration to file",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MessageOKResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, path parameters, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/threshold": {
+            "get": {
+                "description": "Returns the current face similarity threshold used by `/identify`, `/verify`, and `/match-images`.\n\n**Response `data` fields:**\n- `threshold` (int): Current threshold value — range `0–100000`\n- Higher value = stricter match requirement (fewer false positives, more false negatives)\n- Lower value = more lenient (fewer false negatives, more false positives)\n- Default is approximately `75204` (≈ 75.2% similarity)\n\n**Error codes:** `0` success · `-4` SDK not initialized · `-32` parameter not supported",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Config"
+                ],
+                "summary": "Get matching threshold",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ThresholdResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, path parameters, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Updates the face similarity threshold used by `/identify`, `/verify`, and `/match-images`. The new value is persisted to `system_parameter.cfg` automatically.\n\n**Request body:**\n- `threshold` *(required)*: Integer in range `0–100000`\n- Higher = stricter (fewer false accepts, more false rejects)\n- Lower = more lenient (more false accepts, fewer false rejects)\n- Recommended range: `70000–85000`\n\n**Response `data` fields:**\n- `threshold` (int): The newly applied threshold value\n\n**Error codes:** `0` success · `-33` value out of range · `-801` failed to set · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Config"
+                ],
+                "summary": "Set matching threshold",
                 "parameters": [
                     {
-                        "description": "Raw image with dimensions",
+                        "description": "New threshold value (0–100000)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.SetThresholdRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ThresholdResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/faces/analyze": {
+            "post": {
+                "description": "Performs face detection and head pose estimation in a single call. Optimized for real-time video pipelines.\n\n\u003e ⚠️ **This endpoint accepts raw pixel data, NOT JPEG/PNG.**\n\u003e Decode your image to raw RGB/BGR bytes first, then Base64-encode those bytes.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded raw RGB or BGR pixel data (not JPEG/PNG)\n- `width` *(required)*: Image width in pixels (1–4000)\n- `height` *(required)*: Image height in pixels (1–4000)\n- `channel` *(required)*: Color channels — use `3` for RGB or BGR\n\n**Response `data` fields:**\n- `face_count` (int): Number of faces detected\n- `faces[]`: Array of detected faces\n- `face_rect`: Bounding box `{x, y, width, height}`\n- `landmarks[]`: 5 facial landmark points `[{x, y}, ...]`\n- `head_pose`: `{yaw, pitch, roll}` in degrees (range ≈ ±90°)\n\n**Error codes:** `0` success · `-200` no face · `-400` head pose failed · `-401` pose out of range · `80`/`81` session busy · `-90` invalid dimensions",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Faces"
+                ],
+                "summary": "Face detection + head pose estimation (All-in-One)",
+                "parameters": [
+                    {
+                        "description": "Raw pixel image with dimensions",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -712,114 +509,37 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
+                            "$ref": "#/definitions/models.AllInOneResponse"
                         }
-                    }
-                }
-            }
-        },
-        "/api/v2/reset-config": {
-            "post": {
-                "description": "Resets all system parameters to default values.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Config"
-                ],
-                "summary": "Reset configuration",
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/save-config": {
-            "post": {
-                "description": "Saves current system parameters to the default configuration file (system_parameter.cfg).",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Config"
-                ],
-                "summary": "Save system configuration",
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/templates-count": {
-            "get": {
-                "description": "Returns the total number of templates in the database.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Database"
-                ],
-                "summary": "Get template count",
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/user/{user_id}/template": {
-            "get": {
-                "description": "Exports the template for a specific user and sub_id.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Database"
-                ],
-                "summary": "Get user template",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "user_id",
-                        "in": "path",
-                        "required": true
                     },
-                    {
-                        "type": "integer",
-                        "description": "Sub ID (default: 0)",
-                        "name": "sub_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
+                    "400": {
+                        "description": "Bad request: invalid JSON, payload size, or dimensions",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "408": {
+                        "description": "Request processing timeout",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: pipeline failed (SDK error)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic during processing)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or too many concurrent requests",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -827,108 +547,9 @@
                 }
             }
         },
-        "/api/v2/user/{user_id}/templates/count": {
-            "get": {
-                "description": "Returns the number of templates for a specific user.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Database"
-                ],
-                "summary": "Get user template count",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "user_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/users": {
-            "get": {
-                "description": "Returns a list of all user IDs enrolled in the face database.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Database"
-                ],
-                "summary": "Get all enrolled users",
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Deletes all enrolled users from the face database. Use with caution.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Database"
-                ],
-                "summary": "Delete all users",
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/users-count": {
-            "get": {
-                "description": "Returns the total number of enrolled users in the database.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Database"
-                ],
-                "summary": "Get user count",
-                "responses": {
-                    "200": {
-                        "description": "Error response with error_code",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v2/validate-image": {
+        "/faces/attributes": {
             "post": {
-                "description": "Validates image quality based on blur detection, luminance, face positioning, and head pose criteria.",
+                "description": "Estimates demographic and physical attributes of the face detected in the image.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG or PNG image. Must contain a clearly visible face.\n\n**Response `data` fields:**\n- `face_rect`: Bounding box of the detected face `{x, y, width, height}`\n- `attribute.age` (int): Estimated age in years\n- `attribute.gender` (string): `\"male\"` or `\"female\"`\n\n**Error codes:** `0` success · `-200` no face detected · `-600` attribute estimation failed · `80` FD busy · `82` FAM busy · `-4` SDK not initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -936,12 +557,12 @@
                     "application/json"
                 ],
                 "tags": [
-                    "Utility"
+                    "Faces"
                 ],
-                "summary": "Validate image quality",
+                "summary": "Estimate face attributes (FAM)",
                 "parameters": [
                     {
-                        "description": "Base64 encoded image data",
+                        "description": "Base64-encoded JPEG/PNG image",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -952,7 +573,31 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.FaceAttributeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -960,9 +605,9 @@
                 }
             }
         },
-        "/api/v2/verify": {
+        "/faces/detect": {
             "post": {
-                "description": "Performs 1:1 face verification against a specific enrolled user.",
+                "description": "Detects all faces in a JPEG/PNG image and returns bounding boxes with 5-point landmarks.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG or PNG image. Max 50 MB.\n\n**Response `data` fields:**\n- `face_count` (int): Number of faces detected (0 if none)\n- `faces[]`: Array of detected face objects\n- `face_rect`: Bounding box — `{x, y, width, height}` in pixels\n- `landmarks[]`: 5 facial landmark points — `[{x, y}, ...]` (left eye, right eye, nose, left mouth, right mouth)\n\n**Error codes:** `0` success · `-200` no face detected · `80` FD session busy · `-4` SDK not initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -970,23 +615,47 @@
                     "application/json"
                 ],
                 "tags": [
-                    "Authentication"
+                    "Faces"
                 ],
-                "summary": "Verify face (1:1)",
+                "summary": "Detect faces in an image",
                 "parameters": [
                     {
-                        "description": "Face image and target user ID",
+                        "description": "Base64-encoded JPEG/PNG image",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.VerifyRequest"
+                            "$ref": "#/definitions/models.ImageRequest"
                         }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "face detection",
+                        "schema": {
+                            "$ref": "#/definitions/models.DetectFaceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, image size, or parameters",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: face detection failed (SDK error)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic during processing)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -994,9 +663,9 @@
                 }
             }
         },
-        "/api/v2/verify-template": {
+        "/faces/detect/raw": {
             "post": {
-                "description": "Performs 1:1 verification of a template against a specific enrolled user.",
+                "description": "Detects multiple faces from a raw pixel image. Returns bounding boxes, landmarks, image quality score, and cropped (warped) face images per face.\n\n\u003e ⚠️ **This endpoint accepts raw pixel data, NOT JPEG/PNG.**\n\u003e Decode your image to raw RGB/BGR bytes first, then Base64-encode those bytes.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded raw RGB or BGR pixel data (not JPEG/PNG)\n- `width` *(required)*: Image width in pixels (1–4000)\n- `height` *(required)*: Image height in pixels (1–4000)\n- `channel` *(required)*: Color channels — use `3` for RGB or BGR\n\n**Response `data` fields:**\n- `face_count` (int): Number of faces detected\n- `detections[]`: Array per face\n- `face_rect`: Bounding box `{x, y, width, height}`\n- `landmarks[]`: 5 landmark points `[{x, y}, ...]`\n- `image_quality` (float): Quality score (higher is better)\n- `warped_image` (string): Base64-encoded cropped \u0026 aligned face image\n\n**Error codes:** `0` success · `-200` no face · `80` FD session busy · `-90` invalid dimensions · `-4` SDK not initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -1004,23 +673,227 @@
                     "application/json"
                 ],
                 "tags": [
-                    "Authentication"
+                    "Faces"
                 ],
-                "summary": "Verify with template",
+                "summary": "Multi-face detection (raw pixel input)",
                 "parameters": [
                     {
-                        "description": "Template data and user ID",
+                        "description": "Raw pixel image with dimensions",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.VerifyTemplateRequest"
+                            "$ref": "#/definitions/models.RawImageRequest"
                         }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Error response with error_code",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MultiDetectResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, dimensions, or payload size",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "408": {
+                        "description": "Request processing timeout",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: multi detection failed (SDK error)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic during processing)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/faces/identify": {
+            "post": {
+                "description": "Searches all enrolled users and returns the best-matching user if the similarity exceeds the current threshold.\nThis is a 1:N operation — performance depends on the number of enrolled users.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG or PNG image. Must contain exactly one face. Max 50 MB.\n\n**Response `data` fields (on match):**\n- `user_id` (int): ID of the matched user\n- `sub_id` (int): Template sub-index of the best-matching template\n- `match_score` (int): Similarity score `0–100000`\n- `threshold` (int): Threshold used for this decision\n\n\u003e If no match is found, `success` will be `false` and `error_code` will be `-43`.\n\n**Error codes:** `0` match found · `-43` no match (below threshold) · `-200` no face detected · `-400` head pose failed · `-700` template extraction failed · `80`/`81`/`83` session busy · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Faces"
+                ],
+                "summary": "Identify a face — 1:N search (from image)",
+                "parameters": [
+                    {
+                        "description": "Base64-encoded JPEG/PNG image",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.FaceIdentifyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/faces/mask": {
+            "post": {
+                "description": "Detects whether the person in the image is wearing a face mask.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG or PNG image. Must contain a clearly visible face.\n\n**Response `data` fields:**\n- `face_rect`: Bounding box of the detected face `{x, y, width, height}`\n- `has_mask` (bool): `true` if a mask is detected on the face\n\n**Error codes:** `0` success · `-200` no face detected · `-500` mask segmentation failed · `80` FD busy · `84` MS busy · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Faces"
+                ],
+                "summary": "Detect mask wearing (MS)",
+                "parameters": [
+                    {
+                        "description": "Base64-encoded JPEG/PNG image",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MaskResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/faces/pose": {
+            "post": {
+                "description": "Estimates head pose angles from a JPEG/PNG face image. Useful for liveness checks and quality filtering.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG or PNG image. Must contain a clearly visible face.\n\n**Response `data` fields:**\n- `face_rect`: Bounding box of the detected face `{x, y, width, height}`\n- `head_pose.yaw` (float): Left/right rotation in degrees (range ≈ –90° to +90°; negative = left)\n- `head_pose.pitch` (float): Up/down tilt in degrees (range ≈ –90° to +90°; negative = down)\n- `head_pose.roll` (float): Head tilt/rotation in degrees (range ≈ –90° to +90°)\n\n**Error codes:** `0` success · `-200` no face detected · `-400` HPE failed · `-401` pose out of detectable range · `80` FD busy · `81` HPE busy · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Faces"
+                ],
+                "summary": "Estimate head pose (HPE)",
+                "parameters": [
+                    {
+                        "description": "Base64-encoded JPEG/PNG image",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.HeadPoseResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -1030,7 +903,7 @@
         },
         "/health": {
             "get": {
-                "description": "Returns the health status of the API server and QFE SDK. Used for monitoring and load balancer health checks.",
+                "description": "Returns the health status of the API server and QFE SDK. Suitable for load balancer health probes.\n\n**Response `data` fields:**\n- `status` (string): `\"ok\"` when SDK is initialized and ready\n- `timestamp` (string): Current server time (RFC3339)\n- `sdk_status.initialized` (bool): SDK fully initialized\n- `sdk_status.license_activated` (bool): License active\n- `sdk_status.model_loaded` (bool): AI models loaded\n- `sdk_status.instance_created` (bool): Processing instance ready\n- `sdk_status.last_health_check` (string): Timestamp of this check\n\n**Error codes:** `0` healthy · `-1` server running but SDK not yet initialized",
                 "consumes": [
                     "application/json"
                 ],
@@ -1040,12 +913,134 @@
                 "tags": [
                     "System"
                 ],
-                "summary": "Health check endpoint",
+                "summary": "Health check",
                 "responses": {
                     "200": {
-                        "description": "Health status response",
+                        "description": "Health status",
                         "schema": {
                             "$ref": "#/definitions/models.HealthResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Degraded: API up but QFE SDK not initialized (success=false in body)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/images/match": {
+            "post": {
+                "description": "Extracts templates from both images internally and compares them in a single call.\nUse this for quick one-off comparisons. For batch workflows, extract templates separately with `/extract` then call `/match`.\n\n**Request body:**\n- `image1_data` *(required)*: Base64-encoded JPEG/PNG image (first face)\n- `image2_data` *(required)*: Base64-encoded JPEG/PNG image (second face)\n\n**Response `data` fields:**\n- `similarity` (float): Raw match score (same scale as `/match` — range `0–100000`)\n- `threshold` (float): Current decision threshold\n- `is_same_person` (bool): `true` if `similarity \u003e= threshold`\n\n**Error codes:** `0` success · `-200` no face in image1 or image2 · `-700` template extraction failed · `80` FD busy · `83` FR busy · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Images"
+                ],
+                "summary": "Compare two images directly (end-to-end)",
+                "parameters": [
+                    {
+                        "description": "Two Base64-encoded JPEG/PNG images",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.MatchImagesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MatchImagesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/images/validate": {
+            "post": {
+                "description": "Checks whether an image meets quality requirements for reliable face enrollment. Runs face detection and head pose estimation internally.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG/PNG image. Max 50 MB.\n\n**Response `data` fields:**\n- `is_valid` (bool): `true` if the image passes all quality checks\n- `blur_score` (float): Blur level (lower = blurrier; recommended threshold varies by model)\n- `luminance` (float): Average image brightness (0–255; extremes indicate under/over-exposure)\n- `face_position`: Face bounding box `{x, y, width, height}`\n- `head_pose`: `{yaw, pitch, roll}` — large values indicate non-frontal face\n- `reject_reason` (string): Human-readable reason if `is_valid` is `false`\n\n**Error codes:** `0` success · `-200` no face detected · `-400` head pose failed · `80` FD busy · `81` HPE busy · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Images"
+                ],
+                "summary": "Validate image quality for enrollment",
+                "parameters": [
+                    {
+                        "description": "Base64-encoded JPEG/PNG image",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ValidateImageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
@@ -1053,7 +1048,7 @@
         },
         "/stats": {
             "get": {
-                "description": "Returns server statistics including memory usage, request counts, and concurrency information.",
+                "description": "Returns real-time statistics for request counts, memory usage, and concurrency.\n\n**Response `data` fields:**\n- `requests.total` (uint): Total requests received since startup\n- `requests.completed` (uint): Successfully completed requests\n- `requests.timed_out` (uint): Requests that exceeded the timeout\n- `requests.rejected` (uint): Requests rejected due to overload (semaphore full)\n- `memory.alloc_mb` (uint): Currently allocated heap memory (MB)\n- `memory.heap_objects` (uint): Number of live heap objects\n- `memory.gc_cycles` (uint): Number of completed GC cycles\n- `memory.goroutines` (int): Active goroutine count\n- `concurrency.max_concurrent_ops` (int): Max allowed simultaneous heavy operations\n- `concurrency.semaphore_in_use` (int): Current heavy operations in flight\n\n**Error codes:** `0` always succeeds",
                 "consumes": [
                     "application/json"
                 ],
@@ -1066,9 +1061,823 @@
                 "summary": "Get server statistics",
                 "responses": {
                     "200": {
-                        "description": "Server statistics response",
+                        "description": "Server statistics",
                         "schema": {
                             "$ref": "#/definitions/models.ServerStatsResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/info": {
+            "get": {
+                "description": "Returns version, initialization status, and license details of the QFE SDK.\n\n**Response `data` fields:**\n- `sdk_name` (string): Always `\"QFE_SDK\"`\n- `version` (string): SDK version (e.g. `\"1.1.6\"`)\n- `description` (string): Short description of the SDK\n- `status` (string): `\"ready\"` when fully initialized, otherwise `\"not_initialized\"`\n- `details.initialized` (bool): SDK fully initialized\n- `details.license_activated` (bool): License successfully activated\n- `details.model_loaded` (bool): AI models loaded into memory\n- `details.instance_created` (bool): SDK processing instance created\n- `details.last_health_check` (string): Timestamp of last health check (RFC3339)\n- `details.max_instances` (int): Maximum SDK instances allowed by license (`QFE_GetMaxInstance`)\n\n**Error codes:** `0` success · `-1` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Get SDK information",
+                "responses": {
+                    "200": {
+                        "description": "SDK information",
+                        "schema": {
+                            "$ref": "#/definitions/models.SDKInfoResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "SDK not ready or has an initialization error (success=false in body)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/templates/count": {
+            "get": {
+                "description": "Returns the total number of face templates stored across all users in the database.\nA single user can have multiple templates (one per enrollment call).\n\n**Response `data` fields:**\n- `count` (int): Total template count across all users\n\n**Error codes:** `0` success · `-29` database not loaded · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Templates"
+                ],
+                "summary": "Get total template count",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.TemplateCountResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, path parameters, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/templates/extract": {
+            "post": {
+                "description": "Extracts a compact face recognition feature vector (template) from a JPEG/PNG image.\nThe returned `template_data` can be used with `/match`, `/enroll-template`, `/identify-template`, and `/verify-template`.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG/PNG image. Max 50 MB. Must contain exactly one clearly visible face.\n\n**Response `data` fields:**\n- `template_data` (string): Base64-encoded feature vector — pass this to `/match` or `/enroll-template`\n- `template_size` (int): Size of the template in bytes\n\n**Error codes:** `0` success · `-200` no face detected · `-700` template extraction failed · `80` FD busy · `83` FR busy · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Templates"
+                ],
+                "summary": "Extract face template from image",
+                "parameters": [
+                    {
+                        "description": "Base64-encoded JPEG/PNG image",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ExtractTemplateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/templates/identify": {
+            "post": {
+                "description": "Searches all enrolled users using a pre-extracted template instead of re-processing an image.\nFaster than `/identify` when the template was already extracted upstream (e.g. real-time video pipelines).\n\n**Request body:**\n- `template_data` *(required)*: Base64-encoded face template from `/extract`\n\n**Response `data` fields (on match):**\n- `user_id` (int): ID of the matched user\n- `sub_id` (int): Matched template sub-index\n- `match_score` (int): Similarity score `0–100000`\n- `threshold` (int): Threshold used for the decision\n\n\u003e If no match is found, `success` is `false` and `error_code` is `-43`.\n\n**Error codes:** `0` match found · `-43` no match · `-90` invalid template · `-29` database not loaded · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Templates"
+                ],
+                "summary": "Identify a face — 1:N search (from pre-extracted template)",
+                "parameters": [
+                    {
+                        "description": "Base64-encoded face template",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.TemplateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.TemplateIdentifyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/templates/match": {
+            "post": {
+                "description": "Compares two pre-extracted face templates and returns a similarity score.\nUse this when you already have templates from `/extract`. For direct image comparison use `/match-images`.\n\n**Request body:**\n- `template1` *(required)*: Base64-encoded template from `/extract`\n- `template2` *(required)*: Base64-encoded template from `/extract`\n\n**Response `data` fields:**\n- `match_score` (int): Similarity score — range `0–100000` (higher = more similar)\n- `threshold` (int): Current decision threshold (configurable via `/matching-threshold`)\n- `is_same_person` (bool): `true` if `match_score \u003e= threshold`\n\n**Error codes:** `0` success · `-90` invalid template format · `-800` failed to get threshold · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Templates"
+                ],
+                "summary": "Compare two face templates (1:1)",
+                "parameters": [
+                    {
+                        "description": "Two Base64-encoded face templates",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.MatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MatchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users": {
+            "get": {
+                "description": "Returns the complete list of user IDs currently enrolled in the face database, along with per-user template counts.\n\n**Response `data` fields:**\n- `user_count` (int): Total number of enrolled users\n- `users[]`: Array of user objects\n- `user_id` (int): User identifier\n- `template_count` (int): Number of templates stored for this user\n\n**Error codes:** `0` success · `-29` database not loaded · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "List all enrolled users",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.GetUsersResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Permanently removes every enrolled user and all their templates from the face database.\n\n\u003e ⚠️ **This action is irreversible.** All enrollment data will be lost.\n\n**Error codes:** `0` success · `-29` database not loaded · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Delete ALL users (irreversible)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.MessageOKResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/count": {
+            "get": {
+                "description": "Returns the total number of distinct users enrolled in the face database.\n\n**Response `data` fields:**\n- `count` (int): Number of enrolled users\n\n**Error codes:** `0` success · `-29` database not loaded · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Get total enrolled user count",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.UserCountResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{user_id}": {
+            "delete": {
+                "description": "Permanently removes a user and all their enrolled face templates from the face database.\n\n**Path parameter:**\n- `user_id`: Integer `≥ 1`. The user ID to remove.\n\n**Response `data` fields:**\n- `user_id` (int): The deleted user ID\n- `deleted` (bool): `true` if the deletion was successful\n\n**Error codes:** `0` success · `-34` invalid user_id · `-28`/`-43` user not found · `-26` database delete failed · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Delete a specific user",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "User ID (integer \u003e= 1)",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.DeleteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid path parameter",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{user_id}/faces": {
+            "post": {
+                "description": "Registers a face from a JPEG/PNG image into the face database under the specified `user_id`.\nAfter enrollment the user becomes searchable via `/faces/identify` and verifiable via `/users/{user_id}/verify`.\nMultiple enrollments for the same `user_id` add additional templates (improves recognition accuracy).\n\n**Path parameter:**\n- `user_id`: Integer `≥ 1`. Choose a unique ID per person. Re-using an existing ID adds a new template to that user.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG or PNG image. Must contain exactly one clearly visible frontal face. Max 50 MB.\n\n**Response `data` fields:**\n- `user_id` (int): The enrolled user ID\n- `sub_id` (int): Template sub-index assigned to this enrollment (starts at 0)\n- `template_count` (int): Total number of templates now stored for this user\n\n**Error codes:** `0` success · `-34` invalid user_id (must be ≥ 1) · `-40` max template limit reached · `-50` face differs from existing templates · `-200` no face detected · `-700` template extraction failed · `80` FD busy · `83` FR busy · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Enroll a face (from image)",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "User ID (integer \u003e= 1)",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Base64-encoded JPEG/PNG image",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.EnrollFaceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{user_id}/templates": {
+            "post": {
+                "description": "Registers a user using a feature vector previously extracted by `/templates/extract`, rather than re-processing the image.\nUse this for batch enrollment pipelines where templates are extracted once and stored separately.\n\n**Path parameter:**\n- `user_id`: Integer `≥ 1`. Re-using an existing ID adds another template to that user.\n\n**Request body:**\n- `template_data` *(required)*: Base64-encoded face template from `/templates/extract` or `/users/{user_id}/templates/{sub_id}`\n\n**Response `data` fields:**\n- `user_id` (int): The enrolled user ID\n- `sub_id` (int): Template index assigned to this enrollment\n- `template_count` (int): Total templates now stored for this user\n\n**Error codes:** `0` success · `-34` invalid user_id · `-40` max template limit reached · `-50` face differs from existing templates · `-90` invalid template data · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Enroll a face (from pre-extracted template)",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "User ID (integer \u003e= 1)",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Base64-encoded face template",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.TemplateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.EnrollTemplateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{user_id}/templates/count": {
+            "get": {
+                "description": "Returns how many face templates are stored for the specified user.\n\n**Path parameters:**\n- `user_id`: Integer `≥ 1`\n\n**Response `data` fields:**\n- `user_id` (int): The queried user ID\n- `count` (int): Number of templates stored for this user\n\n**Error codes:** `0` success · `-34` invalid user_id · `-43` user not found · `-29` database not loaded · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Get template count for a specific user",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "User ID (integer \u003e= 1)",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.UserTemplateCountResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid path parameter",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{user_id}/templates/{sub_id}": {
+            "get": {
+                "description": "Retrieves a stored face template for a specific user and template index (`sub_id`). Useful for backup or cross-server migration.\n\n**Path parameters:**\n- `user_id`: Integer `≥ 1`\n- `sub_id`: Template index (integer `≥ 0`). A user can have multiple templates (0, 1, 2, …). Check `/users/{user_id}/templates/count` for the available range.\n\n**Response `data` fields:**\n- `user_id` (int): The queried user ID\n- `sub_id` (int): The template index returned\n- `template_data` (string): Base64-encoded face feature vector — usable with `/users/{user_id}/templates`, `/templates/identify`, `/users/{user_id}/verify/template`\n- `template_size` (int): Size in bytes\n\n**Error codes:** `0` success · `-34` invalid user_id · `-35` invalid sub_id · `-43` template not found · `-29` database not loaded · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Export a user's face template",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "User ID (integer \u003e= 1)",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "description": "Template index (integer \u003e= 0)",
+                        "name": "sub_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.GetTemplateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid path parameters",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{user_id}/verify": {
+            "post": {
+                "description": "Checks whether the face in the image matches a specific enrolled user. Unlike `/faces/identify` (1:N), this only compares against the target `user_id`.\n\n**Path parameter:**\n- `user_id`: Integer `≥ 1`. The enrolled user to verify against.\n\n**Request body:**\n- `image_data` *(required)*: Base64-encoded JPEG or PNG image. Max 50 MB.\n\n**Response `data` fields:**\n- `verified` (bool): `true` if the face matches the user above the threshold\n- `user_id` (int): The queried user ID\n- `sub_id` (int): Best-matching template sub-index\n- `match_score` (int): Similarity score `0–100000`\n- `threshold` (int): Threshold used for the decision\n\n**Error codes:** `0` success (verified or not — check `verified` field) · `-34` invalid user_id · `-43` user not found in database · `-200` no face detected · `-700` template extraction failed · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Verify a face against a user — 1:1 (from image)",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "User ID (integer \u003e= 1)",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Base64-encoded JPEG/PNG image",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ImageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.VerifyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/{user_id}/verify/template": {
+            "post": {
+                "description": "Checks whether a pre-extracted template matches a specific enrolled user. Skips the image decoding and feature extraction steps — use in latency-sensitive pipelines where the template is available upstream.\n\n**Path parameter:**\n- `user_id`: Integer `≥ 1`. The enrolled user to verify against.\n\n**Request body:**\n- `template_data` *(required)*: Base64-encoded face template from `/templates/extract`\n\n**Response `data` fields:**\n- `verified` (bool): `true` if the template matches the user above the threshold\n- `user_id` (int): The queried user ID\n- `sub_id` (int): Best-matching template sub-index\n- `match_score` (int): Similarity score `0–100000`\n- `threshold` (int): Threshold used for the decision\n\n**Error codes:** `0` success (check `verified` field) · `-34` invalid user_id · `-43` user not found · `-90` invalid template data · `-29` database not loaded · `-4` SDK not initialized",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Verify a face against a user — 1:1 (from pre-extracted template)",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "User ID (integer \u003e= 1)",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Base64-encoded face template",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.TemplateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.VerifyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request: invalid JSON, body size, or client validation",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable: SDK or algorithm returned an error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (panic recovery)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service unavailable: SDK not initialized or overload",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
@@ -1076,43 +1885,11 @@
         }
     },
     "definitions": {
-        "models.AllInOneData": {
-            "type": "object",
-            "properties": {
-                "face_count": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "faces": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.AllInOneFace"
-                    }
-                }
-            }
-        },
-        "models.AllInOneFace": {
-            "type": "object",
-            "properties": {
-                "face_rect": {
-                    "$ref": "#/definitions/models.FaceRect"
-                },
-                "head_pose": {
-                    "$ref": "#/definitions/models.HeadPose"
-                },
-                "landmarks": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.Landmark"
-                    }
-                }
-            }
-        },
         "models.AllInOneResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.AllInOneData"
+                    "type": "object"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1128,38 +1905,16 @@
                 }
             }
         },
-        "models.BaseResponse": {
+        "models.AutoUpdateModeData": {
             "type": "object",
             "properties": {
-                "data": {},
-                "error_code": {
-                    "type": "integer",
-                    "example": 0
-                },
-                "msg": {
-                    "type": "string",
-                    "example": "Operation completed successfully"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": true
-                }
-            }
-        },
-        "models.DeleteData": {
-            "type": "object",
-            "properties": {
-                "deleted": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "user_id": {
+                "mode": {
                     "type": "integer",
                     "example": 1
                 }
             }
         },
-        "models.DeleteRequest": {
+        "models.DeleteData": {
             "type": "object",
             "properties": {
                 "user_id": {
@@ -1188,26 +1943,11 @@
                 }
             }
         },
-        "models.DetectFaceData": {
-            "type": "object",
-            "properties": {
-                "face_count": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "faces": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.FaceInfo"
-                    }
-                }
-            }
-        },
         "models.DetectFaceResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.DetectFaceData"
+                    "type": "object"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1223,12 +1963,16 @@
                 }
             }
         },
-        "models.EnrollData": {
+        "models.EnrollFaceData": {
             "type": "object",
             "properties": {
-                "template_count": {
+                "enrolled_id": {
                     "type": "integer",
                     "example": 1
+                },
+                "enrolled_sub_id": {
+                    "type": "integer",
+                    "example": 0
                 },
                 "user_id": {
                     "type": "integer",
@@ -1236,24 +1980,11 @@
                 }
             }
         },
-        "models.EnrollRequest": {
-            "type": "object",
-            "properties": {
-                "image_data": {
-                    "type": "string",
-                    "example": "base64_encoded_image"
-                },
-                "user_id": {
-                    "type": "integer",
-                    "example": 1
-                }
-            }
-        },
-        "models.EnrollResponse": {
+        "models.EnrollFaceResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.EnrollData"
+                    "$ref": "#/definitions/models.EnrollFaceData"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1269,12 +2000,12 @@
                 }
             }
         },
-        "models.EnrollTemplateRequest": {
+        "models.EnrollTemplateData": {
             "type": "object",
             "properties": {
-                "template_data": {
-                    "type": "string",
-                    "example": "base64_encoded_template"
+                "sub_id": {
+                    "type": "integer",
+                    "example": 0
                 },
                 "user_id": {
                     "type": "integer",
@@ -1282,12 +2013,30 @@
                 }
             }
         },
-        "models.ErrorResponse": {
+        "models.EnrollTemplateResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "type": "any"
+                    "$ref": "#/definitions/models.EnrollTemplateData"
                 },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Template enrolled successfully"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "data": {},
                 "error_code": {
                     "type": "integer",
                     "example": -1
@@ -1331,35 +2080,11 @@
                 }
             }
         },
-        "models.FaceAttribute": {
-            "type": "object",
-            "properties": {
-                "age": {
-                    "type": "integer",
-                    "example": 25
-                },
-                "gender": {
-                    "type": "string",
-                    "example": "male"
-                }
-            }
-        },
-        "models.FaceAttributeData": {
-            "type": "object",
-            "properties": {
-                "attribute": {
-                    "$ref": "#/definitions/models.FaceAttribute"
-                },
-                "face_rect": {
-                    "$ref": "#/definitions/models.FaceRect"
-                }
-            }
-        },
         "models.FaceAttributeResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.FaceAttributeData"
+                    "type": "object"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1375,38 +2100,44 @@
                 }
             }
         },
-        "models.FaceInfo": {
+        "models.FaceIdentifyData": {
             "type": "object",
             "properties": {
-                "face_rect": {
-                    "$ref": "#/definitions/models.FaceRect"
+                "score": {
+                    "type": "number",
+                    "example": 95000
                 },
-                "landmarks": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.Landmark"
-                    }
+                "status": {
+                    "type": "string",
+                    "example": "success"
+                },
+                "threshold": {
+                    "type": "integer",
+                    "example": 75204
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
                 }
             }
         },
-        "models.FaceRect": {
+        "models.FaceIdentifyResponse": {
             "type": "object",
             "properties": {
-                "height": {
-                    "type": "integer",
-                    "example": 200
+                "data": {
+                    "$ref": "#/definitions/models.FaceIdentifyData"
                 },
-                "width": {
+                "error_code": {
                     "type": "integer",
-                    "example": 200
+                    "example": 0
                 },
-                "x": {
-                    "type": "integer",
-                    "example": 100
+                "msg": {
+                    "type": "string",
+                    "example": "Face identified"
                 },
-                "y": {
-                    "type": "integer",
-                    "example": 50
+                "success": {
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -1414,13 +2145,7 @@
             "type": "object",
             "properties": {
                 "data": {
-                    "type": "object",
-                    "properties": {
-                        "mode": {
-                            "type": "integer",
-                            "example": 1
-                        }
-                    }
+                    "$ref": "#/definitions/models.AutoUpdateModeData"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1480,7 +2205,7 @@
         "models.GetUsersData": {
             "type": "object",
             "properties": {
-                "user_count": {
+                "count": {
                     "type": "integer",
                     "example": 10
                 },
@@ -1512,39 +2237,11 @@
                 }
             }
         },
-        "models.HeadPose": {
-            "type": "object",
-            "properties": {
-                "pitch": {
-                    "type": "number",
-                    "example": -3.1
-                },
-                "roll": {
-                    "type": "number",
-                    "example": 1.5
-                },
-                "yaw": {
-                    "type": "number",
-                    "example": 5.2
-                }
-            }
-        },
-        "models.HeadPoseData": {
-            "type": "object",
-            "properties": {
-                "face_rect": {
-                    "$ref": "#/definitions/models.FaceRect"
-                },
-                "head_pose": {
-                    "$ref": "#/definitions/models.HeadPose"
-                }
-            }
-        },
         "models.HeadPoseResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.HeadPoseData"
+                    "type": "object"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1560,11 +2257,26 @@
                 }
             }
         },
+        "models.HealthData": {
+            "type": "object",
+            "properties": {
+                "sdk_status": {
+                    "$ref": "#/definitions/models.SDKStatus"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
         "models.HealthResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.SDKStatus"
+                    "$ref": "#/definitions/models.HealthData"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1580,48 +2292,6 @@
                 }
             }
         },
-        "models.IdentifyData": {
-            "type": "object",
-            "properties": {
-                "score": {
-                    "type": "number",
-                    "example": 0.95
-                },
-                "user_id": {
-                    "type": "integer",
-                    "example": 1
-                }
-            }
-        },
-        "models.IdentifyResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/models.IdentifyData"
-                },
-                "error_code": {
-                    "type": "integer",
-                    "example": 0
-                },
-                "msg": {
-                    "type": "string",
-                    "example": "Face identified"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": true
-                }
-            }
-        },
-        "models.IdentifyTemplateRequest": {
-            "type": "object",
-            "properties": {
-                "template_data": {
-                    "type": "string",
-                    "example": "base64_encoded_template"
-                }
-            }
-        },
         "models.ImageRequest": {
             "type": "object",
             "properties": {
@@ -1631,36 +2301,11 @@
                 }
             }
         },
-        "models.Landmark": {
-            "type": "object",
-            "properties": {
-                "x": {
-                    "type": "integer",
-                    "example": 150
-                },
-                "y": {
-                    "type": "integer",
-                    "example": 120
-                }
-            }
-        },
-        "models.MaskData": {
-            "type": "object",
-            "properties": {
-                "face_rect": {
-                    "$ref": "#/definitions/models.FaceRect"
-                },
-                "has_mask": {
-                    "type": "boolean",
-                    "example": false
-                }
-            }
-        },
         "models.MaskResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.MaskData"
+                    "type": "object"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1676,16 +2321,20 @@
                 }
             }
         },
-        "models.MatchData": {
+        "models.MatchImagesData": {
             "type": "object",
             "properties": {
-                "is_match": {
+                "is_same_person": {
                     "type": "boolean",
                     "example": true
                 },
-                "score": {
+                "similarity": {
                     "type": "number",
-                    "example": 0.95
+                    "example": 95000
+                },
+                "threshold": {
+                    "type": "number",
+                    "example": 75204
                 }
             }
         },
@@ -1699,6 +2348,26 @@
                 "image2_data": {
                     "type": "string",
                     "example": "base64_encoded_image"
+                }
+            }
+        },
+        "models.MatchImagesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.MatchImagesData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Image matching completed"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -1719,7 +2388,7 @@
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.MatchData"
+                    "$ref": "#/definitions/models.TemplateMatchData"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1767,13 +2436,13 @@
         "models.MaxInstanceData": {
             "type": "object",
             "properties": {
-                "active_instances": {
-                    "type": "integer",
-                    "example": 2
-                },
-                "max_instances": {
+                "max_instance": {
                     "type": "integer",
                     "example": 4
+                },
+                "number_of_instance": {
+                    "type": "integer",
+                    "example": 2
                 }
             }
         },
@@ -1797,10 +2466,33 @@
                 }
             }
         },
+        "models.MessageOKResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "string",
+                    "example": ""
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Operation completed"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
         "models.MultiDetectResponse": {
             "type": "object",
             "properties": {
-                "data": {},
+                "data": {
+                    "type": "object"
+                },
                 "error_code": {
                     "type": "integer",
                     "example": 0
@@ -1836,16 +2528,30 @@
                 }
             }
         },
-        "models.SDKInfoData": {
+        "models.SDKInfoDetails": {
             "type": "object",
             "properties": {
+                "initialization_error": {
+                    "type": "string"
+                },
+                "initialized": {
+                    "type": "boolean"
+                },
+                "instance_created": {
+                    "type": "boolean"
+                },
+                "last_health_check": {
+                    "type": "string"
+                },
+                "license_activated": {
+                    "type": "boolean"
+                },
                 "max_instances": {
                     "type": "integer",
                     "example": 4
                 },
-                "version": {
-                    "type": "string",
-                    "example": "1.0.0"
+                "model_loaded": {
+                    "type": "boolean"
                 }
             }
         },
@@ -1853,7 +2559,7 @@
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.SDKInfoData"
+                    "$ref": "#/definitions/models.SystemInfoData"
                 },
                 "error_code": {
                     "type": "integer",
@@ -1861,7 +2567,7 @@
                 },
                 "msg": {
                     "type": "string",
-                    "example": "SDK info retrieved"
+                    "example": "QFE SDK is loaded and ready to use"
                 },
                 "success": {
                     "type": "boolean",
@@ -1892,30 +2598,90 @@
                 }
             }
         },
+        "models.ServerStatsConcurrency": {
+            "type": "object",
+            "properties": {
+                "max_concurrent_ops": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "semaphore_capacity": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "semaphore_in_use": {
+                    "type": "integer",
+                    "example": 0
+                }
+            }
+        },
         "models.ServerStatsData": {
             "type": "object",
             "properties": {
-                "active_requests": {
-                    "type": "integer",
-                    "example": 2
+                "concurrency": {
+                    "$ref": "#/definitions/models.ServerStatsConcurrency"
                 },
-                "completed_requests": {
+                "memory": {
+                    "$ref": "#/definitions/models.ServerStatsMemory"
+                },
+                "requests": {
+                    "$ref": "#/definitions/models.ServerStatsRequests"
+                }
+            }
+        },
+        "models.ServerStatsMemory": {
+            "type": "object",
+            "properties": {
+                "alloc_mb": {
+                    "type": "integer",
+                    "example": 128
+                },
+                "gc_cycles": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "goroutines": {
+                    "type": "integer",
+                    "example": 24
+                },
+                "heap_alloc_mb": {
+                    "type": "integer",
+                    "example": 120
+                },
+                "heap_inuse_mb": {
+                    "type": "integer",
+                    "example": 100
+                },
+                "heap_objects": {
+                    "type": "integer",
+                    "example": 50000
+                },
+                "heap_sys_mb": {
+                    "type": "integer",
+                    "example": 128
+                },
+                "sys_mb": {
+                    "type": "integer",
+                    "example": 256
+                }
+            }
+        },
+        "models.ServerStatsRequests": {
+            "type": "object",
+            "properties": {
+                "completed": {
                     "type": "integer",
                     "example": 990
                 },
-                "memory_usage_mb": {
-                    "type": "integer",
-                    "example": 256
-                },
-                "rejected_requests": {
+                "rejected": {
                     "type": "integer",
                     "example": 5
                 },
-                "timed_out_requests": {
+                "timed_out": {
                     "type": "integer",
                     "example": 5
                 },
-                "total_requests": {
+                "total": {
                     "type": "integer",
                     "example": 1000
                 }
@@ -1950,6 +2716,26 @@
                 }
             }
         },
+        "models.SetAutoUpdateResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.AutoUpdateModeData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Auto template update mode set successfully"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
         "models.SetMaxFaceRequest": {
             "type": "object",
             "properties": {
@@ -1963,8 +2749,28 @@
             "type": "object",
             "properties": {
                 "threshold": {
-                    "type": "number",
-                    "example": 0.7
+                    "type": "integer",
+                    "example": 75204
+                }
+            }
+        },
+        "models.SystemInfoData": {
+            "type": "object",
+            "properties": {
+                "details": {
+                    "$ref": "#/definitions/models.SDKInfoDetails"
+                },
+                "sdk_name": {
+                    "type": "string",
+                    "example": "QFE_SDK"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ready"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "1.1.6"
                 }
             }
         },
@@ -1997,12 +2803,86 @@
                 }
             }
         },
+        "models.TemplateIdentifyData": {
+            "type": "object",
+            "properties": {
+                "identified": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "match_score": {
+                    "type": "integer",
+                    "example": 95000
+                },
+                "sub_id": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "threshold": {
+                    "type": "integer",
+                    "example": 75204
+                },
+                "user_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.TemplateIdentifyResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.TemplateIdentifyData"
+                },
+                "error_code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "msg": {
+                    "type": "string",
+                    "example": "Template identification completed"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "models.TemplateMatchData": {
+            "type": "object",
+            "properties": {
+                "is_same_person": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "match_score": {
+                    "type": "integer",
+                    "example": 95000
+                },
+                "threshold": {
+                    "type": "integer",
+                    "example": 75204
+                }
+            }
+        },
+        "models.TemplateRequest": {
+            "type": "object",
+            "required": [
+                "template_data"
+            ],
+            "properties": {
+                "template_data": {
+                    "type": "string",
+                    "example": "base64_encoded_template"
+                }
+            }
+        },
         "models.ThresholdData": {
             "type": "object",
             "properties": {
                 "threshold": {
-                    "type": "number",
-                    "example": 0.7
+                    "type": "integer",
+                    "example": 75204
                 }
             }
         },
@@ -2058,7 +2938,7 @@
         "models.UserInfo": {
             "type": "object",
             "properties": {
-                "template_count": {
+                "number_of_templates": {
                     "type": "integer",
                     "example": 3
                 },
@@ -2101,32 +2981,11 @@
                 }
             }
         },
-        "models.ValidateImageData": {
-            "type": "object",
-            "properties": {
-                "height": {
-                    "type": "integer",
-                    "example": 480
-                },
-                "message": {
-                    "type": "string",
-                    "example": "Image is valid"
-                },
-                "valid": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "width": {
-                    "type": "integer",
-                    "example": 640
-                }
-            }
-        },
         "models.ValidateImageResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/models.ValidateImageData"
+                    "type": "object"
                 },
                 "error_code": {
                     "type": "integer",
@@ -2146,16 +3005,16 @@
             "type": "object",
             "properties": {
                 "match_score": {
-                    "type": "number",
-                    "example": 0.95
+                    "type": "integer",
+                    "example": 95000
                 },
                 "sub_id": {
                     "type": "integer",
                     "example": 0
                 },
                 "threshold": {
-                    "type": "number",
-                    "example": 0.7
+                    "type": "integer",
+                    "example": 75204
                 },
                 "user_id": {
                     "type": "integer",
@@ -2164,19 +3023,6 @@
                 "verified": {
                     "type": "boolean",
                     "example": true
-                }
-            }
-        },
-        "models.VerifyRequest": {
-            "type": "object",
-            "properties": {
-                "image_data": {
-                    "type": "string",
-                    "example": "base64_encoded_image"
-                },
-                "user_id": {
-                    "type": "integer",
-                    "example": 1
                 }
             }
         },
@@ -2199,23 +3045,6 @@
                     "example": true
                 }
             }
-        },
-        "models.VerifyTemplateRequest": {
-            "type": "object",
-            "required": [
-                "template_data",
-                "user_id"
-            ],
-            "properties": {
-                "template_data": {
-                    "type": "string",
-                    "example": "base64_encoded_template"
-                },
-                "user_id": {
-                    "type": "integer",
-                    "example": 12345
-                }
-            }
         }
     },
     "tags": [
@@ -2224,27 +3053,23 @@
             "name": "System"
         },
         {
-            "description": "Face detection, multi-detect, template extraction, matching, HPE, FAM, mask detection",
-            "name": "Algorithm"
+            "description": "Face detection, pose estimation, attribute estimation, mask detection, and identification",
+            "name": "Faces"
         },
         {
-            "description": "Image validation, direct image matching, all-in-one processing",
-            "name": "Utility"
+            "description": "User enrollment, verification, template management, and user database operations",
+            "name": "Users"
         },
         {
-            "description": "Face enrollment, identification (1:N), and verification (1:1) with image or template",
-            "name": "Authentication"
+            "description": "Image validation and direct image-to-image matching",
+            "name": "Images"
         },
         {
-            "description": "User list, template export, user/template count, deletion",
-            "name": "Database"
+            "description": "Template extraction, matching, and identification with pre-extracted templates",
+            "name": "Templates"
         },
         {
-            "description": "Max instance, matching threshold, max face count, auto template update",
-            "name": "System Parameter"
-        },
-        {
-            "description": "Load, save, and reset configuration file",
+            "description": "Matching threshold, max face count, auto template update, instance info, and config file management",
             "name": "Config"
         }
     ]

@@ -88,8 +88,10 @@ class APIParser:
 
         endpoints: list[dict[str, Any]] = []
         paths: dict[str, Any] = self._raw.get("paths", {})
+        base_path = self._normalized_base_path()
 
-        for path, path_item in paths.items():
+        for raw_path, path_item in paths.items():
+            path = self._join_base_path(base_path, raw_path)
             if not isinstance(path_item, dict):
                 continue
 
@@ -119,6 +121,27 @@ class APIParser:
                 f"This parser only supports Swagger 2.0. "
                 f"Detected swagger={version!r}"
             )
+
+    def _normalized_base_path(self) -> str:
+        """Return Swagger 2.0 basePath normalized for endpoint path joining."""
+        base_path = str(self._raw.get("basePath", "") or "").strip()
+        if not base_path or base_path == "/":
+            return ""
+        if not base_path.startswith("/"):
+            base_path = "/" + base_path
+        return base_path.rstrip("/")
+
+    @staticmethod
+    def _join_base_path(base_path: str, path: str) -> str:
+        """Join basePath and path without duplicating an already-prefixed path."""
+        path = str(path or "").strip()
+        if not path.startswith("/"):
+            path = "/" + path
+        if not base_path:
+            return path
+        if path == base_path or path.startswith(base_path + "/"):
+            return path
+        return base_path + path
 
     # ──────────────────────────────────────────────────────────────
     # operation parsing
