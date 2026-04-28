@@ -800,6 +800,7 @@ class ExcelReportBuilder2:
                 return ""
             text = str(value)
             text = text.replace(" / ", "\n")
+            text = text.replace(", ", "\n")
             return text
 
         for idx, item in enumerate(tests, start=1):

@@ -674,7 +674,10 @@ class ExcelReportBuilder:
                 return ""
             text = str(value)
             # HTTP 후보값 200/400/422/503은 유지하고, 의미 구분자인 " / "만 줄바꿈 처리
-            return text.replace(" / ", "\n")
+            text.replace(" / ", "\n")
+            text = text.replace(", ", "\n")
+
+            return text
 
         def _parse_expected_http_set(value: Any) -> set[int]:
             if value in (None, ""):
