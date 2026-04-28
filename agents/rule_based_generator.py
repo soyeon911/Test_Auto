@@ -558,10 +558,6 @@ def _expected_http_statuses_for(
         if reason_code == "invalid_base64":
             return (400, 422)
 
-        # 형식은 맞지만 얼굴 없음/알고리즘 처리 실패
-        if reason_code == "no_face_detected":
-            return (422,)
-
         # raw image relation mismatch, channel mismatch 등
         # 구조는 맞지만 값 관계가 유효하지 않은 경우
         if reason_code == "invalid_image_relation":
@@ -573,6 +569,11 @@ def _expected_http_statuses_for(
 
             # 필드 값 타입/범위는 통과했지만 width*height*channel != image_data bytes 관계 오류
             return (400, 422)
+        
+        if reason_code == "no_face_detected":
+            if _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
+                return (200,)
+            return (422,)
 
         # state-dependent positive/probe:
         # 정상 데이터가 있으면 200, user/template/db/sdk 상태 미충족이면 422/503
@@ -582,6 +583,8 @@ def _expected_http_statuses_for(
         # fallback probe:
         # 성공하거나 도메인 처리 실패 정도만 허용
         return (200, 422)
+    
+        
 
     if policy == "must_pass":
         if axis == "state" or reason_code == "precondition_not_met" or pkey in STATE_DEPENDENT_PATHS:
@@ -631,6 +634,8 @@ def _expected_http_statuses_for(
         return (400, 422)
 
     if reason_code in {"no_face_detected", "template_size_mismatch", "unprocessable_payload", "constraint_missing_in_generator"}:
+        if reason_code == "no_face_detected" and _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
+            return (200,)
         return (422, 503)
 
     if axis == "system":
@@ -1348,27 +1353,51 @@ class RuleBasedTCGenerator:
                 path=path,
             )
 
+    def _http_nested_no_face_assertion(self, label: str = "no_face") -> str:
+        """QFE v3 face raw endpoints: no face is returned as HTTP 200 + nested data.error_code=-200."""
+        lines = [
+            "assert resp.status_code == 200, (",
+            f"    f\"[FAIL] {label} — expected HTTP 200 with nested no-face result, got {{resp.status_code}}\\n\"",
+            "    f\"  Body: {resp.text[:300]}\"",
+            ")",
+            "try:",
+            "    body = resp.json()",
+            "except ValueError:",
+            "    pytest.fail(f\"Expected JSON response, got: {resp.text[:300]}\")",
+            "assert body.get(\"success\") is True, (",
+            "    f\"[FAIL] expected top-level success=true for completed face pipeline\\n  body: {resp.text[:300]}\"",
+            ")",
+            "assert body.get(\"error_code\") == 0, (",
+            "    f\"[FAIL] expected top-level error_code=0\\n  body: {resp.text[:300]}\"",
+            ")",
+            "_data = body.get(\"data\") or {}",
+            "assert _data.get(\"error_code\") == -200, (",
+            "    f\"[FAIL] expected nested data.error_code=-200 for no face\\n  data: {_data}\\n  body: {resp.text[:300]}\"",
+            ")",
+            "assert str(_data.get(\"status\") or \"\") in {\"no_faces_detected\", \"no_face_detected\"}, (",
+            "    f\"[FAIL] expected nested no-face status\\n  data: {_data}\\n  body: {resp.text[:300]}\"",
+            ")",
+        ]
+        return "\n".join(lines) + "\n"
+    
+
+
     def _face_no_face_assertion(self, path: str, label: str = "no_face_image") -> str:
-        """
-        얼굴 없음 / face detect 실패 계열 assertion.
+        pkey = _path_key(path)
 
-        qfe:
-        - 기존 QFE legacy 응답 허용
-        - top-level success=true + nested data.error_code=-200 형태도 기존 정책상 허용
+        # 현재 QFE v3 raw face endpoints는 no face를 HTTP 200 + data.error_code=-200으로 반환함
+        if self.error_mode in ("http_status", "hybrid") and pkey in {
+            "/faces/analyze",
+            "/faces/detect/raw",
+        }:
+            return self._http_nested_no_face_assertion(label)
 
-        http_status:
-        - HTTP 422 + expected error_code 계열 기대
-
-        hybrid:
-        - HTTP 422 표준 응답 또는 legacy HTTP 200 응답 모두 허용
-        """
         exp_codes = _expected_error_codes_for(
             "domain",
             "no_face_detected",
             "image_data",
             path,
         )
-
         exp_statuses = _expected_http_statuses_for(
             "domain",
             "no_face_detected",
