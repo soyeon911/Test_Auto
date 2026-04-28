@@ -353,163 +353,168 @@ class ExcelReportBuilder:
         return self.output_path
 
     def _load_endpoints_from_source(self, source_file: str) -> list[dict]:
-        """Load API endpoints for the API List sheet without importing APIParser."""
+        """Build API List endpoints directly from a Swagger 2.0 JSON/YAML file.
+
+        This intentionally does not import APIParser. Excel report generation often runs
+        from a different working directory/PYTHONPATH than test generation, so importing
+        parsers.api_parser can fail even when source_file is valid.
+        """
         if not source_file:
             return []
 
-        p = Path(source_file)
+        p = Path(str(source_file))
         if not p.exists() or not p.is_file():
             print(f"[ExcelReporter] API List source not found: {source_file}")
             return []
 
         try:
+            text = p.read_text(encoding="utf-8")
             if p.suffix.lower() in {".yaml", ".yml"}:
                 try:
-                    import yaml
-                except ImportError:
-                    print("[ExcelReporter] PyYAML is required to read YAML swagger files")
+                    import yaml  # type: ignore
+                except Exception as exc:
+                    print(f"[ExcelReporter] API List YAML parse unavailable: {exc}")
                     return []
-                spec = yaml.safe_load(p.read_text(encoding="utf-8"))
+                spec = yaml.safe_load(text)
             else:
-                spec = json.loads(p.read_text(encoding="utf-8"))
+                spec = json.loads(text)
         except Exception as exc:
-            print(f"[ExcelReporter] API List source read failed: {exc}")
+            print(f"[ExcelReporter] API List source parse failed: {exc}")
             return []
 
         if not isinstance(spec, dict):
             return []
 
-        definitions = spec.get("definitions", {}) or {}
+        methods = {"get", "post", "put", "patch", "delete", "head", "options"}
         base_path = str(spec.get("basePath") or "").strip().rstrip("/")
+        paths = spec.get("paths") or {}
+        if not isinstance(paths, dict):
+            return []
 
-        def resolve_ref(obj):
-            if not isinstance(obj, dict):
-                return obj
-            ref = obj.get("$ref")
-            if not ref or not isinstance(ref, str) or not ref.startswith("#/"):
-                return obj
-
-            node = spec
+        def resolve_ref(ref: str) -> dict[str, Any]:
+            if not isinstance(ref, str) or not ref.startswith("#/"):
+                return {}
+            node: Any = spec
             for part in ref.lstrip("#/").split("/"):
                 if not isinstance(node, dict):
-                    return obj
+                    return {}
                 node = node.get(part, {})
-            return node if isinstance(node, dict) else obj
+            return node if isinstance(node, dict) else {}
 
-        def resolve_schema(schema):
+        def resolve_obj(obj: Any) -> Any:
+            if isinstance(obj, dict) and "$ref" in obj:
+                return resolve_schema(resolve_ref(obj["$ref"]))
+            return obj
+
+        def resolve_schema(schema: Any) -> Any:
             if not isinstance(schema, dict):
                 return schema
+            if "$ref" in schema:
+                return resolve_schema(resolve_ref(schema["$ref"]))
 
-            schema = resolve_ref(schema)
-            if not isinstance(schema, dict):
-                return schema
-
-            out = dict(schema)
-
-            props = out.get("properties")
+            resolved = dict(schema)
+            props = resolved.get("properties")
             if isinstance(props, dict):
-                out["properties"] = {
-                    name: resolve_schema(prop)
-                    for name, prop in props.items()
+                resolved["properties"] = {
+                    name: resolve_schema(prop_schema)
+                    for name, prop_schema in props.items()
                 }
+            if isinstance(resolved.get("items"), dict):
+                resolved["items"] = resolve_schema(resolved["items"])
+            return resolved
 
-            items = out.get("items")
-            if isinstance(items, dict):
-                out["items"] = resolve_schema(items)
-
-            return out
-
-        def normalize_param(param):
-            param = resolve_ref(param)
+        def normalize_param(param: dict[str, Any]) -> dict[str, Any]:
+            param = resolve_obj(param)
             if not isinstance(param, dict):
                 return {}
 
             schema = param.get("schema")
             if not schema:
-                schema = {
-                    "type": param.get("type", "string")
-                }
-                for key in [
-                    "format", "enum", "minimum", "maximum",
-                    "minLength", "maxLength", "pattern", "items",
-                ]:
+                schema = {"type": param.get("type", "string")}
+                for key in ("format", "enum", "minimum", "maximum", "minLength", "maxLength", "pattern", "items"):
                     if key in param:
-                        schema[key] = param[key]
+                        schema[key] = resolve_schema(param[key]) if key == "items" else param[key]
+            else:
+                schema = resolve_schema(schema)
 
             return {
                 "name": param.get("name", ""),
                 "in": param.get("in", "query"),
-                "required": param.get("required", False),
+                "required": bool(param.get("required", False)),
                 "description": param.get("description", ""),
-                "schema": resolve_schema(schema),
+                "schema": schema or {"type": "string"},
             }
 
-        def parse_body_param(param):
-            if not param:
-                return None
+        def merge_params(path_params: list[Any], op_params: list[Any]) -> list[dict[str, Any]]:
+            merged: dict[tuple[str, str], dict[str, Any]] = {}
+            for raw in list(path_params or []) + list(op_params or []):
+                param = normalize_param(raw) if isinstance(raw, dict) else {}
+                if not param:
+                    continue
+                key = (str(param.get("name", "")), str(param.get("in", "")))
+                merged[key] = param
+            return list(merged.values())
 
-            param = resolve_ref(param)
-            schema = resolve_schema(param.get("schema", {}))
-            if not schema:
-                return None
+        def parse_body(params: list[dict[str, Any]]) -> dict[str, Any] | None:
+            for param in params:
+                if param.get("in") != "body":
+                    continue
+                schema = resolve_schema(param.get("schema") or {})
+                if not schema:
+                    return None
+                return {
+                    "content_type": "application/json",
+                    "required": bool(param.get("required", False)),
+                    "description": param.get("description", ""),
+                    "name": param.get("name", ""),
+                    "schema": schema,
+                }
+            return None
 
-            return {
-                "content_type": "application/json",
-                "required": param.get("required", False),
-                "description": param.get("description", ""),
-                "name": param.get("name", ""),
-                "schema": schema,
-            }
+        def parse_responses(raw_responses: Any) -> dict[str, dict[str, Any]]:
+            result: dict[str, dict[str, Any]] = {}
+            if not isinstance(raw_responses, dict):
+                return result
+            for code, resp in raw_responses.items():
+                resp = resolve_obj(resp)
+                if not isinstance(resp, dict):
+                    continue
+                result[str(code)] = {
+                    "description": resp.get("description", ""),
+                    "schema": resolve_schema(resp.get("schema")) if resp.get("schema") else None,
+                }
+            return result
 
-        endpoints: list[dict] = []
-        http_methods = {"get", "post", "put", "patch", "delete", "head", "options"}
-
-        for raw_path, path_item in (spec.get("paths") or {}).items():
+        endpoints: list[dict[str, Any]] = []
+        for raw_path, path_item in paths.items():
             if not isinstance(path_item, dict):
                 continue
 
-            path = str(raw_path)
-            if base_path and not path.startswith(base_path + "/"):
-                path = base_path + path
+            full_path = str(raw_path)
+            if base_path and not full_path.startswith(base_path + "/") and full_path != base_path:
+                full_path = f"{base_path}{full_path if full_path.startswith('/') else '/' + full_path}"
 
-            path_level_params = path_item.get("parameters", []) or []
-
+            path_level_params = path_item.get("parameters", [])
             for method, operation in path_item.items():
                 method_l = str(method).lower()
-                if method_l not in http_methods or not isinstance(operation, dict):
+                if method_l not in methods or not isinstance(operation, dict):
                     continue
 
-                raw_params = list(path_level_params) + list(operation.get("parameters", []) or [])
-
-                non_body_params = []
-                body_param = None
-                for rp in raw_params:
-                    rp = resolve_ref(rp)
-                    if isinstance(rp, dict) and rp.get("in") == "body":
-                        body_param = rp
-                    else:
-                        non_body_params.append(rp)
-
-                responses = {}
-                for code, resp in (operation.get("responses") or {}).items():
-                    resp = resolve_ref(resp)
-                    if not isinstance(resp, dict):
-                        resp = {}
-                    responses[str(code)] = {
-                        "description": resp.get("description", ""),
-                        "schema": resolve_schema(resp.get("schema", {})) if resp.get("schema") else None,
-                    }
+                raw_params = list(path_level_params or []) + list(operation.get("parameters", []) or [])
+                all_params = merge_params([], raw_params)
+                non_body_params = [p for p in all_params if p.get("in") != "body"]
+                request_body = parse_body(all_params)
 
                 endpoints.append({
-                    "path": path,
+                    "path": full_path,
                     "method": method_l,
-                    "operation_id": operation.get("operationId", f"{method_l}_{path}"),
+                    "operation_id": operation.get("operationId", f"{method_l}_{full_path}"),
                     "summary": operation.get("summary", ""),
                     "description": operation.get("description", ""),
                     "tags": operation.get("tags", []),
-                    "parameters": [normalize_param(p) for p in non_body_params],
-                    "request_body": parse_body_param(body_param),
-                    "responses": responses,
+                    "parameters": non_body_params,
+                    "request_body": request_body,
+                    "responses": parse_responses(operation.get("responses", {})),
                 })
 
         print(f"[ExcelReporter] API List loaded {len(endpoints)} endpoint(s) from {source_file}")
@@ -610,46 +615,36 @@ class ExcelReportBuilder:
             ws.freeze_panes = "A3"
 
     def _build_tc_table(self, ws, tests: list[dict[str, Any]], base_url: str) -> None:
-        self._title_banner(ws, "A1:AL1", "TC (Test Case) Table")
+        self._title_banner(ws, "A1:AC1", "TC (Test Case) Table")
         ws.row_dimensions[1].height = 24
 
         headers = [
-            "#",
             "Test Environment",
-            "Target Type",
-            "HTTP Method / Function",
-            "Path / Module",
+            "Endpoint",
             "Rule Type",
             "Rule Subtype",
             "Endpoint Profile",
-            "Expected Result Type",
             "Semantic Tag",
             "Policy",
             "Axis",
             "Reason Code",
             "Target Field",
             "Test Condition",
-            "Request Query",
-            "Request Headers",
             "Request Body / Arguments",
-            "Expected",
-            "Actual",
+            "예상 HTTP",
+            "예상 응답",
+            "실제 HTTP",
+            "실제 응답",
             "Response Msg",
             "Data Error Code",
             "Match Score",
             "Match Status",
-            "Exception Type",
-            "Exception Message",
-            "Server Crash",
-            "Server Log Tail",
             "Outcome",
             "Failure Cause",
             "Duration (s)",
             "Error Detail",
             "Failure Detail (pytest)",
-            # http_status mode columns
             "HTTP Match",
-            "Expected HTTP",
             "Expected Error Codes",
             "Error Code Match",
             "Failure Level",
@@ -657,17 +652,84 @@ class ExcelReportBuilder:
         self._header_row(ws, 2, headers)
 
         col_widths = [
-            5, 26, 12, 22, 34,
-            16, 18, 18, 18, 16, 12,
-            22, 22, 18, 42,
-            28, 28, 70,
-            28, 44, 38, 16, 16, 16,
-            18, 42, 12, 42,
+            26, 48, 16, 18, 18,
+            16, 12, 22, 22, 18,
+            46, 70, 14, 42, 12,
+            44, 38, 16, 16, 16,
             12, 30, 12, 42, 55,
-            12, 10, 28, 14, 24,
+            12, 28, 14, 24,
         ]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
+
+        center_align_cols = {
+            3, 4, 5, 6, 7,
+            13, 15, 18, 19, 20,
+            21, 23, 26, 28, 29,
+        }
+
+        def _excel_linebreak(value: Any) -> str:
+            """Excel Alt+Enter equivalent: newline in cell + wrap_text=True."""
+            if value is None:
+                return ""
+            text = str(value)
+            # HTTP 후보값 200/400/422/503은 유지하고, 의미 구분자인 " / "만 줄바꿈 처리
+            return text.replace(" / ", "\n")
+
+        def _parse_expected_http_set(value: Any) -> set[int]:
+            if value in (None, ""):
+                return set()
+
+            if isinstance(value, int):
+                return {value}
+
+            if isinstance(value, (list, tuple, set)):
+                out: set[int] = set()
+                for v in value:
+                    try:
+                        out.add(int(v))
+                    except Exception:
+                        pass
+                return out
+
+            return {int(x) for x in re.findall(r"\b\d{3}\b", str(value))}
+
+        def _split_expected_display(item: dict[str, Any], fallback: str) -> tuple[str, str]:
+            expected_http = str(item.get("expected_http") or "").strip()
+            display = str(item.get("expected_status_display") or fallback or "").strip()
+
+            if display and " / " in display:
+                left, right = display.split(" / ", 1)
+                return expected_http or left.strip(), right.strip()
+
+            if expected_http:
+                remain = display
+                if remain.startswith(expected_http):
+                    remain = remain[len(expected_http):].strip(" /")
+                return expected_http, remain
+
+            m = re.match(r"^(\d{3}(?:/\d{3})*)\s*(.*)$", display)
+            if m:
+                return m.group(1).strip(), m.group(2).strip()
+
+            return display, ""
+
+        def _split_actual_display(display: str, actual_http: str) -> tuple[str, str]:
+            display = str(display or "").strip()
+            actual_http = str(actual_http or "").strip()
+
+            if actual_http and display.startswith(f"{actual_http} / "):
+                return actual_http, display.split(" / ", 1)[1].strip()
+
+            if " / " in display:
+                left, right = display.split(" / ", 1)
+                if left.strip().isdigit():
+                    return left.strip(), right.strip()
+
+            if actual_http:
+                return actual_http, "" if display == actual_http else display
+
+            return "", display
 
         src_cache: dict[str, str] = {}
 
@@ -690,21 +752,21 @@ class ExcelReportBuilder:
                     item.get("expected_status_display") or info.get("expected_status", "")
                 )
 
-            target_type = item.get("target_type") or self._infer_target_type(item, info)
             method_or_function = item.get("request_method") or item.get("function") or info["method"]
             path_or_module = item.get("request_path") or info["path"] or item.get("request_url") or ""
+            endpoint = f"{str(method_or_function).upper()} {path_or_module}".strip()
 
-            request_query = self._format_value(item.get("request_query", {}))
-            request_headers = self._format_value(item.get("request_headers", {}))
             request_body_or_args = self._pick_request_payload(item)
 
             expected_display = item.get("expected_status_display") or self._build_expected_display(item, info)
+            expected_http, expected_resp = _split_expected_display(item, expected_display)
+
             actual_display = self._build_actual_display(item, actual_status)
+            actual_http, actual_resp = _split_actual_display(actual_display, actual_status)
 
             rule_type = item.get("rule_type") or info["rule_type"]
             rule_subtype = item.get("rule_subtype", "")
             endpoint_profile = item.get("endpoint_profile", "")
-            expected_result_type = item.get("expected_result_type", "")
             semantic_tag = item.get("semantic_tag", "")
             policy = item.get("policy", "")
 
@@ -718,28 +780,30 @@ class ExcelReportBuilder:
             failure_cause = classify_failure_cause_from_item(item)
 
             # -- classify_result for http_status columns ------------------
-            _exp_http = item.get("expected_http")
-            _exp_ec   = item.get("expected_error_codes") or []
-            _act_http = item.get("actual_status")
-            _act_ec   = item.get("response_error_code")
+            _exp_http = item.get("expected_http") or expected_http
+            _exp_http_set = _parse_expected_http_set(_exp_http)
+
+            _exp_ec = item.get("expected_error_codes") or []
+            _act_http = item.get("actual_status") or actual_http
+            _act_ec = item.get("response_error_code")
+
             try:
                 _act_http_int = int(str(_act_http)) if _act_http not in (None, "") else None
             except (ValueError, TypeError):
                 _act_http_int = None
-            try:
-                _exp_http_int = int(str(_exp_http)) if _exp_http not in (None, "") else None
-            except (ValueError, TypeError):
-                _exp_http_int = None
+
             _http_match = (
-                "YES" if _exp_http_int is not None and _act_http_int is not None and _exp_http_int == _act_http_int
-                else "NO" if _exp_http_int is not None and _act_http_int is not None
+                "YES" if _exp_http_set and _act_http_int is not None and _act_http_int in _exp_http_set
+                else "NO" if _exp_http_set and _act_http_int is not None
                 else "N/A"
             )
+
             _ec_match = (
                 "YES" if _exp_ec and _act_ec is not None and _act_ec in _exp_ec
                 else "NO" if _exp_ec and _act_ec is not None
                 else "N/A"
             )
+
             _failure_level = ""
             if _classify_result is not None and outcome != "unknown":
                 try:
@@ -755,47 +819,37 @@ class ExcelReportBuilder:
                     )
                     _failure_level = _cr["level"]
                     if _cr.get("migration_flag"):
-                        _failure_level += f" ({_cr['migration_flag']})"  
+                        _failure_level += f" ({_cr['migration_flag']})"
                 except Exception:
                     pass
 
             row_vals = [
-                idx,
                 base_url,
-                target_type,
-                method_or_function,
-                path_or_module,
+                endpoint,
                 rule_type,
                 rule_subtype,
                 endpoint_profile,
-                expected_result_type,
                 semantic_tag,
                 policy,
                 axis_display,
                 item.get("reason_code", ""),
                 target_field,
                 condition,
-                request_query,
-                request_headers,
                 request_body_or_args,
-                expected_display,
-                actual_display,
+                expected_http,
+                _excel_linebreak(expected_resp),
+                actual_http,
+                _excel_linebreak(actual_resp),
                 response_msg,
                 item.get("response_data_error_code", ""),
                 item.get("response_data_match_score", ""),
                 item.get("response_data_status", ""),
-                item.get("exception_type", ""),
-                item.get("exception_message", ""),
-                "Y" if item.get("server_crashed") else "",
-                (item.get("server_log_tail") or "")[:2000],
                 outcome.upper(),
                 failure_cause,
                 duration,
                 item.get("error_detail", ""),
                 longrepr[:2000] if outcome in {"failed", "broken"} else "",
-                # http_status mode columns
                 _http_match,
-                str(_exp_http) if _exp_http is not None else "",
                 str(sorted(_exp_ec)) if _exp_ec else "",
                 _ec_match,
                 _failure_level,
@@ -804,24 +858,28 @@ class ExcelReportBuilder:
             r = idx + 2
             for col, val in enumerate(row_vals, start=1):
                 cell = ws.cell(row=r, column=col, value=val)
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                cell.alignment = (
+                    Alignment(horizontal="center", vertical="top", wrap_text=True)
+                    if col in center_align_cols
+                    else Alignment(horizontal="left", vertical="top", wrap_text=True)
+                )
                 cell.border = _BORDER
 
             bg = _FC_COLORS.get(failure_cause, _YELLOW_BG)
             for col in range(1, len(headers) + 1):
                 ws.cell(row=r, column=col).fill = PatternFill(fill_type="solid", fgColor=bg)
 
-            fc_cell = ws.cell(row=r, column=30)
+            fc_cell = ws.cell(row=r, column=22)
             if failure_cause not in {"PASS", "알 수 없음"}:
                 fc_cell.font = Font(bold=True)
 
             max_len = max(
                 len(str(v)) if v else 0
                 for v in [
-                    request_query,
                     request_body_or_args,
+                    expected_resp,
+                    actual_resp,
                     response_msg,
-                    item.get("exception_message", ""),
                     longrepr,
                 ]
             )
@@ -834,7 +892,9 @@ class ExcelReportBuilder:
             else:
                 height = 38
             ws.row_dimensions[r].height = height
-            ws.freeze_panes = "A3"
+
+        ws.freeze_panes = "A3"
+        ws.auto_filter.ref = f"A2:AC{len(tests) + 2}"
 
     def _load_test_results(self, pytest_json_path: str | Path | None, allure_results_dir: str | Path | None) -> list[dict[str, Any]]:
         """테스트 결과를 로드한다.

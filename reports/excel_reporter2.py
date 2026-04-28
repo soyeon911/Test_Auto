@@ -729,46 +729,107 @@ class ExcelReportBuilder2:
             ws.merge_cells(f"B{rr}:F{rr}")
 
     def _build_detail_table(self, ws, tests: list[dict[str, Any]], base_url: str) -> None:
-        self._title_banner(ws, "A1:S1", "자동화 테스트 최종 리포트 — 전체 결과 상세")
+        self._title_banner(ws, "A1:R1", "자동화 테스트 최종 리포트 — 전체 결과 상세")
         ws.row_dimensions[1].height = 26
+
         headers = [
-            "#", "TC ID", "HTTP 메서드", "엔드포인트",
-            "테스트유형", "세부유형", "프로파일", "기대결과유형",
-            "Axis", "Reason Code", "테스트조건", "기댓값",
-            "실제 HTTP", "실제 응답", "Data Error", "Match Score", "Match Status",
-            "P/F", "소요시간(s)",
+            "TC ID",
+            "엔드포인트",
+            "테스트유형",
+            "세부유형",
+            "프로파일",
+            "예상결과",
+            "Axis",
+            "Reason Code",
+            "테스트조건",
+            "예상 HTTP",
+            "예상 응답",
+            "실제 HTTP",
+            "실제 응답",
+            "Data Error",
+            "Match Score",
+            "Match Status",
+            "P/F",
+            "소요시간(s)",
         ]
         self._header_row(ws, 2, headers)
 
-        col_widths = [5, 10, 12, 30, 18, 18, 16, 18, 18, 20, 42, 28, 12, 32, 12, 14, 14, 8, 12]
+        col_widths = [
+            10, 42, 18, 18, 16, 16,
+            18, 20, 46, 16, 38,
+            12, 38, 12, 14, 14,
+            8, 12,
+        ]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
         ca = Alignment(horizontal="center", vertical="top", wrap_text=True)
         la = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
+        def split_expected(item: dict[str, Any], fallback: str) -> tuple[str, str]:
+            expected_http = str(item.get("expected_http") or "").strip()
+            expected_app = str(item.get("expected_app") or "").strip()
+
+            if expected_http and expected_app:
+                return expected_http, expected_app
+
+            display = str(item.get("expected_status_display") or fallback or "").strip()
+            if not display:
+                return "", ""
+
+            # expected_http가 200/400/422/503 형태일 수 있으므로
+            # 반드시 공백 포함 구분자 " / " 기준으로만 분리
+            if " / " in display:
+                left, right = display.split(" / ", 1)
+                return left.strip(), right.strip()
+
+            m = re.match(r"^(\d{3}(?:/\d{3})*)\s*(.*)$", display)
+            if m:
+                return m.group(1).strip(), m.group(2).strip()
+
+            return display, ""
+
+        def excel_linebreak(value: Any) -> str:
+            """
+            Excel 셀 내부 Alt+Enter 효과.
+            openpyxl에서는 문자열 안의 \\n + wrap_text=True면 줄바꿈 표시됨.
+            단, HTTP 후보값 200/400/422 같은 슬래시는 깨지 않기 위해
+            공백 포함 ' / ' 만 줄바꿈으로 바꾼다.
+            """
+            if value is None:
+                return ""
+            text = str(value)
+            text = text.replace(" / ", "\n")
+            return text
+
         for idx, item in enumerate(tests, start=1):
             info = self._parse_nodeid(item.get("nodeid", ""), {})
-            method = (item.get("request_method") or info["method"]).upper()
+
+            method = (item.get("request_method") or info["method"] or "").upper()
             path = item.get("request_path") or info["path"] or ""
+            endpoint = f"{method} {path}".strip()
+
             rtype = item.get("rule_type") or info["rule_type"] or ""
             subtype = item.get("rule_subtype", "")
             profile = item.get("endpoint_profile", "")
             expected_result_type = item.get("expected_result_type", "")
+
             axis = _AXIS_LABEL.get(item.get("axis", ""), item.get("axis", ""))
             reason_code = item.get("reason_code", "")
             cond = item.get("condition") or info["condition"] or ""
+
             pf = "PASS" if str(item.get("outcome", "")).lower() == "passed" else "FAIL"
             dur = round(float(item.get("duration", 0) or 0), 3)
+
             expected_display = item.get("expected_status_display") or info.get("expected_status", "")
+            expected_http, expected_resp = split_expected(item, expected_display)
+
             act_http = str(item.get("actual_status") or "")
             act_resp = self._build_actual_resp(item)
 
             row_vals = [
-                idx,
                 f"TC-{idx:04d}",
-                method,
-                path,
+                endpoint,
                 _TYPE_KO.get(rtype, rtype),
                 subtype,
                 _PROFILE_KO.get(profile, profile),
@@ -776,9 +837,10 @@ class ExcelReportBuilder2:
                 axis,
                 reason_code,
                 cond,
-                expected_display,
+                expected_http,
+                excel_linebreak(expected_resp),
                 act_http,
-                act_resp,
+                excel_linebreak(act_resp),
                 item.get("response_data_error_code", ""),
                 item.get("response_data_match_score", ""),
                 item.get("response_data_status", ""),
@@ -790,9 +852,9 @@ class ExcelReportBuilder2:
             for ci, val in enumerate(row_vals, start=1):
                 c = ws.cell(row=r, column=ci, value=val)
                 c.border = _BORDER
-                c.alignment = ca if ci in (1, 2, 3, 12, 13, 15, 16, 17, 18, 19) else la
+                c.alignment = ca if ci in (1, 3, 4, 5, 6, 10, 12, 14, 15, 16, 17, 18) else la
 
-            pf_c = ws.cell(row=r, column=18)
+            pf_c = ws.cell(row=r, column=17)
             if pf == "PASS":
                 pf_c.font = Font(bold=True, color=_GREEN_DARK)
                 pf_c.fill = PatternFill("solid", start_color=_GREEN_FILL, end_color=_GREEN_FILL)
@@ -801,14 +863,31 @@ class ExcelReportBuilder2:
                 pf_c.fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
 
             if pf == "FAIL":
-                for ci in range(1, 18):
-                    ws.cell(row=r, column=ci).fill = PatternFill("solid", start_color="FFF0ED", end_color="FFF0ED")
+                for ci in range(1, len(headers) + 1):
+                    ws.cell(row=r, column=ci).fill = PatternFill(
+                        "solid",
+                        start_color="FFF0ED",
+                        end_color="FFF0ED",
+                    )
+                pf_c.fill = PatternFill("solid", start_color=_RED_FILL, end_color=_RED_FILL)
+
             elif idx % 2 == 0:
-                for ci in range(1, 18):
-                    ws.cell(row=r, column=ci).fill = PatternFill("solid", start_color=_STRIPE, end_color=_STRIPE)
+                for ci in range(1, len(headers) + 1):
+                    ws.cell(row=r, column=ci).fill = PatternFill(
+                        "solid",
+                        start_color=_STRIPE,
+                        end_color=_STRIPE,
+                    )
+                pf_c.fill = PatternFill("solid", start_color=_GREEN_FILL, end_color=_GREEN_FILL)
+
+            # 응답 필드에 줄바꿈이 들어가면 행 높이를 조금 키움
+            if "\n" in str(row_vals[10]) or "\n" in str(row_vals[12]):
+                ws.row_dimensions[r].height = 52
+            else:
+                ws.row_dimensions[r].height = 34
 
         ws.freeze_panes = "A3"
-        ws.auto_filter.ref = f"A2:S{len(tests) + 2}"
+        ws.auto_filter.ref = f"A2:R{len(tests) + 2}"
 
     def _load_test_results(self, pytest_json_path: str | Path | None, allure_results_dir: str | Path | None) -> list[dict[str, Any]]:
         """테스트 결과를 로드한다.
