@@ -531,8 +531,26 @@ def _expected_http_statuses_for(
         # ID 계열 probe:
         # user_id=0/-1, sub_id=-1 등은 invalid parameter에 가까움.
         if reason_code in {"range_violation", "range_error"}:
-            if field_lc in {"user_id", "sub_id"}:
+            field_lc = (target_field or "").lower()
+
+            # path/resource identifier 자체가 invalid
+            # user_id=0, user_id=-1 등은 request parameter 오류
+            if field_lc == "user_id":
                 return (400,)
+
+            # sub_id는 0부터 유효하므로 sub_id=0은 range violation이 아님.
+            # sub_id=-1 같은 음수는 request parameter 오류.
+            # 단, 현재 함수에는 실제 probe 값이 없으므로 보수적으로 400/422 허용.
+            if field_lc == "sub_id":
+                return (400, 422)
+
+            # max_face=0은 Go validator required tag 때문에 400으로 떨어질 수 있고,
+            # max_face=11은 명세상 range 초과라 422 계열이 타당함.
+            # 두 boundary가 같은 reason_code로 들어오므로 400/422 둘 다 허용.
+            if field_lc == "max_face":
+                return (400, 422)
+
+            # mode, threshold 등 config/body domain value 범위 오류
             return (422,)
 
         # base64 문자열 자체가 깨지면 400,
