@@ -858,8 +858,9 @@ class ExcelReportBuilder:
                 "response_data_error_code": None,
                 "response_data_match_score": None,
                 "response_data_status": None,
-                "expected_error_codes": None,
-                "expected_error_family": "",
+                "expected_error_codes": meta.get("expected_error_codes"),   # tc_meta 직접 연결
+                "expected_error_family": meta.get("expected_error_family", ""),
+                "expected_http": meta.get("expected_http"),                    # tc_meta 직접 연결
             }
             # user_properties 에 diag 가 있으면 test_diag.jsonl 없이도 필드 채움
             if inline_diag:
