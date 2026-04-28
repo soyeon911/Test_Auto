@@ -597,15 +597,23 @@ def _expected_http_statuses_for(
     if reason_code in {"range_violation", "range_error"}:
         field_lc = (target_field or "").lower()
 
-        # path/resource identifier 자체가 invalid한 경우:
-        # user_id는 1부터 시작, sub_id는 0 이상 등.
-        # 이 값이 범위를 벗어나면 리소스 상태 문제가 아니라 invalid parameter.
-        if field_lc in {"user_id", "sub_id"}:
+        # user_id는 1부터 시작이므로 0/-1은 invalid path parameter
+        if field_lc == "user_id":
             return (400,)
 
-        # config/body domain value 범위 오류:
-        # mode=-1/2, threshold=-1/100001, max_face=0/11 등
-        # 구조는 맞지만 값 의미가 유효하지 않으므로 422.
+        # sub_id는 0부터 유효.
+        # sub_id=-1은 400, sub_id=0은 state/resource not found로 422가 날 수 있음.
+        # 현재 함수에는 실제 probe 값이 없으므로 보수적으로 400/422 허용.
+        if field_lc == "sub_id":
+            return (400, 422)
+
+        # max_face=0은 Go validator required tag 때문에 400으로 떨어질 수 있음.
+        # max_face=11은 명세상 상한 초과라 400/422 중 하나가 정상.
+        # 실제 200이면 서버가 max_face 상한 검증을 안 한 것이므로 FAIL 유지.
+        if field_lc == "max_face":
+            return (400, 422)
+
+        # mode=-1/2, threshold=-1/100001 등 값 의미가 유효하지 않은 body domain 값
         return (422,)
 
     if axis == "state" or reason_code in {
