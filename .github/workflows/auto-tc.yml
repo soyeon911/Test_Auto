@@ -155,14 +155,14 @@ jobs:
           # 2) Version 조회
           $version = "unknown"
           try {
-            $info = Invoke-RestMethod -Uri "$baseUrl/api/v2/info" -TimeoutSec 5 -ErrorAction Stop
+            $info = Invoke-RestMethod -Uri "$baseUrl/api/v3/system/info" -TimeoutSec 5 -ErrorAction Stop
             if ($null -ne $info.data.version -and "$($info.data.version)".Trim() -ne "") {
               $version = [string]$info.data.version
             }
-            Write-Host "[Version] /api/v2/info -> $version"
+            Write-Host "[Version] /api/v3/system/info -> $version"
           }
           catch {
-            Write-Host "[Version] /api/v2/info 실패: $($_.Exception.Message)"
+            Write-Host "[Version] /api/v3/system/info 실패: $($_.Exception.Message)"
           }
 
           # 3) Swagger 다운로드

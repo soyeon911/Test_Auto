@@ -505,6 +505,64 @@ def _exp_app_probe(axis: str, reason_code: str, target_field: str = "", path: st
 
 
 
+def _expected_http_statuses_for(
+    axis: str,
+    reason_code: str,
+    target_field: str = "",
+    path: str = "",
+    policy: str = "",
+) -> tuple[int, ...]:
+    """axis/reason_code/policy 조합으로 허용 HTTP status code 집합 계산.
+
+    새 QFE Swagger는 legacy 200 단일 응답이 아니라 400/408/422/503을
+    명시하므로, report meta와 assertion이 같은 허용 집합을 쓰도록 한다.
+    """
+    pkey = _path_key(path)
+
+    if policy == "probe_only":
+        return (200, 400, 404, 408, 422, 503)
+
+    if policy == "must_pass":
+        if axis == "state" or reason_code == "precondition_not_met" or pkey in STATE_DEPENDENT_PATHS:
+            return (200, 400, 422, 503)
+        return (200,)
+
+    if axis == "schema" or reason_code in {
+        "missing_required", "type_mismatch", "wrong_type",
+        "invalid_parameter", "type_coercion_risk",
+    }:
+        return (400,)
+
+    if reason_code in {"range_violation", "range_error"}:
+        return (400,)
+
+    if axis == "state" or reason_code in {
+        "user_not_found", "template_not_found", "database_not_loaded",
+        "file_not_found", "precondition_not_met",
+    }:
+        return (422, 503)
+
+    if reason_code == "invalid_base64":
+        return (400, 422)
+
+    if reason_code == "invalid_image_relation":
+        # raw image dimension/channel/payload mismatch is client validation in the new Swagger,
+        # but some server versions surface it as unprocessable SDK input.
+        return (400, 422)
+
+    if reason_code in {"no_face_detected", "template_size_mismatch", "unprocessable_payload", "constraint_missing_in_generator"}:
+        return (422, 503)
+
+    if axis == "system":
+        return (500, 503)
+
+    return (400,)
+
+
+def _format_http_statuses(statuses: tuple[int, ...]) -> str:
+    return "/".join(str(s) for s in statuses)
+
+
 def _expected_http_for(
     axis: str,
     reason_code: str,
@@ -512,37 +570,8 @@ def _expected_http_for(
     path: str = "",
     policy: str = "",
 ) -> int:
-    """axis/reason_code/policy 조합으로 기대 HTTP status code 계산 (http_status / hybrid 모드용)."""
-    if policy == "must_pass":
-        return 200
-
-    if axis == "schema" or reason_code in {
-        "missing_required", "type_mismatch", "wrong_type",
-        "invalid_parameter", "type_coercion_risk",
-    }:
-        return 400
-
-    if reason_code in {"range_violation", "range_error"}:
-        return 400
-
-    if axis == "state" or reason_code in {
-        "user_not_found", "template_not_found", "database_not_loaded",
-        "file_not_found", "precondition_not_met",
-    }:
-        return 422
-
-    if reason_code in {
-        "invalid_base64", "invalid_image_relation", "no_face_detected",
-        "template_size_mismatch", "unprocessable_payload",
-        "constraint_missing_in_generator",
-    }:
-        return 422
-
-    if axis == "system":
-        return 500
-
-    return 400
-
+    """Backward-compatible primary expected HTTP status. Prefer _expected_http_statuses_for for new code."""
+    return _expected_http_statuses_for(axis, reason_code, target_field, path, policy)[0]
 
 def _expected_error_codes_for(
     axis: str,
@@ -1010,24 +1039,26 @@ class RuleBasedTCGenerator:
 
     def _http_error_assertion(
         self,
-        expected_status: int,
+        expected_status: int | tuple[int, ...] | list[int],
         expected_error_codes: frozenset[int] | None,
         field_name: str,
         label: str,
     ) -> str:
         """
         http_status 모드 must_fail:
-        - HTTP status가 expected_status와 정확히 일치해야 함
-
-        주의:
-        textwrap.dedent + 동적 multiline 삽입을 쓰면 generated test에
-        unexpected indent가 생길 수 있으므로 line list 방식으로 생성한다.
+        - HTTP status가 expected_status 후보 중 하나와 일치해야 함
+        - error_code는 pass/fail 기준이 아니라 diag/failure-cause 분류용으로만 기록
         """
         codes_list = sorted(expected_error_codes or [])
+        if isinstance(expected_status, int):
+            statuses = [expected_status]
+        else:
+            statuses = list(dict.fromkeys(int(s) for s in expected_status))
+        status_display = "/".join(str(s) for s in statuses)
 
         lines = [
-            f"assert resp.status_code == {expected_status}, (",
-            f"    f\"[FAIL] {label} on '{field_name}' — expected HTTP {expected_status}, got {{resp.status_code}}\\n\"",
+            f"assert resp.status_code in {statuses!r}, (",
+            f"    f\"[FAIL] {label} on '{field_name}' — expected HTTP {status_display}, got {{resp.status_code}}\\n\"",
             f"    f\"  field : {field_name}\\n\"",
             "    f\"  Body  : {resp.text[:300]}\"",
             ")",
@@ -1041,8 +1072,6 @@ class RuleBasedTCGenerator:
             ")",
         ]
 
-        # error_code는 diag에 기록되어 failure cause 분류에만 사용됨 (pass/fail 기준 아님)
-        # assert _ec in codes_list 는 의도적으로 생략
         if codes_list:
             lines.extend([
                 f"# [info] expected error_code(s): {codes_list} — recorded in diag for failure cause only",
@@ -1052,16 +1081,23 @@ class RuleBasedTCGenerator:
 
     def _http_hybrid_error_assertion(
         self,
-        expected_status: int,
+        expected_status: int | tuple[int, ...] | list[int],
         expected_error_codes: frozenset[int] | None,
         field_name: str,
         label: str,
     ) -> str:
-        """hybrid 모드 must_fail: legacy 200 또는 표준 HTTP error status를 모두 허용."""
+        """hybrid 모드 must_fail: legacy 200 또는 표준 HTTP error status 후보를 모두 허용."""
         codes_list = sorted(expected_error_codes or [])
+        if isinstance(expected_status, int):
+            statuses = [200, expected_status]
+        else:
+            statuses = [200] + [int(s) for s in expected_status]
+        statuses = list(dict.fromkeys(statuses))
+        status_display = "/".join(str(s) for s in statuses)
+
         lines = [
-            f"assert resp.status_code in [200, {expected_status}], (",
-            f"    f\"[FAIL] {label} on '{field_name}' - expected legacy 200 or HTTP {expected_status}, got {{resp.status_code}}\\n\"",
+            f"assert resp.status_code in {statuses!r}, (",
+            f"    f\"[FAIL] {label} on '{field_name}' - expected legacy/standard HTTP {status_display}, got {{resp.status_code}}\\n\"",
             "    f\"  Body: {resp.text[:300]}\"",
             ")",
             "try:",
@@ -1101,15 +1137,18 @@ class RuleBasedTCGenerator:
         return "\n".join(lines) + "\n"
 
     def _http_probe_assertion(self, label: str = "probe") -> str:
-        """http_status/hybrid 모드 probe_only: 200/400/404/422 허용, 500 불허."""
+        """http_status/hybrid 모드 probe_only: Swagger-declared non-crash statuses 허용."""
+        statuses = list(_expected_http_statuses_for("domain", "probe_only", policy="probe_only"))
+        status_display = "/".join(str(s) for s in statuses)
         lines = [
-            "assert resp.status_code < 500, (",
-            f"    f\"[FAIL] {label} — server crash (HTTP {{resp.status_code}})\\n\"",
+            f"assert resp.status_code in {statuses!r}, (",
+            f"    f\"[FAIL] {label} — expected non-crash HTTP {status_display}, got {{resp.status_code}}\\n\"",
             "    f\"  Body: {resp.text[:300]}\"",
             ")",
-            "assert resp.status_code != 0, (",
-            f"    f\"[FAIL] {label} — no response (status=0)\"",
-            ")",
+            "try:",
+            "    body = resp.json()",
+            "except ValueError:",
+            "    pytest.fail(f\"Expected JSON response, got: {resp.text[:300]}\")",
         ]
         return "\n".join(lines) + "\n"
 
@@ -1135,13 +1174,13 @@ class RuleBasedTCGenerator:
         # ── must_fail ─────────────────────────────────────────────────────────
         if policy == "must_fail":
             if mode == "http_status":
-                exp_status = _expected_http_for(axis, reason_code, field_name, path, policy)
+                exp_statuses = _expected_http_statuses_for(axis, reason_code, field_name, path, policy)
                 exp_codes  = _expected_error_codes_for(axis, reason_code, field_name, path)
-                return self._http_error_assertion(exp_status, exp_codes, field_name, label)
+                return self._http_error_assertion(exp_statuses, exp_codes, field_name, label)
             if mode == "hybrid":
-                exp_status = _expected_http_for(axis, reason_code, field_name, path, policy)
+                exp_statuses = _expected_http_statuses_for(axis, reason_code, field_name, path, policy)
                 exp_codes  = _expected_error_codes_for(axis, reason_code, field_name, path)
-                return self._http_hybrid_error_assertion(exp_status, exp_codes, field_name, label)
+                return self._http_hybrid_error_assertion(exp_statuses, exp_codes, field_name, label)
             if mode == "qfe":
                 return self._qfe_error_assertion(field_name, label)
             return self._standard_error_assertion(field_name, label)
@@ -1189,9 +1228,17 @@ class RuleBasedTCGenerator:
             path,
         )
 
+        exp_statuses = _expected_http_statuses_for(
+            "domain",
+            "no_face_detected",
+            "image_data",
+            path,
+            "must_fail",
+        )
+
         if self.error_mode == "http_status":
             return self._http_error_assertion(
-                422,
+                exp_statuses,
                 exp_codes,
                 "image_data",
                 label,
@@ -1199,7 +1246,7 @@ class RuleBasedTCGenerator:
 
         if self.error_mode == "hybrid":
             return self._http_hybrid_error_assertion(
-                422,
+                exp_statuses,
                 exp_codes,
                 "image_data",
                 label,
@@ -1249,20 +1296,18 @@ class RuleBasedTCGenerator:
                 _effective_policy = "probe_only"
 
         if mode in ("http_status", "hybrid"):
-            if _effective_policy == "probe_only":
-                _eff_expected_http = "<500"
-                _exp_codes = []
-            else:
-                _eff_expected_http = str(
-                    _expected_http_for(
-                        axis,
-                        reason_code,
-                        target_field,
-                        request_path,
-                        _effective_policy,
-                    )
-                )
-                _exp_codes = sorted(
+            _eff_statuses = _expected_http_statuses_for(
+                axis,
+                reason_code,
+                target_field,
+                request_path,
+                _effective_policy,
+            )
+            _eff_expected_http = _format_http_statuses(_eff_statuses)
+            _exp_codes = (
+                []
+                if _effective_policy == "probe_only"
+                else sorted(
                     _expected_error_codes_for(
                         axis,
                         reason_code,
@@ -1270,6 +1315,7 @@ class RuleBasedTCGenerator:
                         request_path,
                     )
                 )
+            )
         else:
             _eff_expected_http = expected_http
             _exp_codes = []
