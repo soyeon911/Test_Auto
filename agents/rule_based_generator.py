@@ -534,7 +534,7 @@ def _expected_http_statuses_for(
         return (400,)
 
     if reason_code in {"range_violation", "range_error"}:
-        return (400,)
+        return (422,)
 
     if axis == "state" or reason_code in {
         "user_not_found", "template_not_found", "database_not_loaded",
