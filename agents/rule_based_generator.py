@@ -520,7 +520,43 @@ def _expected_http_statuses_for(
     pkey = _path_key(path)
 
     if policy == "probe_only":
-        return (200, 400, 404, 408, 422, 503)
+        field_lc = (target_field or "").lower()
+
+        # coercible wrong type:
+        # 예: mode="1", mode="0", boolean="true"
+        # 서버가 엄격하면 400, 관대하게 coercion하면 200
+        if axis == "schema" or reason_code in {"type_coercion_risk", "type_mismatch"}:
+            return (200, 400)
+
+        # ID 계열 probe:
+        # user_id=0/-1, sub_id=-1 등은 invalid parameter에 가까움.
+        if reason_code in {"range_violation", "range_error"}:
+            if field_lc in {"user_id", "sub_id"}:
+                return (400,)
+            return (422,)
+
+        # base64 문자열 자체가 깨지면 400,
+        # decode 이후 이미지/템플릿 처리 실패면 422
+        if reason_code == "invalid_base64":
+            return (400, 422)
+
+        # 형식은 맞지만 얼굴 없음/알고리즘 처리 실패
+        if reason_code == "no_face_detected":
+            return (422,)
+
+        # raw image relation mismatch, channel mismatch 등
+        # 구조는 맞지만 값 관계가 유효하지 않은 경우
+        if reason_code == "invalid_image_relation":
+            return (422,)
+
+        # state-dependent positive/probe:
+        # 정상 데이터가 있으면 200, user/template/db/sdk 상태 미충족이면 422/503
+        if axis == "state" or reason_code == "precondition_not_met" or pkey in STATE_DEPENDENT_PATHS:
+            return (200, 422, 503)
+
+        # fallback probe:
+        # 성공하거나 도메인 처리 실패 정도만 허용
+        return (200, 422)
 
     if policy == "must_pass":
         if axis == "state" or reason_code == "precondition_not_met" or pkey in STATE_DEPENDENT_PATHS:
@@ -534,6 +570,17 @@ def _expected_http_statuses_for(
         return (400,)
 
     if reason_code in {"range_violation", "range_error"}:
+        field_lc = (target_field or "").lower()
+
+        # path/resource identifier 자체가 invalid한 경우:
+        # user_id는 1부터 시작, sub_id는 0 이상 등.
+        # 이 값이 범위를 벗어나면 리소스 상태 문제가 아니라 invalid parameter.
+        if field_lc in {"user_id", "sub_id"}:
+            return (400,)
+
+        # config/body domain value 범위 오류:
+        # mode=-1/2, threshold=-1/100001, max_face=0/11 등
+        # 구조는 맞지만 값 의미가 유효하지 않으므로 422.
         return (422,)
 
     if axis == "state" or reason_code in {
