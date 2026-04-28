@@ -338,6 +338,8 @@ class ExcelReportBuilder:
         self._build_summary(ws1, runner_summary, source_file, base_url)
 
         ws2 = wb.create_sheet("API List")
+        if endpoints is None:
+            endpoints = self._load_endpoints_from_source(source_file)
         self._build_api_list(ws2, endpoints or [])
 
         ws3 = wb.create_sheet("TC Table")
@@ -349,6 +351,30 @@ class ExcelReportBuilder:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(self.output_path)
         return self.output_path
+
+    def _load_endpoints_from_source(self, source_file: str) -> list[dict]:
+        """Load API endpoints for the API List sheet when build() caller did not pass endpoints."""
+        if not source_file:
+            return []
+
+        source = str(source_file)
+        try:
+            try:
+                from parsers.api_parser import APIParser
+            except ImportError:
+                try:
+                    from api_parser import APIParser
+                except ImportError:
+                    from parser.api_parser import APIParser
+
+            endpoints = APIParser(source).load().parse()
+            if not isinstance(endpoints, list):
+                return []
+            print(f"[ExcelReporter] API List loaded {len(endpoints)} endpoint(s) from {source}")
+            return endpoints
+        except Exception as exc:
+            print(f"[ExcelReporter] API List fallback parse failed: {exc}")
+            return []
 
     def _build_summary(self, ws, summary: dict[str, Any], source_file: str, base_url: str) -> None:
         self._title_banner(ws, "A1:B1", "AutoTC — Test Execution Summary")
