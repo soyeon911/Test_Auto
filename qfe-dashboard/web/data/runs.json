@@ -1,0 +1,22 @@
+[
+  {
+    "run_id": "2026-04-28_16-55-08",
+    "created_at": "2026-04-28 16:55:08",
+    "total": 244,
+    "passed": 232,
+    "failed": 12,
+    "pass_rate": 95.08,
+    "duration_sec": 5.301,
+    "exitcode": 1
+  },
+  {
+    "run_id": "2026-04-28_07-55-08",
+    "created_at": "2026-04-28 07:55:08",
+    "total": 244,
+    "passed": 232,
+    "failed": 12,
+    "pass_rate": 95.08,
+    "duration_sec": 5.301,
+    "exitcode": 1
+  }
+]

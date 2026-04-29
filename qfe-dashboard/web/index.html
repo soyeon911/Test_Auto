@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QFE AutoTC Dashboard</title>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --primary: #334155;
+      --good: #dff4e8;
+      --good-text: #166534;
+      --bad: #fde2e2;
+      --bad-text: #991b1b;
+      --warn: #fff4d6;
+      --warn-text: #854d0e;
+      --info: #dbeafe;
+      --info-text: #1e40af;
+      --shadow: 0 10px 24px rgba(15, 23, 42, .06);
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      background: linear-gradient(135deg, #111827 0%, #334155 72%, #475569 100%);
+      color: white;
+      padding: 28px 34px;
+    }
+    header .label { opacity: .75; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 8px 0 6px; font-size: 30px; }
+    header p { margin: 0; opacity: .82; }
+    main { padding: 26px 34px 42px; max-width: 1500px; margin: 0 auto; }
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .toolbar .meta { color: var(--muted); font-size: 14px; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 38px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--primary);
+      border-radius: 999px;
+      text-decoration: none;
+      font-weight: 650;
+      font-size: 14px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, .04);
+      cursor: pointer;
+    }
+    .grid { display: grid; gap: 16px; }
+    .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .twocol { grid-template-columns: 1.1fr .9fr; }
+    .threecol { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .kpi .name { color: var(--muted); font-size: 13px; font-weight: 650; }
+    .kpi .value { margin-top: 8px; font-size: 30px; font-weight: 800; letter-spacing: -.02em; }
+    .kpi .sub { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .ok { color: var(--good-text); }
+    .fail { color: var(--bad-text); }
+    .warn { color: var(--warn-text); }
+    h2 { margin: 0 0 14px; font-size: 18px; }
+    .barrow { display: grid; grid-template-columns: 145px 1fr 54px; gap: 10px; align-items: center; margin: 10px 0; }
+    .barrow .label { color: #374151; font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .barrow .count { color: var(--muted); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+    .bar { height: 11px; background: #eef2f7; border-radius: 999px; overflow: hidden; }
+    .bar > span { display: block; height: 100%; background: #64748b; border-radius: 999px; }
+    .table-wrap { overflow: auto; max-height: 560px; border: 1px solid var(--line); border-radius: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: #f8fafc; color: #475569; z-index: 1; font-size: 12px; }
+    tr:hover td { background: #fafafa; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-weight: 750;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .pill.pass { background: var(--good); color: var(--good-text); }
+    .pill.failed { background: var(--bad); color: var(--bad-text); }
+    .pill.schema { background: #ede9fe; color: #5b21b6; }
+    .pill.domain { background: var(--info); color: var(--info-text); }
+    .pill.state { background: var(--warn); color: var(--warn-text); }
+    .pill.runtime { background: var(--bad); color: var(--bad-text); }
+    .pill.unknown { background: #f3f4f6; color: #4b5563; }
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    input, select {
+      height: 38px;
+      padding: 0 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--text);
+      min-width: 180px;
+    }
+    .empty { color: var(--muted); padding: 20px; text-align: center; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .prewrap { white-space: pre-wrap; word-break: break-word; }
+    .input-data { min-width: 300px; max-width: 460px; }
+    .input-cell {
+      min-width: 300px;
+      max-width: 460px;
+      line-height: 1.55;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .input-block {
+      display: grid;
+      grid-template-columns: 58px minmax(0, 1fr);
+      gap: 8px 10px;
+      align-items: start;
+    }
+    .input-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .02em;
+      padding-top: 3px;
+    }
+    .input-value { min-width: 0; word-break: break-word; }
+    .input-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.55;
+      max-height: 96px;
+      overflow: auto;
+    }
+    .input-target {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .input-condition {
+      color: #334155;
+      line-height: 1.55;
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+    @media (max-width: 1100px) {
+      .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .twocol, .threecol { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px; }
+      header { padding: 24px 20px; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="label">QFE AutoTC</div>
+    <h1>테스트 결과 대시보드</h1>
+    <p>pytest JSON report 기반 테스트 실행 결과 요약 · 실패 원인 분류 · 엔드포인트별 현황</p>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <div class="meta" id="runMeta">데이터 로딩 중...</div>
+      <div>
+        <a class="btn" href="data/latest.json" target="_blank">latest.json</a>
+        <a class="btn" href="data/runs.json" target="_blank">runs.json</a>
+        <button class="btn" onclick="location.reload()">새로고침</button>
+      </div>
+    </div>
+
+    <section class="grid kpis" id="kpis"></section>
+
+    <section class="grid twocol" style="margin-top:16px">
+      <div class="card">
+        <h2>실패 엔드포인트 Top</h2>
+        <div id="topFailedEndpoints"></div>
+      </div>
+      <div class="card">
+        <h2>Axis별 분류</h2>
+        <div id="axisBars"></div>
+      </div>
+    </section>
+
+    <section class="grid threecol" style="margin-top:16px">
+      <div class="card">
+        <h2>Reason Code</h2>
+        <div id="reasonBars"></div>
+      </div>
+      <div class="card">
+        <h2>Rule Type</h2>
+        <div id="ruleBars"></div>
+      </div>
+      <div class="card">
+        <h2>HTTP Status</h2>
+        <div id="httpBars"></div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <h2>실패 케이스 상세</h2>
+      <div class="filters">
+        <input id="searchInput" placeholder="endpoint / body / target / condition / message 검색" />
+        <select id="axisFilter"><option value="">Axis 전체</option></select>
+        <select id="reasonFilter"><option value="">Reason 전체</option></select>
+        <select id="ruleFilter"><option value="">Rule 전체</option></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Outcome</th>
+              <th>Endpoint</th>
+              <th>Input Data</th>
+              <th>Rule</th>
+              <th>Axis</th>
+              <th>Reason</th>
+              <th>Expected</th>
+              <th>Actual</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="failureTable"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let summary = null;
+    let failures = [];
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]));
+    }
+
+    function kpi(name, value, sub = "", cls = "") {
+      return `<div class="card kpi"><div class="name">${escapeHtml(name)}</div><div class="value ${cls}">${escapeHtml(value)}</div><div class="sub">${escapeHtml(sub)}</div></div>`;
+    }
+
+    function renderKpis() {
+      $("kpis").innerHTML = [
+        kpi("Total", summary.total, `collected ${summary.collected}`),
+        kpi("Passed", summary.passed, `${summary.pass_rate}%`, "ok"),
+        kpi("Failed", summary.failed, `${summary.fail_rate}%`, summary.failed > 0 ? "fail" : "ok"),
+        kpi("Duration", `${summary.duration_sec}s`, "pytest duration"),
+        kpi("Exit Code", summary.exitcode, summary.exitcode === 0 ? "success" : "non-zero", summary.exitcode === 0 ? "ok" : "fail"),
+        kpi("Run ID", summary.run_id, summary.created_at),
+      ].join("");
+    }
+
+    function renderBars(id, obj, limit = 12) {
+      const entries = Object.entries(obj || {}).filter(([k]) => k !== "unknown" || obj[k] > 0).slice(0, limit);
+      const max = Math.max(1, ...entries.map(([,v]) => Number(v)));
+      if (!entries.length) {
+        $(id).innerHTML = `<div class="empty">데이터 없음</div>`;
+        return;
+      }
+      $(id).innerHTML = entries.map(([k,v]) => `
+        <div class="barrow" title="${escapeHtml(k)}">
+          <div class="label">${escapeHtml(k)}</div>
+          <div class="bar"><span style="width:${Math.max(2, Number(v)/max*100)}%"></span></div>
+          <div class="count">${escapeHtml(v)}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderTopEndpoints() {
+      const rows = (summary.top_failed_endpoints || []).slice(0, 10);
+      if (!rows.length) {
+        $("topFailedEndpoints").innerHTML = `<div class="empty">실패 엔드포인트 없음</div>`;
+        return;
+      }
+      const max = Math.max(1, ...rows.map(r => r.failed));
+      $("topFailedEndpoints").innerHTML = rows.map(r => `
+        <div class="barrow" style="grid-template-columns: 1fr 170px 72px" title="${escapeHtml(r.endpoint)}">
+          <div class="label mono">${escapeHtml(r.endpoint)}</div>
+          <div class="bar"><span style="width:${Math.max(2, r.failed/max*100)}%"></span></div>
+          <div class="count">${r.failed}/${r.total}</div>
+        </div>
+      `).join("");
+    }
+
+    function fillSelect(id, values) {
+      const el = $(id);
+      values.filter(Boolean).sort().forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v;
+        el.appendChild(opt);
+      });
+    }
+
+    function renderFilters() {
+      fillSelect("axisFilter", [...new Set(failures.map(f => f.axis))]);
+      fillSelect("reasonFilter", [...new Set(failures.map(f => f.reason_code))]);
+      fillSelect("ruleFilter", [...new Set(failures.map(f => f.rule_type))]);
+      ["searchInput", "axisFilter", "reasonFilter", "ruleFilter"].forEach(id => $(id).addEventListener("input", renderFailureTable));
+    }
+
+    function pill(text, cls) {
+      return `<span class="pill ${escapeHtml(cls || 'unknown')}">${escapeHtml(text)}</span>`;
+    }
+
+    function inputViewOf(row) {
+      if (row.input_view) return row.input_view;
+      const text = String(row.input_data || "");
+      const get = (key) => {
+        const re = new RegExp(`${key}:\\s*([\\s\\S]*?)(?=\\n(?:body|target|condition):|$)`, "i");
+        const m = text.match(re);
+        return m ? m[1].trim() : "-";
+      };
+      return { body: get("body"), target: get("target"), condition: get("condition") };
+    }
+
+    function renderInputDataCell(row) {
+      const v = inputViewOf(row);
+      return `
+        <div class="input-cell">
+          <div class="input-block">
+            <div class="input-label">Body</div>
+            <div class="input-value input-code">${escapeHtml(v.body || "-")}</div>
+            <div class="input-label">Target</div>
+            <div class="input-value"><span class="input-target">${escapeHtml(v.target || "-")}</span></div>
+            <div class="input-label">Cond</div>
+            <div class="input-value input-condition">${escapeHtml(v.condition || "-")}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderFailureTable() {
+      const q = $("searchInput").value.trim().toLowerCase();
+      const axis = $("axisFilter").value;
+      const reason = $("reasonFilter").value;
+      const rule = $("ruleFilter").value;
+      const filtered = failures.filter(f => {
+        const iv = inputViewOf(f);
+        const hay = `${f.endpoint} ${f.nodeid} ${iv.body || ""} ${iv.target || ""} ${iv.condition || ""} ${f.failure_message} ${f.response_snippet}`.toLowerCase();
+        return (!q || hay.includes(q)) && (!axis || f.axis === axis) && (!reason || f.reason_code === reason) && (!rule || f.rule_type === rule);
+      });
+      if (!filtered.length) {
+        $("failureTable").innerHTML = `<tr><td colspan="9" class="empty">조건에 맞는 실패 케이스 없음</td></tr>`;
+        return;
+      }
+      $("failureTable").innerHTML = filtered.map(f => `
+        <tr>
+          <td>${pill(f.outcome, f.outcome)}</td>
+          <td class="mono">${escapeHtml(f.endpoint)}</td>
+          <td>${renderInputDataCell(f)}</td>
+          <td>${escapeHtml(f.rule_type)}<br><span class="muted">${escapeHtml(f.policy)}</span></td>
+          <td>${pill(f.axis, f.axis)}</td>
+          <td>${escapeHtml(f.reason_code)}<br><span class="mono">${escapeHtml(f.target_field || "")}</span></td>
+          <td class="mono">${escapeHtml(f.expected_http)}</td>
+          <td class="mono">HTTP ${escapeHtml(f.actual_status)}<br>error_code=${escapeHtml(f.response_error_code)}</td>
+          <td>${escapeHtml(f.failure_message || f.response_snippet)}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function load() {
+      const latestRes = await fetch("data/latest.json", {cache: "no-store"});
+      if (!latestRes.ok) throw new Error("data/latest.json 로드 실패");
+      summary = await latestRes.json();
+      const failuresRes = await fetch(`data/runs/${summary.run_id}/failures.json`, {cache: "no-store"});
+      if (!failuresRes.ok) throw new Error("failures.json 로드 실패");
+      failures = await failuresRes.json();
+
+      $("runMeta").textContent = `최근 실행: ${summary.created_at} · run_id=${summary.run_id} · root=${summary.root || "-"}`;
+      renderKpis();
+      renderTopEndpoints();
+      renderBars("axisBars", summary.by_axis);
+      renderBars("reasonBars", summary.by_reason, 10);
+      renderBars("ruleBars", summary.by_rule_type, 10);
+      renderBars("httpBars", summary.by_http_status, 10);
+      renderFilters();
+      renderFailureTable();
+    }
+
+    load().catch(err => {
+      $("runMeta").textContent = `대시보드 데이터 로드 실패: ${err.message}`;
+      console.error(err);
+    });
+  </script>
+</body>
+</html>

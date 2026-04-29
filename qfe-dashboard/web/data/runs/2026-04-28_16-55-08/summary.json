@@ -1,0 +1,112 @@
+{
+  "run_id": "2026-04-28_16-55-08",
+  "created_at": "2026-04-28 16:55:08",
+  "created_ts": 1777362908.5796435,
+  "duration_sec": 5.301,
+  "exitcode": 1,
+  "root": "C:\\Users\\sypark5\\TestAgent\\actions-runner\\_work\\Test_Auto\\Test_Auto",
+  "total": 244,
+  "collected": 244,
+  "passed": 232,
+  "failed": 12,
+  "skipped": 0,
+  "error": 0,
+  "xfailed": 0,
+  "xpassed": 0,
+  "pass_rate": 95.08,
+  "fail_rate": 4.92,
+  "outcomes": {
+    "passed": 232,
+    "failed": 12
+  },
+  "by_axis": {
+    "domain": 135,
+    "schema": 78,
+    "state": 31
+  },
+  "by_reason": {
+    "invalid_base64": 36,
+    "type_coercion_risk": 34,
+    "precondition_not_met": 31,
+    "no_face_detected": 31,
+    "range_violation": 29,
+    "missing_required": 27,
+    "success_expected": 23,
+    "type_mismatch": 17,
+    "invalid_image_relation": 16
+  },
+  "by_rule_type": {
+    "wrong_type": 51,
+    "input_validation": 51,
+    "boundary": 43,
+    "positive": 36,
+    "missing_required": 27,
+    "face_image": 20,
+    "raw_image_relation": 16
+  },
+  "by_policy": {
+    "must_fail": 114,
+    "must_pass": 65,
+    "probe_only": 65
+  },
+  "by_method": {
+    "POST": 170,
+    "PUT": 34,
+    "GET": 32,
+    "DELETE": 8
+  },
+  "by_http_status": {
+    "400": 112,
+    "422": 75,
+    "200": 57
+  },
+  "by_error_code": {
+    "-1": 113,
+    "0": 57,
+    "-34": 28,
+    "-200": 24,
+    "-43": 7,
+    "-35": 4,
+    "-28": 3,
+    "-50": 3,
+    "-33": 3,
+    "-90": 2
+  },
+  "top_failed_endpoints": [
+    {
+      "endpoint": "POST /api/v3/faces/analyze",
+      "failed": 4,
+      "total": 27,
+      "fail_rate": 14.81
+    },
+    {
+      "endpoint": "POST /api/v3/faces/detect/raw",
+      "failed": 4,
+      "total": 27,
+      "fail_rate": 14.81
+    },
+    {
+      "endpoint": "POST /api/v3/templates/match",
+      "failed": 2,
+      "total": 7,
+      "fail_rate": 28.57
+    },
+    {
+      "endpoint": "PUT /api/v3/config/max-face",
+      "failed": 1,
+      "total": 11,
+      "fail_rate": 9.09
+    },
+    {
+      "endpoint": "PUT /api/v3/config/threshold",
+      "failed": 1,
+      "total": 14,
+      "fail_rate": 7.14
+    }
+  ],
+  "report_links": {
+    "summary": "data/runs/2026-04-28_16-55-08/summary.json",
+    "failures": "data/runs/2026-04-28_16-55-08/failures.json",
+    "tests": "data/runs/2026-04-28_16-55-08/tests.json"
+  }
+}

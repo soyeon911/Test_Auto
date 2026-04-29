@@ -977,6 +977,7 @@ jobs:
       PROBE_REPORT_DIR:  reports/crash_probe
       SWAGGER_SOURCE:    ${{ needs.detect-changes.outputs.swagger_source }}
       PYTHONIOENCODING:  utf-8
+      DASHBOARD_WEB_ROOT: C:\qfe-dashboard\web
 
     steps:
       - name: Checkout
@@ -1042,6 +1043,94 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::warning::Excel 리포트 생성 실패 (exit=$LASTEXITCODE)"
           }
+
+      - name: Dashboard 데이터 생성
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+
+          if (-not (Test-Path "$env:REPORT_DIR\report.json")) {
+            Write-Host "::warning::Dashboard 생성 스킵 - report.json 없음: $env:REPORT_DIR\report.json"
+            exit 0
+          }
+
+          python scripts\build_dashboard_data.py `
+            --input "$env:REPORT_DIR\report.json" `
+            --out "web\data"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Dashboard 데이터 생성 실패 (exit=$LASTEXITCODE)"
+            exit 0
+          }
+
+          Write-Host "[Dashboard] data generated -> web\data"
+
+      - name: Dashboard Web 서버에 배포
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $dashboardRoot = "$env:DASHBOARD_WEB_ROOT"
+
+          if (-not $dashboardRoot) {
+            Write-Host "::warning::DASHBOARD_WEB_ROOT가 비어 있습니다. Dashboard 배포를 스킵합니다."
+            exit 0
+          }
+
+          New-Item -ItemType Directory -Path $dashboardRoot -Force | Out-Null
+          New-Item -ItemType Directory -Path "$dashboardRoot\data" -Force | Out-Null
+
+          # index.html까지 같이 배포
+          if (Test-Path "web\index.html") {
+            Copy-Item -Path "web\index.html" -Destination "$dashboardRoot\index.html" -Force
+          }
+
+          # dashboard data 배포
+          if (Test-Path "web\data") {
+            Copy-Item -Path "web\data\*" -Destination "$dashboardRoot\data" -Recurse -Force
+          }
+          else {
+            Write-Host "::warning::web\data 폴더가 없어 Dashboard data 복사를 스킵합니다."
+          }
+
+          Write-Host "[Dashboard] published to $dashboardRoot"
+          Write-Host "[Dashboard] URL: http://192.168.150.125:7800/"
+
+      - name: Dashboard 리포트 파일 배포
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $dashboardRoot = "$env:DASHBOARD_WEB_ROOT"
+          $runId = "${{ github.run_id }}"
+          $reportWebDir = Join-Path $dashboardRoot "reports\$runId"
+
+          New-Item -ItemType Directory -Path $reportWebDir -Force | Out-Null
+
+          $files = @(
+            "$env:REPORT_DIR\summary.html",
+            "$env:REPORT_DIR\report.json",
+            "$env:REPORT_DIR\pytest_output.txt",
+            "$env:REPORT_DIR\test_report.xlsx",
+            "$env:REPORT_DIR\test_report2.xlsx"
+          )
+
+          foreach ($f in $files) {
+            if (Test-Path $f) {
+              Copy-Item -Path $f -Destination $reportWebDir -Force
+              Write-Host "[Dashboard Report] copied: $f"
+            }
+            else {
+              Write-Host "[Dashboard Report] missing: $f"
+            }
+          }
+
+          Write-Host "[Dashboard Report] published -> $reportWebDir"
+          Write-Host "[Dashboard Report] URL base: http://192.168.150.125:7800/reports/$runId/"
 
       - name: 통합 리포트 업로드
         if: always()
