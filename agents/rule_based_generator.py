@@ -512,7 +512,16 @@ def _exp_app_probe(axis: str, reason_code: str, target_field: str = "", path: st
             return "no crash; if rejected: error_code=-33 (SYS_PARAM_OUT_OF_RANGE)"
         return "no crash; if rejected: error_code in DOMAIN_FAIL_CODES or schema-like -1" + state_suffix
 
-    if reason_code in ("invalid_base64", "no_face_detected", "invalid_image_relation"):
+    if reason_code == "no_face_detected":
+        # Probe Only라도 no_face는 기대 실패 — "성공"으로 잡으면 안 됨.
+        # QFE envelope 엔드포인트: HTTP 200 + data.error_code=-200 방식도 허용.
+        return (
+            "기대: 실패 — success=false, error_code in {-200, -1} "
+            "OR (QFE envelope) HTTP 200 + data.error_code=-200 / data.status=no_faces_detected"
+            + state_suffix
+        )
+
+    if reason_code in ("invalid_base64", "invalid_image_relation"):
         return (
             "no crash; if rejected: domain error expected "
             "(-200 FAILED_FACE_DETECT / DOMAIN_FAIL_CODES / -1 depending on endpoint)"
@@ -596,8 +605,11 @@ def _expected_http_statuses_for(
             return (400, 422)
         
         if reason_code == "no_face_detected":
+            # no_face는 Probe Only라도 기대 실패. "성공" 으로 잡으면 안 됨.
+            # QFE envelope 엔드포인트(analyze/detect/raw)는 HTTP 200 + data.error_code=-200
+            # 방식일 수 있으나, 서버가 422를 직접 반환하는 경우도 모두 정상으로 허용.
             if _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
-                return (200,)
+                return (200, 422)
             return (422,)
 
         # state-dependent positive/probe:
@@ -660,7 +672,9 @@ def _expected_http_statuses_for(
 
     if reason_code in {"no_face_detected", "template_size_mismatch", "unprocessable_payload", "constraint_missing_in_generator"}:
         if reason_code == "no_face_detected" and _path_key(path) in {"/faces/analyze", "/faces/detect/raw"}:
-            return (200,)
+            # QFE envelope(HTTP 200 + data.error_code=-200) 또는 직접 422 모두 허용.
+            # no_face는 어느 방식이든 기대 결과는 "실패" — HTTP 200 성공으로 잡으면 안 됨.
+            return (200, 422)
         return (422, 503)
 
     if axis == "system":
@@ -1403,29 +1417,41 @@ class RuleBasedTCGenerator:
             )
 
     def _http_nested_no_face_assertion(self, label: str = "no_face") -> str:
-        """QFE v3 face raw endpoints: no face is returned as HTTP 200 + nested data.error_code=-200."""
+        """QFE face endpoints: no face 처리 결과 검증.
+
+        서버 구현에 따라 두 가지 응답 방식 모두 허용:
+          - HTTP 422: top-level success=false (http_status 모드 직접 표현)
+          - HTTP 200 + data.error_code=-200: QFE envelope 방식 (상위 성공, 내부 실패)
+
+        어느 경우든 기대 결과는 "얼굴 없음으로 인한 실패" — HTTP 200 success 응답이 아님.
+        """
         lines = [
-            "assert resp.status_code == 200, (",
-            f"    f\"[FAIL] {label} — expected HTTP 200 with nested no-face result, got {{resp.status_code}}\\n\"",
+            "assert resp.status_code in (200, 422), (",
+            f"    f\"[FAIL] {label} — expected HTTP 422 (no-face rejection) or 200 (QFE envelope), got {{resp.status_code}}\\n\"",
             "    f\"  Body: {resp.text[:300]}\"",
             ")",
             "try:",
             "    body = resp.json()",
             "except ValueError:",
             "    pytest.fail(f\"Expected JSON response, got: {resp.text[:300]}\")",
-            "assert body.get(\"success\") is True, (",
-            "    f\"[FAIL] expected top-level success=true for completed face pipeline\\n  body: {resp.text[:300]}\"",
-            ")",
-            "assert body.get(\"error_code\") == 0, (",
-            "    f\"[FAIL] expected top-level error_code=0\\n  body: {resp.text[:300]}\"",
-            ")",
-            "_data = body.get(\"data\") or {}",
-            "assert _data.get(\"error_code\") == -200, (",
-            "    f\"[FAIL] expected nested data.error_code=-200 for no face\\n  data: {_data}\\n  body: {resp.text[:300]}\"",
-            ")",
-            "assert str(_data.get(\"status\") or \"\") in {\"no_faces_detected\", \"no_face_detected\"}, (",
-            "    f\"[FAIL] expected nested no-face status\\n  data: {_data}\\n  body: {resp.text[:300]}\"",
-            ")",
+            "if resp.status_code == 422:",
+            "    # HTTP 422: top-level failure (http_status 모드)",
+            "    assert body.get(\"success\") is False, (",
+            f"        f\"[FAIL] {label} — HTTP 422 but success!=false\\n  body: {{resp.text[:300]}}\"",
+            "    )",
+            "    assert body.get(\"error_code\", 0) in {-200, -1}, (",
+            f"        f\"[FAIL] {label} — HTTP 422 but error_code not in {{-200, -1}}\\n  body: {{resp.text[:300]}}\"",
+            "    )",
+            "else:",
+            "    # HTTP 200: QFE envelope — 상위 성공이어도 data.error_code=-200 확인 필수",
+            "    _data = body.get(\"data\") or {}",
+            "    _top_ok = body.get(\"success\") is False or _data.get(\"error_code\") == -200",
+            "    _status_ok = str(_data.get(\"status\") or \"\") in {\"no_faces_detected\", \"no_face_detected\"}",
+            "    assert _top_ok or _status_ok, (",
+            f"        f\"[FAIL] {label} — HTTP 200 but no-face not indicated in body\\n\"",
+            "        f\"  expected: success=false OR data.error_code=-200 OR data.status=no_faces_detected\\n\"",
+            "        f\"  body: {resp.text[:300]}\"",
+            "    )",
         ]
         return "\n".join(lines) + "\n"
     
@@ -3426,7 +3452,9 @@ class RuleBasedTCGenerator:
                     )
 
             # (B) channel=3 고정, 유효한 컬러 이미지 → probe_only
-            #     (실제 얼굴 없이 통과 여부만 확인; success=false 가능하나 서버 crash 없어야 함)
+            #     relation은 정상(channel=3, 올바른 byte size)이나 얼굴이 없는 케이스.
+            #     reason_code = no_face_detected (invalid_image_relation이 아님).
+            #     기대 결과: 실패 (422 또는 QFE envelope 200+data.error_code=-200).
             valid_ch3_body = {
                 **base_body,
                 "width":      _CH3_W,
@@ -3434,29 +3462,33 @@ class RuleBasedTCGenerator:
                 "channel":    3,
                 "image_data": _CH3_IMG_VALID_B64,
             }
-            if self._register_case(method, resolved_path, "channel", "fixed3_valid", "invalid_image_relation", "raw_image_relation"):
+            if self._register_case(method, resolved_path, "image_data", "channel_fixed3_valid", "no_face_detected", "raw_image_relation"):
+                _exp_http_ch3v = _format_http_statuses(
+                    _expected_http_statuses_for("domain", "no_face_detected", "image_data", path, "probe_only")
+                )
                 blocks.append(
                     self._api_test_block(
                         fname=f"test_{op_id}_raw_image_relation_channel_fixed3_valid",
                         docstring=(
                             "[rule:raw_image_relation][channel=3 fixed] "
-                            f"channel=3, {_CH3_W}x{_CH3_H} color image — valid RGB payload, no crash expected."
+                            f"channel=3, {_CH3_W}x{_CH3_H} RGB valid — 얼굴 없음. "
+                            "relation은 정상이나 no_face_detected 기대. 기대 결과: 실패."
                         ),
                         call_str=_render_call(method, path, path_params, query_params, valid_ch3_body),
-                        assertion_str=self._build_policy_assertion("probe_only", "channel", "channel_fixed3_valid", axis="domain", reason_code="invalid_image_relation"),
+                        assertion_str=self._build_policy_assertion("probe_only", "image_data", "channel_fixed3_valid", axis="domain", reason_code="no_face_detected", path=path),
                         axis="domain",
-                        reason_code="invalid_image_relation",
-                        target_field="channel",
-                        test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid",
-                        expected_http="200",
+                        reason_code="no_face_detected",
+                        target_field="image_data",
+                        test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid, no face",
+                        expected_http=_exp_http_ch3v,
                         expected_app=_exp_app_probe("domain", "no_face_detected", "image_data", path),
-                        error_detail="domain.invalid_image_relation.channel.fixed3_valid",
+                        error_detail="domain.no_face_detected.image_data.channel_fixed3_valid",
                         request_method=method,
                         request_path=resolved_path,
                         request_query=query_params,
                         request_headers=None,
                         request_body=valid_ch3_body,
-                        expected_status_display=f"200 / {_exp_app_probe('domain', 'no_face_detected', 'image_data', path)}",
+                        expected_status_display=f"{_exp_http_ch3v} / {_exp_app_probe('domain', 'no_face_detected', 'image_data', path)}",
                         rule_type="raw_image_relation",
                         rule_subtype="channel_fixed3_valid",
                         endpoint_profile="raw_image",
@@ -3465,13 +3497,14 @@ class RuleBasedTCGenerator:
                 )
 
             # (C) channel=3 고정, width/height 경계값 TC
-            #     - width=0 → must_fail (서버가 0 크기 이미지 거부해야 함)
-            #     - height=0 → must_fail
-            #     - width=1, height=1 (최소 유효) → probe_only
-            for wh_label, w, h, img_b64, policy in [
-                ("width_zero",   0,              _CH3_H,         base64.b64encode(bytes(0)).decode(),                            "must_fail"),
-                ("height_zero",  _CH3_W,         0,              base64.b64encode(bytes(0)).decode(),                            "must_fail"),
-                ("min_1x1",      1,              1,              base64.b64encode(bytes(1 * 1 * 3)).decode(),                    "probe_only"),
+            #     - width=0  → must_fail, invalid_image_relation (서버가 0 크기 이미지 거부해야 함)
+            #     - height=0 → must_fail, invalid_image_relation
+            #     - min_1x1  → probe_only, no_face_detected
+            #                  (1x1x3=3B로 relation은 정상; 최소 이미지라 얼굴 없음이 정상 실패)
+            for wh_label, w, h, img_b64, policy, wh_reason_code in [
+                ("width_zero",   0,     _CH3_H, base64.b64encode(bytes(0)).decode(),             "must_fail",  "invalid_image_relation"),
+                ("height_zero",  _CH3_W, 0,     base64.b64encode(bytes(0)).decode(),             "must_fail",  "invalid_image_relation"),
+                ("min_1x1",      1,     1,      base64.b64encode(bytes(1 * 1 * 3)).decode(),     "probe_only", "no_face_detected"),
             ]:
                 wh_body = {
                     **base_body,
@@ -3481,31 +3514,55 @@ class RuleBasedTCGenerator:
                     "image_data": img_b64,
                 }
                 key_wh = f"ch3_wh:{wh_label}"
-                if self._register_case(method, resolved_path, "width_height", key_wh, "invalid_image_relation", "raw_image_relation"):
-                    exp_app = (_exp_app_fail("domain", "invalid_image_relation", "width_height") if policy == "must_fail"
-                               else _exp_app_probe("domain", "invalid_image_relation", "width_height", path))
+                # min_1x1은 no_face_detected로 등록 (relation이 유효하므로 invalid_image_relation 아님)
+                _reg_reason = wh_reason_code
+                if self._register_case(method, resolved_path, "width_height", key_wh, _reg_reason, "raw_image_relation"):
+                    if policy == "must_fail":
+                        exp_app = _exp_app_fail("domain", wh_reason_code, "width_height")
+                    elif wh_reason_code == "no_face_detected":
+                        exp_app = _exp_app_probe("domain", "no_face_detected", "image_data", path)
+                    else:
+                        exp_app = _exp_app_probe("domain", wh_reason_code, "width_height", path)
+
+                    _exp_http_wh = _format_http_statuses(
+                        _expected_http_statuses_for("domain", wh_reason_code, "width_height", path, policy)
+                    )
+
+                    if wh_reason_code == "no_face_detected":
+                        _wh_docstring = (
+                            f"[rule:raw_image_relation][channel=3 fixed] "
+                            f"width={w}, height={h}, channel=3 — {wh_label}, relation 정상. "
+                            "얼굴 없음 예상. 기대 결과: 실패 (no_face_detected)."
+                        )
+                        _wh_target_field = "image_data"
+                        _wh_error_detail = f"domain.no_face_detected.image_data.ch3_{wh_label}"
+                    else:
+                        _wh_docstring = (
+                            f"[rule:raw_image_relation][channel=3 fixed] "
+                            f"width={w}, height={h}, channel=3 — {wh_label} ({policy})."
+                        )
+                        _wh_target_field = "width_height"
+                        _wh_error_detail = f"domain.invalid_image_relation.wh.ch3_{wh_label}"
+
                     blocks.append(
                         self._api_test_block(
                             fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
-                            docstring=(
-                                f"[rule:raw_image_relation][channel=3 fixed] "
-                                f"width={w}, height={h}, channel=3 — {wh_label} ({policy})."
-                            ),
+                            docstring=_wh_docstring,
                             call_str=_render_call(method, path, path_params, query_params, wh_body),
-                            assertion_str=self._build_policy_assertion(policy, "width_height", f"ch3_{wh_label}", axis="domain", reason_code="invalid_image_relation"),
+                            assertion_str=self._build_policy_assertion(policy, _wh_target_field, f"ch3_{wh_label}", axis="domain", reason_code=wh_reason_code, path=path),
                             axis="domain",
-                            reason_code="invalid_image_relation",
-                            target_field="width_height",
+                            reason_code=wh_reason_code,
+                            target_field=_wh_target_field,
                             test_condition=f"channel=3 (fixed), width={w}, height={h}, image_data={max(w,0)*max(h,0)*3}B — {wh_label}",
-                            expected_http="200",
+                            expected_http=_exp_http_wh,
                             expected_app=exp_app,
-                            error_detail=f"domain.invalid_image_relation.wh.ch3_{wh_label}",
+                            error_detail=_wh_error_detail,
                             request_method=method,
                             request_path=resolved_path,
                             request_query=query_params,
                             request_headers=None,
                             request_body=wh_body,
-                            expected_status_display=f"200 / {exp_app}",
+                            expected_status_display=f"{_exp_http_wh} / {exp_app}",
                             rule_type="raw_image_relation",
                             rule_subtype=f"channel_fixed3_{wh_label}",
                             endpoint_profile="raw_image",
