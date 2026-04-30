@@ -1202,8 +1202,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::warning::[Ingest] 적재 실패 (exit=$LASTEXITCODE) — 대시보드 갱신 불가"
           } else {
-            Write-Host "[Ingest] 완료 ✓"
-            Write-Host "[Dashboard] React UI → http://192.168.150.165:7801/"
+            Write-Host "[Ingest] 완료"
+            Write-Host "[Dashboard] React UI -> http://192.168.150.165:7801/"
           }
 
       - name: 통합 리포트 업로드
