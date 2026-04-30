@@ -978,6 +978,7 @@ jobs:
       SWAGGER_SOURCE:    ${{ needs.detect-changes.outputs.swagger_source }}
       PYTHONIOENCODING:  utf-8
       DASHBOARD_WEB_ROOT: C:\qfe-dashboard\web
+      DASHBOARD_BACKEND:  C:\Users\sypark5\AutoTC_dashboard\backend
 
     steps:
       - name: Checkout
@@ -1131,6 +1132,79 @@ jobs:
 
           Write-Host "[Dashboard Report] published -> $reportWebDir"
           Write-Host "[Dashboard Report] URL base: http://192.168.150.166:7800/reports/$runId/"
+
+      # ── React Dashboard DB ingest ─────────────────────────────────────────────
+      # build_dashboard_data.py 가 생성한 web\data 를 AutoTC Dashboard SQLite DB에 적재.
+      # 프론트엔드: http://192.168.150.165:7801/
+      - name: React Dashboard DB ingest
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:PYTHONIOENCODING = "utf-8"
+
+          $backendDir   = "$env:DASHBOARD_BACKEND"
+          $ingestScript = Join-Path $backendDir "ingest_report.py"
+          $dataRoot     = "$env:DASHBOARD_WEB_ROOT\data"
+
+          # ── 사전 조건 확인 ──────────────────────────────────────────────────
+          if (-not (Test-Path $ingestScript)) {
+            Write-Host "::warning::[Ingest] ingest_report.py 없음: $ingestScript — 스킵"
+            exit 0
+          }
+
+          if (-not (Test-Path "$dataRoot\runs")) {
+            Write-Host "::warning::[Ingest] runs 폴더 없음: $dataRoot\runs — 스킵"
+            exit 0
+          }
+
+          # ── Python 환경: dashboard 전용 venv 우선, 없으면 시스템 Python ───
+          $venvPython = Join-Path $backendDir "venv\Scripts\python.exe"
+          if (Test-Path $venvPython) {
+            $pyExe = $venvPython
+            Write-Host "[Ingest] venv Python 사용: $pyExe"
+          } else {
+            $pyExe = "python"
+            Write-Host "[Ingest] 시스템 Python 사용"
+            # dashboard 백엔드 의존성이 없을 수 있으므로 설치
+            & $pyExe -m pip install `
+              "fastapi>=0.115" "sqlalchemy>=2.0" "aiosqlite>=0.20" `
+              "pydantic-settings>=2.0" "python-dotenv>=1.0" --quiet
+          }
+
+          # ── 이번 run의 run_id 확인 (latest.json에서 읽기) ─────────────────
+          $latestJson = Join-Path $dataRoot "latest.json"
+          $runId = ""
+          if (Test-Path $latestJson) {
+            try {
+              $latest = Get-Content $latestJson -Raw -Encoding utf8 | ConvertFrom-Json
+              $runId  = $latest.run_id
+              Write-Host "[Ingest] 대상 run_id: $runId"
+            } catch {
+              Write-Host "[Ingest] latest.json 파싱 실패: $($_.Exception.Message)"
+            }
+          }
+
+          # ── ingest 실행 ────────────────────────────────────────────────────
+          $env:APP_ENV = "prod"
+
+          if ($runId -and (Test-Path "$dataRoot\runs\$runId")) {
+            # 이번 run만 ingest (빠름)
+            $runDir = "$dataRoot\runs\$runId"
+            Write-Host "[Ingest] 단일 run 적재: $runDir"
+            & $pyExe $ingestScript --file $runDir
+          } else {
+            # 전체 backfill (중복 skip으로 안전)
+            Write-Host "[Ingest] backfill: $dataRoot"
+            & $pyExe $ingestScript --backfill $dataRoot
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::[Ingest] 적재 실패 (exit=$LASTEXITCODE) — 대시보드 갱신 불가"
+          } else {
+            Write-Host "[Ingest] 완료 ✓"
+            Write-Host "[Dashboard] React UI → http://192.168.150.165:7801/"
+          }
 
       - name: 통합 리포트 업로드
         if: always()
