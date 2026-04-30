@@ -3610,39 +3610,3 @@ class RuleBasedTCGenerator:
                     )
 
         return blocks
-ght"
-                        _wh_error_detail = f"domain.invalid_image_relation.wh.ch3_{wh_label}"
-
-                    _wh_assertion = (
-                        self._face_no_face_assertion(path, f"ch3_{wh_label}")
-                        if wh_reason_code == "no_face_detected"
-                        else self._build_policy_assertion(policy, _wh_target_field, f"ch3_{wh_label}", axis="domain", reason_code=wh_reason_code, path=path)
-                    )
-
-                    blocks.append(
-                        self._api_test_block(
-                            fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
-                            docstring=_wh_docstring,
-                            call_str=_render_call(method, path, path_params, query_params, wh_body),
-                            assertion_str=_wh_assertion,
-                            axis="domain",
-                            reason_code=wh_reason_code,
-                            target_field=_wh_target_field,
-                            test_condition=f"channel=3 (fixed), width={w}, height={h}, image_data={max(w,0)*max(h,0)*3}B — {wh_label}",
-                            expected_http=_exp_http_wh,
-                            expected_app=exp_app,
-                            error_detail=_wh_error_detail,
-                            request_method=method,
-                            request_path=resolved_path,
-                            request_query=query_params,
-                            request_headers=None,
-                            request_body=wh_body,
-                            expected_status_display=f"{_exp_http_wh} / {exp_app}",
-                            rule_type="raw_image_relation",
-                            rule_subtype=f"channel_fixed3_{wh_label}",
-                            endpoint_profile="raw_image",
-                            expected_result_type="expected_fail" if policy == "must_fail" else "probe_only",
-                        )
-                    )
-
-        return blocks
