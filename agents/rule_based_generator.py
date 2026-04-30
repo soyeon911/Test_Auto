@@ -479,6 +479,8 @@ def _exp_app_fail(axis: str, reason_code: str, target_field: str = "") -> str:
         return "success=false, error_code in DOMAIN_FAIL_CODES (range)"
     if reason_code in ("invalid_base64", "no_face_detected", "constraint_missing_in_generator"):
         return "success=false, error_code=-200 (FAILED_FACE_DETECT) OR -1"
+    if reason_code == "decoded_data_size_mismatch":
+        return "success=false, error_code=-1 (decoded image data size mismatch)"
     if axis == "domain":
         return "success=false, error_code in DOMAIN_FAIL_CODES"
     return "success=false, error_code<0"
@@ -592,6 +594,11 @@ def _expected_http_statuses_for(
         if reason_code == "invalid_base64":
             return (400, 422)
 
+        # raw image 엔드포인트: PNG 등 인코딩된 이미지를 raw pixel로 넘기면
+        # 디코드 후 size mismatch → 항상 422
+        if reason_code == "decoded_data_size_mismatch":
+            return (422,)
+
         # raw image relation mismatch, channel mismatch 등
         # 구조는 맞지만 값 관계가 유효하지 않은 경우
         if reason_code == "invalid_image_relation":
@@ -665,6 +672,11 @@ def _expected_http_statuses_for(
     if reason_code == "invalid_base64":
         return (400, 422)
 
+    if reason_code == "decoded_data_size_mismatch":
+        # raw image 엔드포인트에 PNG 등 encoded image를 raw pixel로 넘기면
+        # decoded size != width*height*channel → 422
+        return (422,)
+
     if reason_code == "invalid_image_relation":
         # raw image dimension/channel/payload mismatch is client validation in the new Swagger,
         # but some server versions surface it as unprocessable SDK input.
@@ -720,6 +732,10 @@ def _expected_error_codes_for(
 
     if reason_code == "invalid_base64":
         return frozenset({-1, -90, -200})
+
+    if reason_code == "decoded_data_size_mismatch":
+        # decoded size mismatch — 서버는 항상 -1 (FAILED) 반환
+        return frozenset({-1})
 
     if reason_code in {"invalid_image_relation", "no_face_detected"}:
         return frozenset({-1, -90, -200})
@@ -3118,6 +3134,17 @@ class RuleBasedTCGenerator:
                     (tag, probe_label), ("domain", "constraint_missing_in_generator")
                 )
 
+                # raw image 엔드포인트에서 no_face_image probe(PNG base64)는
+                # pixel raw bytes로 해석되므로 width*height*channel과 size mismatch 유발.
+                # no_face_detected가 아닌 decoded_data_size_mismatch로 분류하고 must_fail 처리.
+                if (
+                    tag == "base64_image"
+                    and probe_label == "no_face_image"
+                    and self._is_raw_image_relation_endpoint(req_body)
+                ):
+                    _s_axis, _s_rc = "domain", "decoded_data_size_mismatch"
+                    policy = "must_fail"
+
                 if not self._register_case(method, resolved_path, field, repr(probe_val), _s_rc, "input_validation"):
                     continue
 
@@ -3454,7 +3481,9 @@ class RuleBasedTCGenerator:
             # (B) channel=3 고정, 유효한 컬러 이미지 → probe_only
             #     relation은 정상(channel=3, 올바른 byte size)이나 얼굴이 없는 케이스.
             #     reason_code = no_face_detected (invalid_image_relation이 아님).
-            #     기대 결과: 실패 (422 또는 QFE envelope 200+data.error_code=-200).
+            #     A연속 문자열(AAAA...)은 valid base64 — 정상 raw pixel(0x00 bytes)로 해석됨.
+            #     size 관계도 정상(width*height*channel == decoded bytes)이므로
+            #     서버가 처리 후 얼굴 없음을 반환: HTTP 200, success=true, data.error_code=-200 (FAILED_FACE_DETECT).
             valid_ch3_body = {
                 **base_body,
                 "width":      _CH3_W,
@@ -3463,32 +3492,30 @@ class RuleBasedTCGenerator:
                 "image_data": _CH3_IMG_VALID_B64,
             }
             if self._register_case(method, resolved_path, "image_data", "channel_fixed3_valid", "no_face_detected", "raw_image_relation"):
-                _exp_http_ch3v = _format_http_statuses(
-                    _expected_http_statuses_for("domain", "no_face_detected", "image_data", path, "probe_only")
-                )
+                _exp_app_ch3v = _exp_app_nested_no_face(path)
                 blocks.append(
                     self._api_test_block(
                         fname=f"test_{op_id}_raw_image_relation_channel_fixed3_valid",
                         docstring=(
                             "[rule:raw_image_relation][channel=3 fixed] "
-                            f"channel=3, {_CH3_W}x{_CH3_H} RGB valid — 얼굴 없음. "
-                            "relation은 정상이나 no_face_detected 기대. 기대 결과: 실패."
+                            f"channel=3, {_CH3_W}x{_CH3_H} RGB valid (A연속=valid base64, null pixel) — "
+                            "size 관계 정상, 얼굴 없음. 기대: 200, success=true, FAILED_FACE_DETECT(-200)."
                         ),
                         call_str=_render_call(method, path, path_params, query_params, valid_ch3_body),
-                        assertion_str=self._build_policy_assertion("probe_only", "image_data", "channel_fixed3_valid", axis="domain", reason_code="no_face_detected", path=path),
+                        assertion_str=self._face_no_face_assertion(path, "channel_fixed3_valid"),
                         axis="domain",
                         reason_code="no_face_detected",
                         target_field="image_data",
-                        test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid, no face",
-                        expected_http=_exp_http_ch3v,
-                        expected_app=_exp_app_probe("domain", "no_face_detected", "image_data", path),
+                        test_condition=f"channel=3 (fixed), width={_CH3_W}, height={_CH3_H}, image_data={_CH3_W*_CH3_H*3}B — RGB valid (A연속 valid base64), no face",
+                        expected_http="200",
+                        expected_app=_exp_app_ch3v,
                         error_detail="domain.no_face_detected.image_data.channel_fixed3_valid",
                         request_method=method,
                         request_path=resolved_path,
                         request_query=query_params,
                         request_headers=None,
                         request_body=valid_ch3_body,
-                        expected_status_display=f"{_exp_http_ch3v} / {_exp_app_probe('domain', 'no_face_detected', 'image_data', path)}",
+                        expected_status_display=f"200 / {_exp_app_ch3v}",
                         rule_type="raw_image_relation",
                         rule_subtype="channel_fixed3_valid",
                         endpoint_profile="raw_image",
@@ -3520,19 +3547,25 @@ class RuleBasedTCGenerator:
                     if policy == "must_fail":
                         exp_app = _exp_app_fail("domain", wh_reason_code, "width_height")
                     elif wh_reason_code == "no_face_detected":
-                        exp_app = _exp_app_probe("domain", "no_face_detected", "image_data", path)
+                        # A연속 문자열(min_1x1 등)은 valid base64 + size 관계 정상 →
+                        # 서버가 처리 후 얼굴 없음 반환: 200, success=true, FAILED_FACE_DETECT(-200)
+                        exp_app = _exp_app_nested_no_face(path)
                     else:
                         exp_app = _exp_app_probe("domain", wh_reason_code, "width_height", path)
 
-                    _exp_http_wh = _format_http_statuses(
-                        _expected_http_statuses_for("domain", wh_reason_code, "width_height", path, policy)
-                    )
+                    if wh_reason_code == "no_face_detected":
+                        # valid base64(A연속) + 정확한 size → no face 처리 성공, 200 반환
+                        _exp_http_wh = "200"
+                    else:
+                        _exp_http_wh = _format_http_statuses(
+                            _expected_http_statuses_for("domain", wh_reason_code, "width_height", path, policy)
+                        )
 
                     if wh_reason_code == "no_face_detected":
                         _wh_docstring = (
                             f"[rule:raw_image_relation][channel=3 fixed] "
-                            f"width={w}, height={h}, channel=3 — {wh_label}, relation 정상. "
-                            "얼굴 없음 예상. 기대 결과: 실패 (no_face_detected)."
+                            f"width={w}, height={h}, channel=3 — {wh_label}, relation 정상 (A연속=valid base64). "
+                            "얼굴 없음. 기대: 200, success=true, FAILED_FACE_DETECT(-200)."
                         )
                         _wh_target_field = "image_data"
                         _wh_error_detail = f"domain.no_face_detected.image_data.ch3_{wh_label}"
@@ -3544,12 +3577,54 @@ class RuleBasedTCGenerator:
                         _wh_target_field = "width_height"
                         _wh_error_detail = f"domain.invalid_image_relation.wh.ch3_{wh_label}"
 
+                    _wh_assertion = (
+                        self._face_no_face_assertion(path, f"ch3_{wh_label}")
+                        if wh_reason_code == "no_face_detected"
+                        else self._build_policy_assertion(policy, _wh_target_field, f"ch3_{wh_label}", axis="domain", reason_code=wh_reason_code, path=path)
+                    )
+
                     blocks.append(
                         self._api_test_block(
                             fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
                             docstring=_wh_docstring,
                             call_str=_render_call(method, path, path_params, query_params, wh_body),
-                            assertion_str=self._build_policy_assertion(policy, _wh_target_field, f"ch3_{wh_label}", axis="domain", reason_code=wh_reason_code, path=path),
+                            assertion_str=_wh_assertion,
+                            axis="domain",
+                            reason_code=wh_reason_code,
+                            target_field=_wh_target_field,
+                            test_condition=f"channel=3 (fixed), width={w}, height={h}, image_data={max(w,0)*max(h,0)*3}B — {wh_label}",
+                            expected_http=_exp_http_wh,
+                            expected_app=exp_app,
+                            error_detail=_wh_error_detail,
+                            request_method=method,
+                            request_path=resolved_path,
+                            request_query=query_params,
+                            request_headers=None,
+                            request_body=wh_body,
+                            expected_status_display=f"{_exp_http_wh} / {exp_app}",
+                            rule_type="raw_image_relation",
+                            rule_subtype=f"channel_fixed3_{wh_label}",
+                            endpoint_profile="raw_image",
+                            expected_result_type="expected_fail" if policy == "must_fail" else "probe_only",
+                        )
+                    )
+
+        return blocks
+ght"
+                        _wh_error_detail = f"domain.invalid_image_relation.wh.ch3_{wh_label}"
+
+                    _wh_assertion = (
+                        self._face_no_face_assertion(path, f"ch3_{wh_label}")
+                        if wh_reason_code == "no_face_detected"
+                        else self._build_policy_assertion(policy, _wh_target_field, f"ch3_{wh_label}", axis="domain", reason_code=wh_reason_code, path=path)
+                    )
+
+                    blocks.append(
+                        self._api_test_block(
+                            fname=f"test_{op_id}_raw_image_relation_ch3_{wh_label}",
+                            docstring=_wh_docstring,
+                            call_str=_render_call(method, path, path_params, query_params, wh_body),
+                            assertion_str=_wh_assertion,
                             axis="domain",
                             reason_code=wh_reason_code,
                             target_field=_wh_target_field,

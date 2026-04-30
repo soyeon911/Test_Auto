@@ -36,7 +36,7 @@ Rule 기반으로 Test Case를 생성하는 항목들을 Excel로 정리
 | 단계 | 설명 | 목적 |
 |------|------|------|
 | Step 1 | AI만 사용하여 Test Case 생성 | AI 단독 생성 능력 측정 |
-| Step 2 | AI에게 rule 수정 권한 부여 후 Test Case 생성 (중복 허용) | 중복 test case 발생 비율 파악 |
+| Step 2 | rule refinement + augmentation (중복 허용) | 중복 test case 발생 비율 파악 |
 | Step 3 | Rule 기반 Test Case 제외 후 AI가 나머지 생성 (중복 불가) | AI 보완 생성 능력 측정 |
 
 ---

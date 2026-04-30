@@ -381,7 +381,7 @@ class ExcelReportBuilder2:
         ws.row_dimensions[1].height = 26
 
         headers = [
-            "TC ID", "HTTP 메서드", "엔드포인트", "기능설명",
+            "TC ID", "HTTP 메서드", "엔드포인트", 
             "테스트유형", "세부유형", "프로파일",
             "기대결과유형", "Semantic Tag", "Policy",
             "테스트조건", "기댓값", "실행결과",
@@ -389,7 +389,7 @@ class ExcelReportBuilder2:
         ]
         self._header_row(ws, 2, headers)
 
-        col_widths = [10, 12, 32, 18, 18, 18, 16, 18, 16, 12, 44, 28, 34, 12, 14, 14, 8]
+        col_widths = [10, 12, 32, 18, 18, 16, 18, 16, 12, 44, 28, 34, 12, 14, 14, 8]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -463,13 +463,13 @@ class ExcelReportBuilder2:
         ws.row_dimensions[1].height = 26
 
         headers = [
-            "HTTP 메서드", "엔드포인트", "기능설명",
+            "HTTP 메서드", "엔드포인트", 
             "전체 TC", "PASS", "FAIL",
             "Expected Pass 실패", "Expected Fail 이상동작", "Probe Only 실패", "주요 이슈",
         ]
         self._header_row(ws, 2, headers)
 
-        col_widths = [12, 32, 18, 10, 10, 10, 16, 18, 16, 50]
+        col_widths = [12, 32, 10, 10, 10, 16, 18, 16, 50]
         for i, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
 

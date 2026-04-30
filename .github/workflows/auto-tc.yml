@@ -30,7 +30,7 @@ on:
       base_url:
         description: '서버 Base URL'
         required: false
-        default: 'http://192.168.150.166:7900'
+        default: 'http://192.168.150.125:7900'
         type: string
 
       reset_semantic_cache:
@@ -84,7 +84,7 @@ jobs:
 
     env:
       SERVER_TARGET: ${{ inputs.server_target != '' && inputs.server_target || 'external' }}
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.166:7900' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.125:7900' }}
       SERVER_LICENSE_KEY: 1
       SERVER_MODE_CHOICE: 1
       SERVER_INSTANCE_COUNT: 1
@@ -288,7 +288,7 @@ jobs:
       AUTOTC_CONFIG: config\config.yaml
 
       SERVER_TARGET: ${{ inputs.server_target != '' && inputs.server_target || 'external' }}
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.166:7900' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.125:7900' }}
 
       SERVER_DIR: C:\Users\sypark5\TestAgent\qfe-api-server-no-license
       SERVER_EXE_NAME: qfe-server.exe
@@ -972,7 +972,7 @@ jobs:
     runs-on: [self-hosted, windows]
 
     env:
-      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.166:7900' }}
+      BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || 'http://192.168.150.125:7900' }}
       REPORT_DIR:        reports
       PROBE_REPORT_DIR:  reports/crash_probe
       SWAGGER_SOURCE:    ${{ needs.detect-changes.outputs.swagger_source }}
@@ -1097,7 +1097,7 @@ jobs:
           }
 
           Write-Host "[Dashboard] published to $dashboardRoot"
-          Write-Host "[Dashboard] URL: http://192.168.150.125:7800/"
+          Write-Host "[Dashboard] URL: http://192.168.150.166:7800/"
 
       - name: Dashboard 리포트 파일 배포
         if: always()
@@ -1130,7 +1130,7 @@ jobs:
           }
 
           Write-Host "[Dashboard Report] published -> $reportWebDir"
-          Write-Host "[Dashboard Report] URL base: http://192.168.150.125:7800/reports/$runId/"
+          Write-Host "[Dashboard Report] URL base: http://192.168.150.166:7800/reports/$runId/"
 
       - name: 통합 리포트 업로드
         if: always()
