@@ -240,7 +240,7 @@
   <!-- Row 4: Trend chart -->
   <section class="card" style="margin-top:16px">
     <h2>날짜별 추이 분석</h2>
-    <p class="card-sub">실행 이력 기반 합격률(%) · 실패 건수 추이</p>
+    <p class="card-sub">실행 이력 기반 성공률(%) · 실패 건수 추이</p>
     <div class="trend-wrap">
       <canvas id="trendChart"></canvas>
     </div>
@@ -436,7 +436,7 @@ function renderTrendChart() {
           type: "bar",
           label: "실패 건수",
           data: failCounts,
-          backgroundColor: "rgba(185,28,28,0.2)",
+          backgroundColor: "B91C1C",
           borderColor: "#B91C1C",
           borderWidth: 1.5,
           borderRadius: 4,
@@ -445,7 +445,7 @@ function renderTrendChart() {
         },
         {
           type: "line",
-          label: "합격률 (%)",
+          label: "성공률 (%)",
           data: passRates,
           borderColor: "#16a34a",
           backgroundColor: "rgba(22,163,74,0.07)",
@@ -470,8 +470,8 @@ function renderTrendChart() {
         },
         tooltip: {
           callbacks: {
-            label: ctx => ctx.dataset.label === "합격률 (%)"
-              ? ` 합격률 ${ctx.parsed.y}%`
+            label: ctx => ctx.dataset.label === "성공률 (%)"
+              ? ` 성공률 ${ctx.parsed.y}%`
               : ` 실패 ${ctx.parsed.y}건`,
           },
         },
@@ -486,14 +486,14 @@ function renderTrendChart() {
           min: minRate, max: 100,
           ticks: { callback: v => `${v}%`, font: { size: 11 }, stepSize: 1 },
           grid: { color: "#f1f5f9" },
-          title: { display: true, text: "합격률 (%)", font: { size: 11 }, color: "#6b7280" },
+          title: { display: true, text: "성공률 (%)", font: { size: 11 }, color: "#6b7280" },
         },
         yFail: {
           type: "linear", position: "right",
           min: 0,
           ticks: { stepSize: 1, font: { size: 11 } },
           grid: { display: false },
-          title: { display: true, text: "실패 건수", font: { size: 11 }, color: "#6b7280" },
+          title: { display: true, text: "실패 건수", font: { size: 11 }, color: "#B91C1C" },
         },
       },
     },
@@ -594,7 +594,7 @@ async function initRunSelector() {
       const opt = document.createElement("option");
       opt.value = r.run_id;
       const date = r.created_at.slice(0, 16);
-      opt.textContent = `${date}  |  합격 ${r.pass_rate.toFixed(1)}%  |  실패 ${r.failed}건`;
+      opt.textContent = `${date}  |  성공 ${r.pass_rate.toFixed(1)}%  |  실패 ${r.failed}건`;
       if (i === 0) opt.selected = true;
       sel.appendChild(opt);
     });
