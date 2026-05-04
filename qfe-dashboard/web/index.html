@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>QFE AutoTC Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <style>
     :root {
       --bg: #f6f7fb;
@@ -12,6 +13,7 @@
       --muted: #6b7280;
       --line: #e5e7eb;
       --primary: #334155;
+      --accent: #B91C1C;
       --good: #dff4e8;
       --good-text: #166534;
       --bad: #fde2e2;
@@ -20,7 +22,7 @@
       --warn-text: #854d0e;
       --info: #dbeafe;
       --info-text: #1e40af;
-      --shadow: 0 10px 24px rgba(15, 23, 42, .06);
+      --shadow: 0 10px 24px rgba(15,23,42,.07);
       --radius: 18px;
     }
     * { box-sizing: border-box; }
@@ -30,388 +32,639 @@
       background: var(--bg);
       color: var(--text);
     }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
     header {
-      background: linear-gradient(135deg, #111827 0%, #334155 72%, #475569 100%);
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 65%, #334155 100%);
       color: white;
-      padding: 28px 34px;
+      padding: 28px 36px 22px;
     }
-    header .label { opacity: .75; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
-    h1 { margin: 8px 0 6px; font-size: 30px; }
-    header p { margin: 0; opacity: .82; }
-    main { padding: 26px 34px 42px; max-width: 1500px; margin: 0 auto; }
-    .toolbar {
-      display: flex;
-      gap: 12px;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 18px;
-      flex-wrap: wrap;
+    header .label {
+      opacity: .65; font-size: 12px; letter-spacing: .1em;
+      text-transform: uppercase; font-weight: 700;
     }
-    .toolbar .meta { color: var(--muted); font-size: 14px; }
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      height: 38px;
-      padding: 0 14px;
-      border: 1px solid var(--line);
-      background: white;
-      color: var(--primary);
-      border-radius: 999px;
-      text-decoration: none;
-      font-weight: 650;
-      font-size: 14px;
-      box-shadow: 0 2px 8px rgba(15, 23, 42, .04);
-      cursor: pointer;
-    }
+    header h1 { margin: 8px 0 6px; font-size: 30px; font-weight: 800; }
+    header p  { margin: 0; opacity: .78; font-size: 14px; }
+
+    /* ── Layout ─────────────────────────────────────────────────────────── */
+    main { padding: 24px 36px 48px; max-width: 1520px; margin: 0 auto; }
     .grid { display: grid; gap: 16px; }
-    .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-    .twocol { grid-template-columns: 1.1fr .9fr; }
+    .kpis     { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .twocol   { grid-template-columns: 1.15fr .85fr; }
     .threecol { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    /* ── Card ───────────────────────────────────────────────────────────── */
     .card {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
-      padding: 18px;
+      padding: 20px 22px;
     }
-    .kpi .name { color: var(--muted); font-size: 13px; font-weight: 650; }
-    .kpi .value { margin-top: 8px; font-size: 30px; font-weight: 800; letter-spacing: -.02em; }
-    .kpi .sub { margin-top: 4px; color: var(--muted); font-size: 12px; }
-    .ok { color: var(--good-text); }
+    h2 { margin: 0 0 3px; font-size: 17px; font-weight: 700; }
+    .card-sub { margin: 0 0 14px; font-size: 12px; color: var(--muted); }
+
+    /* ── Toolbar ────────────────────────────────────────────────────────── */
+    .toolbar {
+      display: flex; gap: 12px;
+      justify-content: space-between; align-items: center;
+      margin-bottom: 18px; flex-wrap: wrap;
+    }
+    .toolbar .meta { color: var(--muted); font-size: 13px; max-width: 58%; line-height: 1.5; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px; height: 38px; padding: 0 16px;
+      border: 1px solid var(--line); background: white; color: var(--primary);
+      border-radius: 999px; font-weight: 700; font-size: 13px; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(15,23,42,.05);
+    }
+    .btn:hover { background: #f8fafc; }
+    .run-select {
+      height: 38px; padding: 0 12px; border-radius: 12px;
+      border: 1px solid var(--line); background: white; color: var(--text);
+      font-size: 13px; min-width: 300px; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(15,23,42,.05);
+    }
+
+    /* ── KPI ────────────────────────────────────────────────────────────── */
+    .kpi .name  { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .kpi .value { margin-top: 8px; font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.15; }
+    .kpi .sub   { margin-top: 5px; color: var(--muted); font-size: 12px; }
+    .ok   { color: #16a34a; }
     .fail { color: var(--bad-text); }
-    .warn { color: var(--warn-text); }
-    h2 { margin: 0 0 14px; font-size: 18px; }
-    .barrow { display: grid; grid-template-columns: 145px 1fr 54px; gap: 10px; align-items: center; margin: 10px 0; }
-    .barrow .label { color: #374151; font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .barrow .count { color: var(--muted); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
-    .bar { height: 11px; background: #eef2f7; border-radius: 999px; overflow: hidden; }
-    .bar > span { display: block; height: 100%; background: #64748b; border-radius: 999px; }
+
+    /* ── Bar rows (generic) ─────────────────────────────────────────────── */
+    .bar { height: 10px; background: #f1f5f9; border-radius: 999px; overflow: hidden; flex: 1 1 0; min-width: 40px; }
+    .bar > span { display: block; height: 100%; border-radius: 999px; transition: width .4s ease; }
+    .bar-accent > span  { background: var(--accent); }
+    .bar-neutral > span { background: #94a3b8; }
+
+    /* Endpoint bar row */
+    .ep-row { display: flex; gap: 10px; align-items: center; margin: 9px 0; }
+    .ep-row .ep-label { flex: 0 0 auto; max-width: 210px; font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ep-row .ep-count { flex: 0 0 48px; text-align: right; font-size: 14px; font-weight: 800; color: var(--accent); }
+
+    /* Axis / Reason / Rule bar row (with 실패율) */
+    .stat-row { margin: 10px 0; }
+    .stat-row-top { display: flex; gap: 10px; align-items: center; }
+    .stat-label { flex: 0 0 130px; font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #374151; }
+    .stat-count { flex: 0 0 58px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .fail-rate { font-size: 11px; color: var(--muted); margin-top: 3px; padding-left: 2px; }
+    .fail-rate.nonzero { color: var(--bad-text); font-weight: 700; }
+
+    /* HTTP status bar (narrow label) */
+    .http-row { display: flex; gap: 10px; align-items: center; margin: 9px 0; }
+    .http-row .http-label { flex: 0 0 50px; font-size: 13px; }
+    .http-row .http-count { flex: 0 0 36px; text-align: right; font-size: 12px; color: var(--muted); }
+
+    /* ── Trend chart ────────────────────────────────────────────────────── */
+    .trend-wrap { position: relative; height: 240px; }
+
+    /* ── Failure table ──────────────────────────────────────────────────── */
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .filters input, .filters select {
+      height: 36px; padding: 0 12px; border-radius: 10px;
+      border: 1px solid var(--line); background: white; color: var(--text); font-size: 13px;
+    }
+    #searchInput { min-width: 260px; }
     .table-wrap { overflow: auto; max-height: 560px; border: 1px solid var(--line); border-radius: 14px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; }
     th { position: sticky; top: 0; background: #f8fafc; color: #475569; z-index: 1; font-size: 12px; }
     tr:hover td { background: #fafafa; }
     .pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      font-weight: 750;
-      font-size: 12px;
-      white-space: nowrap;
+      display: inline-flex; align-items: center;
+      padding: 3px 8px; border-radius: 999px;
+      font-weight: 750; font-size: 12px; white-space: nowrap;
     }
-    .pill.pass { background: var(--good); color: var(--good-text); }
-    .pill.failed { background: var(--bad); color: var(--bad-text); }
-    .pill.schema { background: #ede9fe; color: #5b21b6; }
-    .pill.domain { background: var(--info); color: var(--info-text); }
-    .pill.state { background: var(--warn); color: var(--warn-text); }
-    .pill.runtime { background: var(--bad); color: var(--bad-text); }
+    .pill.pass    { background: var(--good); color: var(--good-text); }
+    .pill.failed  { background: var(--bad);  color: var(--bad-text); }
+    .pill.schema  { background: #ede9fe; color: #5b21b6; }
+    .pill.domain  { background: var(--info); color: var(--info-text); }
+    .pill.state   { background: var(--warn); color: var(--warn-text); }
     .pill.unknown { background: #f3f4f6; color: #4b5563; }
-    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-    input, select {
-      height: 38px;
-      padding: 0 12px;
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      background: white;
-      color: var(--text);
-      min-width: 180px;
-    }
-    .empty { color: var(--muted); padding: 20px; text-align: center; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .prewrap { white-space: pre-wrap; word-break: break-word; }
-    .input-data { min-width: 300px; max-width: 460px; }
-    .input-cell {
-      min-width: 300px;
-      max-width: 460px;
-      line-height: 1.55;
-      font-size: 12px;
-      color: var(--text);
-    }
-    .input-block {
-      display: grid;
-      grid-template-columns: 58px minmax(0, 1fr);
-      gap: 8px 10px;
-      align-items: start;
-    }
-    .input-label {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: .02em;
-      padding-top: 3px;
-    }
-    .input-value { min-width: 0; word-break: break-word; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .empty { color: var(--muted); padding: 24px; text-align: center; }
+    .input-cell { min-width: 270px; max-width: 440px; }
+    .input-block { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 6px 10px; align-items: start; }
+    .input-label { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; padding-top: 3px; }
     .input-code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: #f8fafc;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 8px 10px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      line-height: 1.55;
-      max-height: 96px;
-      overflow: auto;
+      background: #f8fafc; border: 1px solid var(--line); border-radius: 8px;
+      padding: 5px 8px; white-space: pre-wrap; word-break: break-word;
+      line-height: 1.5; max-height: 80px; overflow: auto; font-size: 11px;
     }
-    .input-target {
-      display: inline-block;
-      padding: 3px 9px;
-      border-radius: 999px;
-      background: #eef2ff;
-      color: #3730a3;
-      font-size: 11px;
-      font-weight: 800;
+    .input-target { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-size: 11px; font-weight: 800; }
+    .input-condition { color: #334155; line-height: 1.5; font-size: 12px; }
+
+    /* ── Footer ─────────────────────────────────────────────────────────── */
+    footer {
+      background: #0f172a; color: rgba(255,255,255,.45);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 36px; font-size: 12px;
     }
-    .input-condition {
-      color: #334155;
-      line-height: 1.55;
-    }
-    .muted { color: var(--muted); font-size: 12px; }
+    footer .brand { color: white; font-weight: 900; font-size: 15px; letter-spacing: .06em; text-transform: lowercase; }
+
+    /* ── Responsive ─────────────────────────────────────────────────────── */
     @media (max-width: 1100px) {
-      .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .kpis { grid-template-columns: repeat(3, minmax(0,1fr)); }
       .twocol, .threecol { grid-template-columns: 1fr; }
     }
     @media (max-width: 720px) {
-      main { padding: 18px; }
-      header { padding: 24px 20px; }
-      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      main   { padding: 16px; }
+      header { padding: 22px 20px 18px; }
+      .kpis  { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .toolbar .meta { max-width: 100%; }
+      .run-select { min-width: 220px; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="label">QFE AutoTC</div>
-    <h1>테스트 결과 대시보드</h1>
-    <p>pytest JSON report 기반 테스트 실행 결과 요약 · 실패 원인 분류 · 엔드포인트별 현황</p>
-  </header>
 
-  <main>
-    <div class="toolbar">
-      <div class="meta" id="runMeta">데이터 로딩 중...</div>
-      <div>
-        <a class="btn" href="data/latest.json" target="_blank">latest.json</a>
-        <a class="btn" href="data/runs.json" target="_blank">runs.json</a>
-        <button class="btn" onclick="location.reload()">새로고침</button>
-      </div>
+<header>
+  <div class="label">QFE AutoTC</div>
+  <h1>테스트 결과 대시보드</h1>
+  <p>pytest JSON report 기반 테스트 실행 결과 요약 · 실패 원인 분류 · 엔드포인트별 현황</p>
+</header>
+
+<main>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="meta" id="runMeta">데이터 로딩 중...</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <select class="run-select" id="runSelect" onchange="onRunChange()">
+        <option value="">실행 이력 로딩 중...</option>
+      </select>
+      <button class="btn" onclick="location.reload()">↺ 새로고침</button>
     </div>
+  </div>
 
-    <section class="grid kpis" id="kpis"></section>
+  <!-- KPI cards -->
+  <section class="grid kpis" id="kpis"></section>
 
-    <section class="grid twocol" style="margin-top:16px">
-      <div class="card">
-        <h2>실패 엔드포인트 Top</h2>
-        <div id="topFailedEndpoints"></div>
-      </div>
-      <div class="card">
-        <h2>Axis별 분류</h2>
-        <div id="axisBars"></div>
-      </div>
-    </section>
+  <!-- Row 2: Endpoints + Axis -->
+  <section class="grid twocol" style="margin-top:16px">
+    <div class="card">
+      <h2>실패 엔드포인트 Top 5</h2>
+      <p class="card-sub">실패 케이스 상세 필터링 가능 (Axis / Reason / Rule)</p>
+      <div id="topFailedEndpoints"></div>
+    </div>
+    <div class="card">
+      <h2>Axis별 실패 현황</h2>
+      <p class="card-sub">도메인·스키마·상태별 테스트 실패율</p>
+      <div id="axisBars"></div>
+    </div>
+  </section>
 
-    <section class="grid threecol" style="margin-top:16px">
-      <div class="card">
-        <h2>Reason Code</h2>
-        <div id="reasonBars"></div>
-      </div>
-      <div class="card">
-        <h2>Rule Type</h2>
-        <div id="ruleBars"></div>
-      </div>
-      <div class="card">
-        <h2>HTTP Status</h2>
-        <div id="httpBars"></div>
-      </div>
-    </section>
+  <!-- Row 3: Reason / Rule / HTTP -->
+  <section class="grid threecol" style="margin-top:16px">
+    <div class="card">
+      <h2>Reason Code별 실패 현황</h2>
+      <p class="card-sub">실패 원인 상위 항목</p>
+      <div id="reasonBars"></div>
+    </div>
+    <div class="card">
+      <h2>Rule Type별 실패 현황</h2>
+      <p class="card-sub">규칙 유형별 실패 분포</p>
+      <div id="ruleBars"></div>
+    </div>
+    <div class="card">
+      <h2>HTTP Status 분포</h2>
+      <p class="card-sub">응답 코드 전체 현황</p>
+      <div id="httpBars"></div>
+    </div>
+  </section>
 
-    <section class="card" style="margin-top:16px">
-      <h2>실패 케이스 상세</h2>
-      <div class="filters">
-        <input id="searchInput" placeholder="endpoint / body / target / condition / message 검색" />
-        <select id="axisFilter"><option value="">Axis 전체</option></select>
-        <select id="reasonFilter"><option value="">Reason 전체</option></select>
-        <select id="ruleFilter"><option value="">Rule 전체</option></select>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Outcome</th>
-              <th>Endpoint</th>
-              <th>Input Data</th>
-              <th>Rule</th>
-              <th>Axis</th>
-              <th>Reason</th>
-              <th>Expected</th>
-              <th>Actual</th>
-              <th>Message</th>
-            </tr>
-          </thead>
-          <tbody id="failureTable"></tbody>
-        </table>
-      </div>
-    </section>
-  </main>
+  <!-- Row 4: Trend chart -->
+  <section class="card" style="margin-top:16px">
+    <h2>날짜별 추이 분석</h2>
+    <p class="card-sub">실행 이력 기반 합격률(%) · 실패 건수 추이</p>
+    <div class="trend-wrap">
+      <canvas id="trendChart"></canvas>
+    </div>
+  </section>
 
-  <script>
-    const $ = (id) => document.getElementById(id);
-    let summary = null;
-    let failures = [];
+  <!-- Row 5: Failure detail table -->
+  <section class="card" style="margin-top:16px">
+    <h2>실패 케이스 상세</h2>
+    <div class="filters">
+      <input id="searchInput" placeholder="endpoint · body · condition · message 검색" />
+      <select id="axisFilter"><option value="">Axis 전체</option></select>
+      <select id="reasonFilter"><option value="">Reason 전체</option></select>
+      <select id="ruleFilter"><option value="">Rule 전체</option></select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Outcome</th><th>Endpoint</th><th>Input Data</th>
+            <th>Rule</th><th>Axis</th><th>Reason</th>
+            <th>Expected</th><th>Actual</th><th>Message</th>
+          </tr>
+        </thead>
+        <tbody id="failureTable"></tbody>
+      </table>
+    </div>
+  </section>
 
-    function escapeHtml(s) {
-      return String(s ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]));
-    }
+</main>
 
-    function kpi(name, value, sub = "", cls = "") {
-      return `<div class="card kpi"><div class="name">${escapeHtml(name)}</div><div class="value ${cls}">${escapeHtml(value)}</div><div class="sub">${escapeHtml(sub)}</div></div>`;
-    }
+<footer>
+  <span class="brand">suprema</span>
+  <span>© Suprema Inc. All rights reserved.</span>
+  <span></span>
+</footer>
 
-    function renderKpis() {
-      $("kpis").innerHTML = [
-        kpi("Total", summary.total, `collected ${summary.collected}`),
-        kpi("Passed", summary.passed, `${summary.pass_rate}%`, "ok"),
-        kpi("Failed", summary.failed, `${summary.fail_rate}%`, summary.failed > 0 ? "fail" : "ok"),
-        kpi("Duration", `${summary.duration_sec}s`, "pytest duration"),
-        kpi("Exit Code", summary.exitcode, summary.exitcode === 0 ? "success" : "non-zero", summary.exitcode === 0 ? "ok" : "fail"),
-        kpi("Run ID", summary.run_id, summary.created_at),
-      ].join("");
-    }
+<script>
+/* ── State ─────────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+let summary = null, failures = [], runs = [], trendChart = null;
 
-    function renderBars(id, obj, limit = 12) {
-      const entries = Object.entries(obj || {}).filter(([k]) => k !== "unknown" || obj[k] > 0).slice(0, limit);
-      const max = Math.max(1, ...entries.map(([,v]) => Number(v)));
-      if (!entries.length) {
-        $(id).innerHTML = `<div class="empty">데이터 없음</div>`;
-        return;
-      }
-      $(id).innerHTML = entries.map(([k,v]) => `
-        <div class="barrow" title="${escapeHtml(k)}">
-          <div class="label">${escapeHtml(k)}</div>
-          <div class="bar"><span style="width:${Math.max(2, Number(v)/max*100)}%"></span></div>
-          <div class="count">${escapeHtml(v)}</div>
-        </div>
-      `).join("");
-    }
+/* ── Helpers ────────────────────────────────────────────────────────────── */
+function esc(s) {
+  return String(s ?? "").replace(/[&<>'"]/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[c]);
+}
 
-    function renderTopEndpoints() {
-      const rows = (summary.top_failed_endpoints || []).slice(0, 10);
-      if (!rows.length) {
-        $("topFailedEndpoints").innerHTML = `<div class="empty">실패 엔드포인트 없음</div>`;
-        return;
-      }
-      const max = Math.max(1, ...rows.map(r => r.failed));
-      $("topFailedEndpoints").innerHTML = rows.map(r => `
-        <div class="barrow" style="grid-template-columns: 1fr 170px 72px" title="${escapeHtml(r.endpoint)}">
-          <div class="label mono">${escapeHtml(r.endpoint)}</div>
-          <div class="bar"><span style="width:${Math.max(2, r.failed/max*100)}%"></span></div>
-          <div class="count">${r.failed}/${r.total}</div>
-        </div>
-      `).join("");
-    }
+function pct(n, d) { return d > 0 ? (n / d * 100).toFixed(1) : "0.0"; }
 
-    function fillSelect(id, values) {
-      const el = $(id);
-      values.filter(Boolean).sort().forEach(v => {
-        const opt = document.createElement("option");
-        opt.value = v;
-        opt.textContent = v;
-        el.appendChild(opt);
-      });
-    }
+function buildFailMap(key) {
+  const m = {};
+  failures.forEach(f => { m[f[key]] = (m[f[key]] || 0) + 1; });
+  return m;
+}
 
-    function renderFilters() {
-      fillSelect("axisFilter", [...new Set(failures.map(f => f.axis))]);
-      fillSelect("reasonFilter", [...new Set(failures.map(f => f.reason_code))]);
-      fillSelect("ruleFilter", [...new Set(failures.map(f => f.rule_type))]);
-      ["searchInput", "axisFilter", "reasonFilter", "ruleFilter"].forEach(id => $(id).addEventListener("input", renderFailureTable));
-    }
+/* ── KPI cards ──────────────────────────────────────────────────────────── */
+function kpiCard(name, value, sub, cls) {
+  return `<div class="card kpi">
+    <div class="name">${esc(name)}</div>
+    <div class="value ${cls || ''}">${value}</div>
+    <div class="sub">${esc(sub || "")}</div>
+  </div>`;
+}
 
-    function pill(text, cls) {
-      return `<span class="pill ${escapeHtml(cls || 'unknown')}">${escapeHtml(text)}</span>`;
-    }
+function renderKpis() {
+  const s = summary;
+  // Format run_id as two-line date/time
+  const m = (s.run_id || "").match(/\d{4}-(\d{2}-\d{2})_(\d{2})-(\d{2})/);
+  const runLabel = m
+    ? `<span style="font-size:22px;line-height:1.2;display:block">${m[1]}</span><span style="font-size:18px">${m[2]}:${m[3]}</span>`
+    : esc(s.run_id);
 
-    function inputViewOf(row) {
-      if (row.input_view) return row.input_view;
-      const text = String(row.input_data || "");
-      const get = (key) => {
-        const re = new RegExp(`${key}:\\s*([\\s\\S]*?)(?=\\n(?:body|target|condition):|$)`, "i");
-        const m = text.match(re);
-        return m ? m[1].trim() : "-";
-      };
-      return { body: get("body"), target: get("target"), condition: get("condition") };
-    }
+  $("kpis").innerHTML = [
+    kpiCard("Total",     s.total,                `collected ${s.collected}`),
+    kpiCard("Passed",    s.passed,               `${s.pass_rate}%`,                    "ok"),
+    kpiCard("Failed",    s.failed,               `${s.fail_rate}%`,                    s.failed > 0 ? "fail" : "ok"),
+    kpiCard("Duration",  `${s.duration_sec}s`,   "pytest duration"),
+    kpiCard("Exit Code", s.exitcode,             s.exitcode === 0 ? "success" : "non-zero", s.exitcode === 0 ? "ok" : "fail"),
+    `<div class="card kpi">
+      <div class="name">Run ID</div>
+      <div class="value" style="margin-top:8px">${runLabel}</div>
+      <div class="sub">${esc(s.created_at || "")}</div>
+    </div>`,
+  ].join("");
+}
 
-    function renderInputDataCell(row) {
-      const v = inputViewOf(row);
-      return `
-        <div class="input-cell">
-          <div class="input-block">
-            <div class="input-label">Body</div>
-            <div class="input-value input-code">${escapeHtml(v.body || "-")}</div>
-            <div class="input-label">Target</div>
-            <div class="input-value"><span class="input-target">${escapeHtml(v.target || "-")}</span></div>
-            <div class="input-label">Cond</div>
-            <div class="input-value input-condition">${escapeHtml(v.condition || "-")}</div>
+/* ── Top 5 failed endpoints ─────────────────────────────────────────────── */
+function renderTopEndpoints() {
+  const rows = (summary.top_failed_endpoints || []).filter(r => r.failed > 0).slice(0, 5);
+  if (!rows.length) {
+    $("topFailedEndpoints").innerHTML = `<div class="empty">실패 엔드포인트 없음 ✓</div>`;
+    return;
+  }
+  const max = Math.max(1, ...rows.map(r => r.failed));
+  $("topFailedEndpoints").innerHTML = rows.map(r => `
+    <div class="ep-row">
+      <div class="ep-label" title="${esc(r.endpoint)}">${esc(r.endpoint)}</div>
+      <div class="bar bar-accent"><span style="width:${Math.max(4, r.failed / max * 100)}%"></span></div>
+      <div class="ep-count">${r.failed}건</div>
+    </div>
+  `).join("");
+}
+
+/* ── Axis bars (모든 축 표시, 실패율 포함) ──────────────────────────────── */
+function renderAxisBars() {
+  const totalMap = summary.by_axis || {};
+  const failMap  = buildFailMap("axis");
+  const keys     = Object.keys(totalMap);
+  if (!keys.length) { $("axisBars").innerHTML = `<div class="empty">데이터 없음</div>`; return; }
+  const maxTotal = Math.max(1, ...keys.map(k => totalMap[k]));
+
+  $("axisBars").innerHTML = keys.map(k => {
+    const t = totalMap[k] || 0, f = failMap[k] || 0;
+    const rate = pct(f, t);
+    const hasFail = f > 0;
+    return `
+      <div class="stat-row">
+        <div class="stat-row-top">
+          <div class="stat-label">${esc(k)}</div>
+          <div class="bar ${hasFail ? 'bar-accent' : 'bar-neutral'}">
+            <span style="width:${Math.max(2, t / maxTotal * 100)}%"></span>
           </div>
+          <div class="stat-count">${f}/${t}</div>
         </div>
-      `;
-    }
+        <div class="fail-rate ${hasFail ? 'nonzero' : ''}">실패율 ${rate}%</div>
+      </div>`;
+  }).join("");
+}
 
-    function renderFailureTable() {
-      const q = $("searchInput").value.trim().toLowerCase();
-      const axis = $("axisFilter").value;
-      const reason = $("reasonFilter").value;
-      const rule = $("ruleFilter").value;
-      const filtered = failures.filter(f => {
-        const iv = inputViewOf(f);
-        const hay = `${f.endpoint} ${f.nodeid} ${iv.body || ""} ${iv.target || ""} ${iv.condition || ""} ${f.failure_message} ${f.response_snippet}`.toLowerCase();
-        return (!q || hay.includes(q)) && (!axis || f.axis === axis) && (!reason || f.reason_code === reason) && (!rule || f.rule_type === rule);
-      });
-      if (!filtered.length) {
-        $("failureTable").innerHTML = `<tr><td colspan="9" class="empty">조건에 맞는 실패 케이스 없음</td></tr>`;
-        return;
-      }
-      $("failureTable").innerHTML = filtered.map(f => `
-        <tr>
-          <td>${pill(f.outcome, f.outcome)}</td>
-          <td class="mono">${escapeHtml(f.endpoint)}</td>
-          <td>${renderInputDataCell(f)}</td>
-          <td>${escapeHtml(f.rule_type)}<br><span class="muted">${escapeHtml(f.policy)}</span></td>
-          <td>${pill(f.axis, f.axis)}</td>
-          <td>${escapeHtml(f.reason_code)}<br><span class="mono">${escapeHtml(f.target_field || "")}</span></td>
-          <td class="mono">${escapeHtml(f.expected_http)}</td>
-          <td class="mono">HTTP ${escapeHtml(f.actual_status)}<br>error_code=${escapeHtml(f.response_error_code)}</td>
-          <td>${escapeHtml(f.failure_message || f.response_snippet)}</td>
-        </tr>
-      `).join("");
-    }
+/* ── Reason / Rule bars (실패 항목만, 실패율 포함) ──────────────────────── */
+function renderFailureBars(id, totalMap, failKey, limit = 8) {
+  const t = totalMap || {};
+  const failMap = buildFailMap(failKey);
+  const keys = Object.keys(t)
+    .filter(k => (failMap[k] || 0) > 0)
+    .sort((a, b) => (failMap[b] || 0) - (failMap[a] || 0))
+    .slice(0, limit);
 
-    async function load() {
-      const latestRes = await fetch("data/latest.json", {cache: "no-store"});
-      if (!latestRes.ok) throw new Error("data/latest.json 로드 실패");
-      summary = await latestRes.json();
-      const failuresRes = await fetch(`data/runs/${summary.run_id}/failures.json`, {cache: "no-store"});
-      if (!failuresRes.ok) throw new Error("failures.json 로드 실패");
-      failures = await failuresRes.json();
+  if (!keys.length) {
+    $(id).innerHTML = `<div class="empty">실패 케이스 없음 ✓</div>`;
+    return;
+  }
+  const maxFail = Math.max(1, ...keys.map(k => failMap[k]));
 
-      $("runMeta").textContent = `최근 실행: ${summary.created_at} · run_id=${summary.run_id} · root=${summary.root || "-"}`;
-      renderKpis();
-      renderTopEndpoints();
-      renderBars("axisBars", summary.by_axis);
-      renderBars("reasonBars", summary.by_reason, 10);
-      renderBars("ruleBars", summary.by_rule_type, 10);
-      renderBars("httpBars", summary.by_http_status, 10);
-      renderFilters();
-      renderFailureTable();
-    }
+  $(id).innerHTML = keys.map(k => {
+    const total = t[k] || 0, f = failMap[k] || 0;
+    const rate = pct(f, total);
+    return `
+      <div class="stat-row">
+        <div class="stat-row-top">
+          <div class="stat-label" title="${esc(k)}">${esc(k)}</div>
+          <div class="bar bar-accent">
+            <span style="width:${Math.max(4, f / maxFail * 100)}%"></span>
+          </div>
+          <div class="stat-count">${f}/${total}</div>
+        </div>
+        <div class="fail-rate nonzero">실패율 ${rate}%</div>
+      </div>`;
+  }).join("");
+}
 
-    load().catch(err => {
-      $("runMeta").textContent = `대시보드 데이터 로드 실패: ${err.message}`;
-      console.error(err);
+/* ── HTTP Status bars (단순 분포) ────────────────────────────────────────── */
+function renderHttpBars() {
+  const entries = Object.entries(summary.by_http_status || {}).slice(0, 10);
+  if (!entries.length) { $("httpBars").innerHTML = `<div class="empty">데이터 없음</div>`; return; }
+  const max = Math.max(1, ...entries.map(([, v]) => Number(v)));
+  $("httpBars").innerHTML = entries.map(([k, v]) => `
+    <div class="http-row">
+      <div class="http-label mono">${esc(k)}</div>
+      <div class="bar bar-neutral"><span style="width:${Math.max(2, Number(v) / max * 100)}%"></span></div>
+      <div class="http-count">${esc(v)}</div>
+    </div>
+  `).join("");
+}
+
+/* ── Trend Chart ─────────────────────────────────────────────────────────── */
+function renderTrendChart() {
+  if (!runs.length) return;
+  const sorted = [...runs].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const labels     = sorted.map(r => r.created_at.slice(5, 16));   // "04-28 07:55"
+  const passRates  = sorted.map(r => r.pass_rate);
+  const failCounts = sorted.map(r => r.failed);
+  const minRate    = Math.max(0, Math.min(...passRates) - 5);
+
+  const ctx = $("trendChart").getContext("2d");
+  if (trendChart) trendChart.destroy();
+
+  trendChart = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar",
+          label: "실패 건수",
+          data: failCounts,
+          backgroundColor: "rgba(185,28,28,0.2)",
+          borderColor: "#B91C1C",
+          borderWidth: 1.5,
+          borderRadius: 4,
+          yAxisID: "yFail",
+          order: 2,
+        },
+        {
+          type: "line",
+          label: "합격률 (%)",
+          data: passRates,
+          borderColor: "#16a34a",
+          backgroundColor: "rgba(22,163,74,0.07)",
+          borderWidth: 2.5,
+          pointRadius: 5,
+          pointBackgroundColor: "#16a34a",
+          fill: true,
+          tension: 0.35,
+          yAxisID: "yRate",
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          position: "top",
+          labels: { font: { size: 12 }, usePointStyle: true, padding: 20 },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.label === "합격률 (%)"
+              ? ` 합격률 ${ctx.parsed.y}%`
+              : ` 실패 ${ctx.parsed.y}건`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { font: { size: 11 } },
+        },
+        yRate: {
+          type: "linear", position: "left",
+          min: minRate, max: 100,
+          ticks: { callback: v => `${v}%`, font: { size: 11 }, stepSize: 1 },
+          grid: { color: "#f1f5f9" },
+          title: { display: true, text: "합격률 (%)", font: { size: 11 }, color: "#6b7280" },
+        },
+        yFail: {
+          type: "linear", position: "right",
+          min: 0,
+          ticks: { stepSize: 1, font: { size: 11 } },
+          grid: { display: false },
+          title: { display: true, text: "실패 건수", font: { size: 11 }, color: "#6b7280" },
+        },
+      },
+    },
+  });
+}
+
+/* ── Failure table ──────────────────────────────────────────────────────── */
+function fillSelect(id, vals) {
+  const el = $(id);
+  while (el.options.length > 1) el.remove(1);
+  [...new Set(vals)].filter(Boolean).sort().forEach(v => {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = v;
+    el.appendChild(o);
+  });
+}
+
+function updateFilters() {
+  fillSelect("axisFilter",   failures.map(f => f.axis));
+  fillSelect("reasonFilter", failures.map(f => f.reason_code));
+  fillSelect("ruleFilter",   failures.map(f => f.rule_type));
+  ["searchInput","axisFilter","reasonFilter","ruleFilter"].forEach(id => {
+    $(id).oninput  = renderFailureTable;
+    $(id).onchange = renderFailureTable;
+  });
+}
+
+function pill(text, cls) {
+  return `<span class="pill ${esc(cls || 'unknown')}">${esc(text)}</span>`;
+}
+
+function inputViewOf(row) {
+  if (row.input_view && typeof row.input_view === "object") return row.input_view;
+  const text = String(row.input_data || "");
+  const get = key => {
+    const re = new RegExp(`${key}:\\s*([\\s\\S]*?)(?=\\n(?:body|target|condition):|$)`, "i");
+    const m = text.match(re);
+    return m ? m[1].trim() : "-";
+  };
+  return { body: get("body"), target: get("target"), condition: get("condition") };
+}
+
+function renderInputCell(row) {
+  const v = inputViewOf(row);
+  return `<div class="input-cell"><div class="input-block">
+    <div class="input-label">Body</div>
+    <div><div class="input-code">${esc(v.body || "-")}</div></div>
+    <div class="input-label">Target</div>
+    <div><span class="input-target">${esc(v.target || "-")}</span></div>
+    <div class="input-label">Cond</div>
+    <div class="input-condition">${esc(v.condition || "-")}</div>
+  </div></div>`;
+}
+
+function renderFailureTable() {
+  const q      = $("searchInput").value.trim().toLowerCase();
+  const axis   = $("axisFilter").value;
+  const reason = $("reasonFilter").value;
+  const rule   = $("ruleFilter").value;
+
+  const list = failures.filter(f => {
+    const iv  = inputViewOf(f);
+    const hay = `${f.endpoint} ${iv.body||""} ${iv.target||""} ${iv.condition||""} ${f.failure_message||""} ${f.response_snippet||""}`.toLowerCase();
+    return (!q || hay.includes(q))
+      && (!axis   || f.axis === axis)
+      && (!reason || f.reason_code === reason)
+      && (!rule   || f.rule_type === rule);
+  });
+
+  if (!list.length) {
+    $("failureTable").innerHTML = `<tr><td colspan="9" class="empty">조건에 맞는 실패 케이스 없음</td></tr>`;
+    return;
+  }
+  $("failureTable").innerHTML = list.map(f => `<tr>
+    <td>${pill(f.outcome, f.outcome)}</td>
+    <td class="mono" style="white-space:nowrap">${esc(f.endpoint)}</td>
+    <td>${renderInputCell(f)}</td>
+    <td>${esc(f.rule_type)}<br><span class="muted">${esc(f.policy || "")}</span></td>
+    <td>${pill(f.axis, f.axis)}</td>
+    <td>${esc(f.reason_code)}<br><span class="mono muted">${esc(f.target_field || "")}</span></td>
+    <td class="mono">${esc(f.expected_http)}</td>
+    <td class="mono">HTTP ${esc(f.actual_status)}<br><span class="muted">code=${esc(f.response_error_code)}</span></td>
+    <td style="max-width:260px">${esc(f.failure_message || f.response_snippet || "")}</td>
+  </tr>`).join("");
+}
+
+/* ── Run selector ────────────────────────────────────────────────────────── */
+async function initRunSelector() {
+  try {
+    const res = await fetch("data/runs.json", { cache: "no-store" });
+    if (!res.ok) return;
+    runs = await res.json();
+    runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+    const sel = $("runSelect");
+    sel.innerHTML = "";
+    runs.forEach((r, i) => {
+      const opt = document.createElement("option");
+      opt.value = r.run_id;
+      const date = r.created_at.slice(0, 16);
+      opt.textContent = `${date}  |  합격 ${r.pass_rate.toFixed(1)}%  |  실패 ${r.failed}건`;
+      if (i === 0) opt.selected = true;
+      sel.appendChild(opt);
     });
-  </script>
+    renderTrendChart();
+  } catch (e) {
+    console.warn("runs.json 로드 실패:", e);
+  }
+}
+
+async function onRunChange() {
+  const runId = $("runSelect").value;
+  if (!runId) return;
+  $("runMeta").textContent = "로딩 중...";
+  try {
+    await loadRun(runId);
+  } catch (e) {
+    $("runMeta").textContent = `로드 실패: ${e.message}`;
+    console.error(e);
+  }
+}
+
+async function loadRun(runId) {
+  const sRes = await fetch(`data/runs/${runId}/summary.json`, { cache: "no-store" });
+  if (!sRes.ok) throw new Error(`summary.json 없음 (${runId})`);
+  summary = await sRes.json();
+
+  const fRes = await fetch(`data/runs/${runId}/failures.json`, { cache: "no-store" });
+  failures = fRes.ok ? await fRes.json() : [];
+
+  renderAll();
+}
+
+function renderAll() {
+  const s = summary;
+  $("runMeta").textContent =
+    `실행: ${s.created_at}  ·  run_id=${s.run_id}  ·  root=${s.root || "-"}`;
+  renderKpis();
+  renderTopEndpoints();
+  renderAxisBars();
+  renderFailureBars("reasonBars", s.by_reason,    "reason_code");
+  renderFailureBars("ruleBars",   s.by_rule_type, "rule_type");
+  renderHttpBars();
+  updateFilters();
+  renderFailureTable();
+}
+
+/* ── Init ────────────────────────────────────────────────────────────────── */
+async function init() {
+  await initRunSelector();
+
+  try {
+    // latest.json 로드 → 최신 run 표시
+    const latestRes = await fetch("data/latest.json", { cache: "no-store" });
+    if (!latestRes.ok) throw new Error("data/latest.json 로드 실패");
+    summary = await latestRes.json();
+
+    const fRes = await fetch(`data/runs/${summary.run_id}/failures.json`, { cache: "no-store" });
+    failures = fRes.ok ? await fRes.json() : [];
+
+    // 드롭다운 선택 동기화
+    $("runSelect").value = summary.run_id;
+    renderAll();
+  } catch (e) {
+    $("runMeta").textContent = `데이터 로드 실패: ${e.message}`;
+    console.error(e);
+  }
+}
+
+init();
+</script>
+
 </body>
 </html>
