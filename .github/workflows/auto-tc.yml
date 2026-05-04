@@ -1098,7 +1098,68 @@ jobs:
           }
 
           Write-Host "[Dashboard] published to $dashboardRoot"
-          Write-Host "[Dashboard] URL: http://192.168.150.166:7800/"
+          Write-Host "[Dashboard] URL: http://192.168.150.152:7800/"
+
+      - name: Dashboard 웹서버 확인 및 재시작
+        if: always()
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $port         = 7800
+          $webRoot      = "$env:DASHBOARD_WEB_ROOT"
+          $pidFile      = "$webRoot\.server.pid"
+          $logFile      = "$webRoot\.server.log"
+          $dashboardUrl = "http://localhost:$port/"
+
+          function Test-PortListening {
+            param([int]$Port)
+            $result = netstat -ano -p tcp 2>$null | Select-String ":$Port\s+.*LISTENING"
+            return ($null -ne $result -and $result.Count -gt 0)
+          }
+
+          # 1) 이미 포트가 열려 있는지 확인
+          if (Test-PortListening -Port $port) {
+            Write-Host "[WebServer] 포트 $port 이미 리스닝 중 — 재시작 불필요"
+            exit 0
+          }
+
+          # 2) 이전 PID 파일이 있으면 종료 시도
+          if (Test-Path $pidFile) {
+            $oldPid = (Get-Content $pidFile -Raw -ErrorAction SilentlyContinue).Trim()
+            if ($oldPid -match "^\d+$") {
+              try { Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue } catch {}
+            }
+            Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+          }
+
+          # 3) Python http.server 로 정적 파일 서빙 시작
+          New-Item -ItemType Directory -Path $webRoot -Force | Out-Null
+          $env:RUNNER_TRACKING_ID = ""
+
+          $proc = Start-Process `
+            -FilePath   "python" `
+            -ArgumentList @("-u", "-m", "http.server", "$port", "--directory", "`"$webRoot`"") `
+            -RedirectStandardOutput $logFile `
+            -RedirectStandardError  $logFile `
+            -PassThru `
+            -WindowStyle Hidden
+
+          $proc.Id | Out-File -FilePath $pidFile -NoNewline -Encoding ascii
+          Write-Host "[WebServer] 시작됨 PID=$($proc.Id) → http://192.168.150.166:$port/"
+
+          # 4) 최대 10초 대기하여 포트 오픈 확인
+          $ok = $false
+          for ($i = 0; $i -lt 10; $i++) {
+            Start-Sleep -Seconds 1
+            if (Test-PortListening -Port $port) { $ok = $true; break }
+          }
+
+          if ($ok) {
+            Write-Host "[WebServer] 포트 $port 응답 확인 완료"
+          } else {
+            Write-Host "::warning::[WebServer] 포트 $port 응답 없음 — 로그: $logFile"
+          }
 
       - name: Dashboard 리포트 파일 배포
         if: always()
@@ -1188,15 +1249,23 @@ jobs:
           # ── ingest 실행 ────────────────────────────────────────────────────
           $env:APP_ENV = "prod"
 
-          if ($runId -and (Test-Path "$dataRoot\runs\$runId")) {
-            # 이번 run만 ingest (빠름)
-            $runDir = "$dataRoot\runs\$runId"
-            Write-Host "[Ingest] 단일 run 적재: $runDir"
-            & $pyExe $ingestScript --file $runDir
-          } else {
-            # 전체 backfill (중복 skip으로 안전)
-            Write-Host "[Ingest] backfill: $dataRoot"
-            & $pyExe $ingestScript --backfill $dataRoot
+          # ingest_report.py 는 backend 디렉터리 기준 상대 경로 DB를 사용하므로
+          # 반드시 $backendDir 에서 실행해야 함 (SQLite "unable to open" 방지)
+          Push-Location $backendDir
+
+          try {
+            if ($runId -and (Test-Path "$dataRoot\runs\$runId")) {
+              # 이번 run만 ingest (빠름)
+              $runDir = "$dataRoot\runs\$runId"
+              Write-Host "[Ingest] 단일 run 적재: $runDir"
+              & $pyExe $ingestScript --file $runDir
+            } else {
+              # 전체 backfill (중복 skip으로 안전)
+              Write-Host "[Ingest] backfill: $dataRoot"
+              & $pyExe $ingestScript --backfill $dataRoot
+            }
+          } finally {
+            Pop-Location
           }
 
           if ($LASTEXITCODE -ne 0) {
@@ -1205,6 +1274,8 @@ jobs:
             Write-Host "[Ingest] 완료"
             Write-Host "[Dashboard] React UI -> http://192.168.150.165:7801/"
           }
+
+          exit 0   # ingest 실패는 경고로만 처리 — job 전체를 실패시키지 않음
 
       - name: 통합 리포트 업로드
         if: always()
