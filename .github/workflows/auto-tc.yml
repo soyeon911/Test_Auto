@@ -1057,9 +1057,9 @@ jobs:
             exit 0
           }
 
-          python scripts\build_dashboard_data.py `
+          python qfe-dashboard\scripts\build_dashboard_data.py `
             --input "$env:REPORT_DIR\report.json" `
-            --out "web\data"
+            --out "qfe-dashboard\web\data"
 
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::warning::Dashboard 데이터 생성 실패 (exit=$LASTEXITCODE)"
@@ -1085,16 +1085,16 @@ jobs:
           New-Item -ItemType Directory -Path "$dashboardRoot\data" -Force | Out-Null
 
           # index.html까지 같이 배포
-          if (Test-Path "web\index.html") {
-            Copy-Item -Path "web\index.html" -Destination "$dashboardRoot\index.html" -Force
+          if (Test-Path "qfe-dashboard\web\index.html") {
+            Copy-Item -Path "qfe-dashboard\web\index.html" -Destination "$dashboardRoot\index.html" -Force
           }
 
           # dashboard data 배포
-          if (Test-Path "web\data") {
-            Copy-Item -Path "web\data\*" -Destination "$dashboardRoot\data" -Recurse -Force
+          if (Test-Path "qfe-dashboard\web\data") {
+            Copy-Item -Path "qfe-dashboard\web\data\*" -Destination "$dashboardRoot\data" -Recurse -Force
           }
           else {
-            Write-Host "::warning::web\data 폴더가 없어 Dashboard data 복사를 스킵합니다."
+            Write-Host "::warning::qfe-dashboard\web\data 폴더가 없어 Dashboard data 복사를 스킵합니다."
           }
 
           Write-Host "[Dashboard] published to $dashboardRoot"
